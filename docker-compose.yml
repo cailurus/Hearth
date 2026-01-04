@@ -1,13 +1,11 @@
 services:
   hearth:
-    build: .
-    image: hearth:local
+    image: cailurus/hearth:latest
     ports:
       - "8787:8787"
-    environment:
-      HEARTH_ADDR: ":8787"
-      HEARTH_DATA_DIR: "/data"
-      HEARTH_DB_DSN: "/data/hearth.db"
     volumes:
-      - ./data:/data
+      - hearth-data:/data
     restart: unless-stopped
+
+volumes:
+  hearth-data:
