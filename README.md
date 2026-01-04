@@ -2,7 +2,7 @@
 
 Hearth is a lightweight home dashboard for self-hosted services.
 
-![Hearth screenshot](./screenshot.png)
+![Hearth screenshot](https://raw.githubusercontent.com/cailurus/Hearth/main/screenshot.png)
 
 - Backend: Go + SQLite
 - Frontend: React (Vite)
@@ -16,11 +16,11 @@ Hearth is a lightweight home dashboard for self-hosted services.
 docker pull cailurus/hearth:latest
 
 docker run -d \
-	--name hearth \
-	-p 8787:8787 \
-	-v hearth-data:/data \
-	--restart unless-stopped \
-	cailurus/hearth:latest
+  --name hearth \
+  -p 8787:8787 \
+  -v hearth-data:/data \
+  --restart unless-stopped \
+  cailurus/hearth:latest
 ```
 
 Open `http://localhost:8787`.
@@ -31,16 +31,16 @@ Data is stored under `/data` inside the container (mounted to the volume above).
 
 ```yaml
 services:
-	hearth:
-		image: cailurus/hearth:latest
-		ports:
-			- "8787:8787"
-		volumes:
-			- hearth-data:/data
-		restart: unless-stopped
+  hearth:
+    image: cailurus/hearth:latest
+    ports:
+      - "8787:8787"
+    volumes:
+      - hearth-data:/data
+    restart: unless-stopped
 
 volumes:
-	hearth-data:
+  hearth-data:
 ```
 
 ## Download & Run (Local)
