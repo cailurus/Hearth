@@ -27,8 +27,8 @@ Open `http://localhost:8787`.
 
 Data is stored under `/data` inside the container (mounted to the volume above).
 
-If you bind-mount a host folder to `/data` (e.g. `-v ./data:/data`), the folder must be writable by the container user (uid `65532`, distroless `nonroot`).
-For example: `sudo chown -R 65532:65532 ./data`.
+If you bind-mount a host folder to `/data` (e.g. `-v ./data:/data`), that folder must be writable by the container.
+If you choose to run the container as nonroot (uid `65532`), you may need: `sudo chown -R 65532:65532 ./data`.
 
 ### Docker Compose
 

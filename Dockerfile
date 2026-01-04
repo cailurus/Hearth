@@ -24,11 +24,14 @@ RUN mkdir -p /out/data/icons /out/data/cache \
 	&& chmod -R 0777 /out/data
 
 # Runtime
-FROM gcr.io/distroless/base-debian12:nonroot
+# Note: run as root by default to avoid volume permission issues across hosts and
+# existing volumes created by older image versions.
+FROM gcr.io/distroless/base-debian12
 WORKDIR /app
 COPY --from=gobuild /out/hearth /app/hearth
 COPY --from=gobuild /src/web/dist /app/web/dist
 COPY --from=gobuild /out/data /data
+USER 0
 ENV HEARTH_ADDR=:8787
 ENV HEARTH_DATA_DIR=/data
 ENV HEARTH_DB_DSN=/data/hearth.db
