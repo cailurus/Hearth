@@ -160,11 +160,12 @@ func (s *Service) ResolveBingRandomURL(ctx context.Context) (string, error) {
 // - non-empty query: random image for query
 func (s *Service) ResolveUnsplashURL(query string) (string, error) {
 	base := "https://source.unsplash.com/1920x1080"
+	sig := url.QueryEscape(strconv.FormatInt(time.Now().UnixNano(), 10))
 	if strings.TrimSpace(query) == "" {
-		return base + "?random=1", nil
+		return base + "?random=1&sig=" + sig, nil
 	}
 	q := url.QueryEscape(strings.TrimSpace(query))
-	return base + "?" + q, nil
+	return base + "?" + q + "&sig=" + sig, nil
 }
 
 // Picsum random image URL.

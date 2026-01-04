@@ -132,6 +132,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [siteDraft, setSiteDraft] = useState<Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'> | null>(null)
     const [siteSaveErr, setSiteSaveErr] = useState<string | null>(null)
 
+    const siteSaveSeqRef = useRef(0)
+    const siteSaveTimerRef = useRef<number | null>(null)
+
     const now = useNow(1000)
     // Timezone is now auto-detected from the user's system.
 
@@ -655,31 +658,47 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }
 
-    const saveSiteSettings = async (e: FormEvent) => {
-        e.preventDefault()
-        if (!isAdmin || !settings || !siteDraft) return
+    const persistSiteDraft = async (draft: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>) => {
+        if (!isAdmin || !settings) return
+        const token = ++siteSaveSeqRef.current
         setSiteSaveErr(null)
         try {
-            const normalizedTime = siteDraft.time
+            const normalizedTime = draft.time
                 ? {
-                    ...siteDraft.time,
+                    ...draft.time,
                     mode: 'digital',
                     timezone: systemTimezone,
                 }
-                : siteDraft.time
+                : draft.time
             const next: Settings = {
                 ...settings,
-                siteTitle: siteDraft.siteTitle,
-                language: siteDraft.language,
-                background: siteDraft.background,
+                siteTitle: draft.siteTitle,
+                language: draft.language,
+                background: draft.background,
                 time: normalizedTime,
             }
             await apiPut('/api/settings', next)
-            setSettingsOpen(false)
-            await reloadDashboard()
+            if (token !== siteSaveSeqRef.current) return
+            setSettings(next)
         } catch (e2) {
+            if (token !== siteSaveSeqRef.current) return
             setSiteSaveErr(e2 instanceof Error ? e2.message : 'failed')
         }
+    }
+
+    const schedulePersistSiteDraft = (draft: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>, mode: 'now' | 'debounce') => {
+        if (siteSaveTimerRef.current) {
+            window.clearTimeout(siteSaveTimerRef.current)
+            siteSaveTimerRef.current = null
+        }
+        if (mode === 'now') {
+            void persistSiteDraft(draft)
+            return
+        }
+        siteSaveTimerRef.current = window.setTimeout(() => {
+            siteSaveTimerRef.current = null
+            void persistSiteDraft(draft)
+        }, 300)
     }
 
     useEffect(() => {
@@ -909,9 +928,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         setBgRefreshing(true)
         setBgRefreshErr(null)
         try {
+            // Refresh should reflect the currently selected provider in the settings UI,
+            // even if the user hasn't clicked Save yet.
+            const draftProvider = String(siteDraft?.background?.provider ?? '').trim()
+            const savedProvider = String(settings?.background?.provider ?? '').trim()
+            const provider = (draftProvider || savedProvider || 'default').trim()
+
             // Avoid spinning forever if the network/proxy hangs.
             const refreshRes = await fetchWithTimeout(
-                '/api/background/refresh',
+                `/api/background/refresh?${new URLSearchParams({ provider }).toString()}`,
                 { method: 'POST', credentials: 'include' },
                 15000,
             )
@@ -1195,14 +1220,21 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         </button>
                     </div>
                     {siteSaveErr ? <div className="rounded-lg border border-white/10 bg-black/40 p-3 text-sm">{siteSaveErr}</div> : null}
-                    <form onSubmit={saveSiteSettings} className="space-y-6">
+                    <div className="space-y-6">
                         <section className="rounded-xl border border-white/10 bg-black/40 p-4">
                             <div className="mb-3 text-sm font-semibold text-white/80">{t('通用', 'General')}</div>
                             <label className="block text-sm">
                                 <div className="mb-1 text-white/70">{t('标题', 'Title')}</div>
                                 <input
                                     value={siteDraft?.siteTitle ?? ''}
-                                    onChange={(e) => setSiteDraft((prev) => (prev ? { ...prev, siteTitle: e.target.value } : prev))}
+                                    onChange={(e) =>
+                                        setSiteDraft((prev) => {
+                                            if (!prev) return prev
+                                            const next = { ...prev, siteTitle: e.target.value }
+                                            schedulePersistSiteDraft(next, 'debounce')
+                                            return next
+                                        })
+                                    }
                                     className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                 />
                             </label>
@@ -1211,7 +1243,14 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                 <div className="mb-1 text-white/70">{t('语言', 'Language')}</div>
                                 <select
                                     value={siteDraft?.language || 'zh'}
-                                    onChange={(e) => setSiteDraft((prev) => (prev ? { ...prev, language: e.target.value } : prev))}
+                                    onChange={(e) =>
+                                        setSiteDraft((prev) => {
+                                            if (!prev) return prev
+                                            const next = { ...prev, language: e.target.value }
+                                            schedulePersistSiteDraft(next, 'now')
+                                            return next
+                                        })
+                                    }
                                     className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                 >
                                     <option value="zh">{t('中文', 'Chinese')}</option>
@@ -1229,19 +1268,20 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                             type="checkbox"
                                             checked={!!siteDraft?.time?.enabled}
                                             onChange={(e) =>
-                                                setSiteDraft((prev) =>
-                                                    prev
-                                                        ? {
-                                                            ...prev,
-                                                            time: {
-                                                                enabled: e.target.checked,
-                                                                timezone: systemTimezone,
-                                                                showSeconds: prev.time?.showSeconds ?? true,
-                                                                mode: 'digital',
-                                                            },
-                                                        }
-                                                        : prev,
-                                                )
+                                                setSiteDraft((prev) => {
+                                                    if (!prev) return prev
+                                                    const next = {
+                                                        ...prev,
+                                                        time: {
+                                                            enabled: e.target.checked,
+                                                            timezone: systemTimezone,
+                                                            showSeconds: prev.time?.showSeconds ?? true,
+                                                            mode: 'digital',
+                                                        },
+                                                    }
+                                                    schedulePersistSiteDraft(next, 'now')
+                                                    return next
+                                                })
                                             }
                                         />
                                         {t('显示日期与时间', 'Show date & time')}
@@ -1253,19 +1293,20 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                             disabled={!siteDraft?.time?.enabled}
                                             checked={siteDraft?.time?.showSeconds ?? true}
                                             onChange={(e) =>
-                                                setSiteDraft((prev) =>
-                                                    prev
-                                                        ? {
-                                                            ...prev,
-                                                            time: {
-                                                                enabled: prev.time?.enabled ?? false,
-                                                                timezone: systemTimezone,
-                                                                showSeconds: e.target.checked,
-                                                                mode: 'digital',
-                                                            },
-                                                        }
-                                                        : prev,
-                                                )
+                                                setSiteDraft((prev) => {
+                                                    if (!prev) return prev
+                                                    const next = {
+                                                        ...prev,
+                                                        time: {
+                                                            enabled: prev.time?.enabled ?? false,
+                                                            timezone: systemTimezone,
+                                                            showSeconds: e.target.checked,
+                                                            mode: 'digital',
+                                                        },
+                                                    }
+                                                    schedulePersistSiteDraft(next, 'now')
+                                                    return next
+                                                })
                                             }
                                         />
                                         {t('显示秒', 'Show seconds')}
@@ -1298,23 +1339,24 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         <select
                                             value={siteDraft?.background.provider ?? 'default'}
                                             onChange={(e) =>
-                                                setSiteDraft((prev) =>
-                                                    prev
-                                                        ? {
-                                                            ...prev,
-                                                            background: {
-                                                                ...prev.background,
-                                                                provider: e.target.value,
-                                                                interval:
-                                                                    e.target.value === 'bing_daily'
-                                                                        ? '24h'
-                                                                        : e.target.value === 'default'
-                                                                            ? '0'
-                                                                            : prev.background.interval,
-                                                            },
-                                                        }
-                                                        : prev,
-                                                )
+                                                setSiteDraft((prev) => {
+                                                    if (!prev) return prev
+                                                    const next = {
+                                                        ...prev,
+                                                        background: {
+                                                            ...prev.background,
+                                                            provider: e.target.value,
+                                                            interval:
+                                                                e.target.value === 'bing_daily'
+                                                                    ? '24h'
+                                                                    : e.target.value === 'default'
+                                                                        ? '0'
+                                                                        : prev.background.interval,
+                                                        },
+                                                    }
+                                                    schedulePersistSiteDraft(next, 'now')
+                                                    return next
+                                                })
                                             }
                                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                         >
@@ -1331,9 +1373,12 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                             <select
                                                 value={siteDraft?.background.interval ?? '0'}
                                                 onChange={(e) =>
-                                                    setSiteDraft((prev) =>
-                                                        prev ? { ...prev, background: { ...prev.background, interval: e.target.value } } : prev,
-                                                    )
+                                                    setSiteDraft((prev) => {
+                                                        if (!prev) return prev
+                                                        const next = { ...prev, background: { ...prev.background, interval: e.target.value } }
+                                                        schedulePersistSiteDraft(next, 'now')
+                                                        return next
+                                                    })
                                                 }
                                                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                             >
@@ -1370,12 +1415,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             </div>
                         </section>
 
-                        <div className="flex flex-wrap gap-3">
-                            <button type="submit" className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20">
-                                {t('保存', 'Save')}
-                            </button>
-                        </div>
-                    </form>
+                    </div>
                 </div>
             </Modal>
 
@@ -2476,7 +2516,7 @@ function TimezonesWidget({ localTimezone, clocks }: { localTimezone: string; clo
                     return (
                         <div key={`${c.timezone}-${idx}`} className="flex w-full flex-col items-center text-center">
                             <AppleClock now={smoothNow} timezone={c.timezone} day={meta.isDay} />
-                            <div className="mt-1.5">
+                            <div className="mt-2.5">
                                 <div className="text-[12px] font-semibold leading-tight text-white/90">{labels[idx] || cityShort(c.city) || c.city}</div>
                                 <div className="text-[11px] leading-tight text-white/60">{meta.dayLabel}</div>
                                 <div className="text-[11px] leading-tight text-white/60">{meta.offsetLabel}</div>

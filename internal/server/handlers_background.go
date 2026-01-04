@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/morezhou/hearth/internal/background"
@@ -163,7 +164,10 @@ func (s *Server) resolveBackgroundURL(ctx context.Context, provider string) (str
 }
 
 func (s *Server) handleRefreshBackground(w http.ResponseWriter, r *http.Request) {
-	provider := s.getStringSetting(kvBackgroundProvider, "default")
+	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
+	if provider == "" {
+		provider = s.getStringSetting(kvBackgroundProvider, "default")
+	}
 	if provider == string(background.ProviderBing) {
 		provider = string(background.ProviderBingDaily)
 	}
@@ -172,10 +176,35 @@ func (s *Server) handleRefreshBackground(w http.ResponseWriter, r *http.Request)
 		cacheKey = cacheKey + ":" + s.getStringSetting(kvBackgroundUnsplashQuery, "")
 	}
 	log.Printf("[bg] refresh requested provider=%s cacheKey=%q", provider, cacheKey)
-	if err := s.store.DeleteBackgroundCache(cacheKey); err != nil {
-		log.Printf("[bg] refresh delete cache error: %v", err)
-	} else {
-		log.Printf("[bg] refresh delete cache ok")
+
+	// Default provider: nothing remote to fetch.
+	if provider == "default" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
 	}
+
+	// Actually prefetch the next image here so the UI can surface errors.
+	// Keep this under the frontend timeout (15s).
+	ctx, cancel := context.WithTimeout(r.Context(), 14*time.Second)
+	defer cancel()
+
+	imgURL, err := s.resolveBackgroundURL(ctx, provider)
+	if err != nil {
+		log.Printf("[bg] refresh resolve error: %v", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to resolve background url: %v", err))
+		return
+	}
+	res, err := s.bgSvc.FetchToFile(ctx, imgURL)
+	if err != nil {
+		log.Printf("[bg] refresh fetch error: %v", err)
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch background image: %v", err))
+		return
+	}
+	if err := s.store.SetBackgroundCache(cacheKey, res.FileName); err != nil {
+		log.Printf("[bg] refresh set cache error: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to update background cache")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
