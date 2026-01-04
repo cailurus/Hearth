@@ -23,6 +23,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/heart
 RUN mkdir -p /out/data/icons /out/data/cache \
 	&& chmod -R 0777 /out/data
 
+# CA certificates (needed for HTTPS background providers like Bing/Unsplash/Picsum).
+FROM alpine:3.20 AS certs
+RUN apk add --no-cache ca-certificates
+
 # Runtime
 # Note: run as root by default to avoid volume permission issues across hosts and
 # existing volumes created by older image versions.
@@ -31,6 +35,7 @@ WORKDIR /app
 COPY --from=gobuild /out/hearth /app/hearth
 COPY --from=gobuild /src/web/dist /app/web/dist
 COPY --from=gobuild /out/data /data
+COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 0
 ENV HEARTH_ADDR=:8787
 ENV HEARTH_DATA_DIR=/data

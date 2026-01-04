@@ -2348,11 +2348,11 @@ function WeatherWidget({ data, error, lang }: { data: Weather | null; error?: st
             </div>
 
             {daily.length ? (
-                <div className="-mt-1 grid grid-cols-5 gap-2">
+                <div className="-mt-1 grid grid-cols-5 gap-1.5">
                     {daily.map((d) => (
-                        <div key={d.date} className="flex flex-col items-center gap-1 px-1.5 py-1 text-center">
+                        <div key={d.date} className="flex flex-col items-center gap-0.5 px-1 py-0.5 text-center">
                             <div className="text-[12px] leading-tight text-white/65">{weekdayLabel(d.date, lang)}</div>
-                            <WeatherGlyph code={d.weatherCode ?? 0} windKph={0} size={30} />
+                            <WeatherGlyph code={d.weatherCode ?? 0} windKph={0} size={34} />
                             <div className="tabular-nums text-[12px] leading-tight text-white/80">
                                 <span className="text-white/90">{Math.round(d.tempMaxC)}°</span>
                                 <span className="text-white/50">/{Math.round(d.tempMinC)}°</span>
@@ -2476,9 +2476,11 @@ function TimezonesWidget({ localTimezone, clocks }: { localTimezone: string; clo
                     return (
                         <div key={`${c.timezone}-${idx}`} className="flex w-full flex-col items-center text-center">
                             <AppleClock now={smoothNow} timezone={c.timezone} day={meta.isDay} />
-                            <div className="mt-1 text-[12px] font-semibold leading-tight text-white/90">{labels[idx] || cityShort(c.city) || c.city}</div>
-                            <div className="text-[11px] leading-tight text-white/60">{meta.dayLabel}</div>
-                            <div className="text-[11px] leading-tight text-white/60">{meta.offsetLabel}</div>
+                            <div className="mt-1.5">
+                                <div className="text-[12px] font-semibold leading-tight text-white/90">{labels[idx] || cityShort(c.city) || c.city}</div>
+                                <div className="text-[11px] leading-tight text-white/60">{meta.dayLabel}</div>
+                                <div className="text-[11px] leading-tight text-white/60">{meta.offsetLabel}</div>
+                            </div>
                         </div>
                     )
                 })}
