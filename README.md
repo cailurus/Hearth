@@ -8,6 +8,41 @@ Hearth is a lightweight home dashboard for self-hosted services.
 - Frontend: React (Vite)
 - Features: grouped app links, built-in widgets (weather / world clock / system status), background wallpaper
 
+## Run with Docker
+
+### Docker CLI
+
+```bash
+docker pull cailurus/hearth:latest
+
+docker run -d \
+	--name hearth \
+	-p 8787:8787 \
+	-v hearth-data:/data \
+	--restart unless-stopped \
+	cailurus/hearth:latest
+```
+
+Open `http://localhost:8787`.
+
+Data is stored under `/data` inside the container (mounted to the volume above).
+
+### Docker Compose
+
+```yaml
+services:
+	hearth:
+		image: cailurus/hearth:latest
+		ports:
+			- "8787:8787"
+		volumes:
+			- hearth-data:/data
+		restart: unless-stopped
+
+volumes:
+	hearth-data:
+```
+
 ## Download & Run (Local)
 
 Prerequisites: Go and Node.js.
