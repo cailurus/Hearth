@@ -1971,7 +1971,7 @@ function GroupBlock({
                                                         <div className="flex items-center justify-between">
                                                             <span className="flex items-center gap-2"><Cpu className="h-4 w-4 text-white/70" />CPU</span>
                                                             <span className="text-right">
-                                                                {metrics.cpuModel ? <span className="mr-1">{metrics.cpuModel} ·</span> : null}
+                                                                {metrics.cpuModel ? <span className="mr-1">{shortenCpuModelName(metrics.cpuModel)} ·</span> : null}
                                                                 <span className="tabular-nums">{metrics.cpuPercent.toFixed(1)}%</span>
                                                             </span>
                                                         </div>
@@ -2734,4 +2734,67 @@ function formatGiB(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes < 0) return '—'
     const gib = bytes / (1024 * 1024 * 1024)
     return `${Math.round(gib)}GiB`
+}
+
+function shortenCpuModelName(model: string): string {
+    const original = (model ?? '').trim()
+    if (!original) return original
+
+    // Drop common suffixes like clocks/frequency.
+    let s = original
+        .replace(/^\s*\d+(?:st|nd|rd|th)\s+Gen\s+/i, '')
+        .replace(/\s*@\s*[\d.]+\s*GHz\b.*$/i, '')
+        .replace(/\b[\d.]+\s*GHz\b/gi, '')
+        .replace(/\bCPU\b/gi, '')
+        .replace(/\bProcessor\b/gi, '')
+        .replace(/\bwith\s+Radeon\s+Graphics\b/gi, '')
+        .replace(/\(R\)|\(TM\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    const lower = s.toLowerCase()
+    const isIntel = lower.includes('intel')
+    const isAmd = lower.includes('amd')
+
+    if (isIntel) {
+        // Try to keep: Intel + (Core iX-XXXX | Ultra X XXX | N100 | Xeon ... | Celeron J4125 ...)
+        const ultra = s.match(/\bUltra\s+[3579]\s+\d{3,4}[A-Za-z]{0,3}\b/i)
+        if (ultra) return `Intel ${ultra[0]}`
+
+        const core = s.match(/\bi[3579]-[0-9]{3,5}[A-Za-z0-9]{0,3}\b/i)
+        if (core) return `Intel ${core[0]}`
+
+        const nSeries = s.match(/\bN\d{3,4}[A-Za-z0-9]{0,3}\b/i)
+        if (nSeries) return `Intel ${nSeries[0].toUpperCase()}`
+
+        const celeronPentiumAtom = s.match(/\b(Celeron|Pentium|Atom)\s+([A-Za-z]?[0-9]{3,5}[A-Za-z0-9]{0,3})\b/i)
+        if (celeronPentiumAtom) return `Intel ${celeronPentiumAtom[1]} ${celeronPentiumAtom[2].toUpperCase()}`
+
+        const xeonE = s.match(/\bXeon\s+([A-Za-z]\d-\d{4,5}[A-Za-z0-9]{0,2})\b/i)
+        if (xeonE) return `Intel Xeon ${xeonE[1].toUpperCase()}`
+
+        const xeonTier = s.match(/\bXeon\s+(Silver|Gold|Platinum|Bronze)\s+(\d{4,5}[A-Za-z0-9]{0,2})\b/i)
+        if (xeonTier) return `Intel Xeon ${xeonTier[1]} ${xeonTier[2].toUpperCase()}`
+
+        return 'Intel'
+    }
+
+    if (isAmd) {
+        // Keep: AMD + (Ryzen ... | EPYC ... | Threadripper ...)
+        const ryzen = s.match(/\bRyzen(?:\s+Threadripper)?\s+\d\s+\d{3,4}[A-Za-z0-9]{0,3}\b/i)
+        if (ryzen) return `AMD ${ryzen[0]}`
+
+        const epyc = s.match(/\bEPYC\s+\d{4}[A-Za-z0-9]{0,3}\b/i)
+        if (epyc) return `AMD ${epyc[0]}`
+
+        const athlon = s.match(/\bAthlon\s+\w+(?:\s+\w+)?\b/i)
+        if (athlon) return `AMD ${athlon[0]}`
+
+        return 'AMD'
+    }
+
+    // Fallback: keep the first few tokens; avoid long wrapping.
+    const tokens = s.split(' ').filter(Boolean)
+    if (tokens.length <= 4) return s
+    return tokens.slice(0, 4).join(' ')
 }
