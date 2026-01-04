@@ -26,7 +26,30 @@ go.work.sum
 
 # env file
 .env
+.env.*
+
+# certs/keys
+*.pem
+*.key
+
+# OS
+.DS_Store
+
+# app data
+data/
+
+# local builds
+dist/
+
+# frontend
+web/node_modules/
+web/dist/
+web/.vite/
+web/.env*
+
+# logs
+*.log
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/

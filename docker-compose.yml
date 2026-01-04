@@ -1,0 +1,13 @@
+services:
+  hearth:
+    build: .
+    image: hearth:local
+    ports:
+      - "8787:8787"
+    environment:
+      HEARTH_ADDR: ":8787"
+      HEARTH_DATA_DIR: "/data"
+      HEARTH_DB_DSN: "/data/hearth.db"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

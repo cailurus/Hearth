@@ -1,0 +1,12 @@
+.git
+.gitignore
+
+data
+
+web/node_modules
+web/dist
+
+**/*.test
+**/*.out
+
+.DS_Store
