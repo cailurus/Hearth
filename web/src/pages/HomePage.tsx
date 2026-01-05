@@ -1,7 +1,8 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { FaApple, FaBitcoin, FaEthereum, FaMicrosoft } from 'react-icons/fa'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
-import type { AppItem, BackgroundInfo, Group, HostMetrics, Settings, Weather } from '../types'
+import type { AppItem, BackgroundInfo, Group, HolidayCountry, HolidaysResponse, HostMetrics, MarketsResponse, Settings, Weather } from '../types'
 
 type Me = { admin: boolean }
 
@@ -61,6 +62,36 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
     }
 }
 
+function normalizeCountryCodes(codes: string[]): string[] {
+    const out: string[] = []
+    const seen = new Set<string>()
+    for (const raw of codes) {
+        const c = String(raw || '').trim().toUpperCase()
+        if (c.length !== 2) continue
+        if (c < 'AA' || c > 'ZZ') continue
+        if (seen.has(c)) continue
+        seen.add(c)
+        out.push(c)
+    }
+    return out
+}
+
+function widgetKindFromUrl(url: string): 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | null {
+    const s = String(url || '')
+    if (!s.startsWith('widget:')) return null
+    const rest = s.slice('widget:'.length)
+    const kind = rest.split(/[?#]/)[0]
+    if (kind === 'weather' || kind === 'metrics' || kind === 'timezones' || kind === 'markets' || kind === 'holidays') return kind
+    return null
+}
+
+function widgetQueryFromUrl(url: string): URLSearchParams {
+    const s = String(url || '')
+    const i = s.indexOf('?')
+    if (i < 0) return new URLSearchParams()
+    return new URLSearchParams(s.slice(i + 1))
+}
+
 export default function HomePage({ initialDialog }: { initialDialog?: 'login' } = {}) {
     const [me, setMe] = useState<Me | null>(null)
     const [settings, setSettings] = useState<Settings | null>(null)
@@ -71,6 +102,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [weatherErr, setWeatherErr] = useState<string | null>(null)
     const [weatherById, setWeatherById] = useState<Record<string, Weather | null>>({})
     const [weatherErrById, setWeatherErrById] = useState<Record<string, string | null>>({})
+
+    const [marketsById, setMarketsById] = useState<Record<string, MarketsResponse | null>>({})
+    const [marketsErrById, setMarketsErrById] = useState<Record<string, string | null>>({})
+    const [holidaysById, setHolidaysById] = useState<Record<string, HolidaysResponse | null>>({})
+    const [holidaysErrById, setHolidaysErrById] = useState<Record<string, string | null>>({})
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -113,8 +149,31 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [editIconUrl, setEditIconUrl] = useState('')
     const [iconResolving, setIconResolving] = useState(false)
 
-    const [widgetKind, setWidgetKind] = useState<'weather' | 'timezones' | 'metrics' | null>(null)
+    const [widgetKind, setWidgetKind] = useState<'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null>(null)
     const [wCity, setWCity] = useState('')
+
+    const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
+
+    const ensureFourMarketSymbols = useCallback(
+        (raw: unknown): string[] => {
+            const cleaned = (Array.isArray(raw) ? raw : [])
+                .map((s) => String(s ?? '').trim().toUpperCase())
+                .filter(Boolean)
+            const unique: string[] = []
+            for (const s of cleaned) {
+                if (unique.length >= 4) break
+                if (!unique.includes(s)) unique.push(s)
+            }
+            while (unique.length < 4) unique.push(DEFAULT_MARKET_SYMBOLS[unique.length] || 'BTC')
+            return unique.slice(0, 4)
+        },
+        [DEFAULT_MARKET_SYMBOLS],
+    )
+
+    const [mkSymbols, setMkSymbols] = useState<string[]>(DEFAULT_MARKET_SYMBOLS)
+    const [mkQueries, setMkQueries] = useState<string[]>(DEFAULT_MARKET_SYMBOLS)
+    const [hCountryCodes, setHCountryCodes] = useState<string[]>(['CN', 'US'])
+    const [hCountryQuery, setHCountryQuery] = useState('')
 
     const [tzClocks, setTzClocks] = useState<Array<{ city: string; timezone: string }>>([
         { city: 'Tokyo, Tokyo, Japan', timezone: 'Asia/Tokyo' },
@@ -215,8 +274,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         setEditIconUrl('')
         setIconResolving(false)
 
-        const widgetType = item.url.startsWith('widget:') ? item.url.slice('widget:'.length) : null
-        if (widgetType === 'weather' || widgetType === 'timezones' || widgetType === 'metrics') {
+        const widgetType = widgetKindFromUrl(item.url)
+        if (widgetType) {
             setWidgetKind(widgetType)
             const cfg = safeParseJSON(item.description)
             if (widgetType === 'weather') {
@@ -262,6 +321,25 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 setMShowNet(cfg?.showNet !== false)
                 const rs = Number(cfg?.refreshSec)
                 setMRefreshSec(rs === 5 || rs === 10 ? rs : 1)
+            }
+            if (widgetType === 'markets') {
+                const symbols = Array.isArray(cfg?.symbols) ? (cfg?.symbols as unknown[]) : null
+                const next = ensureFourMarketSymbols(symbols || [])
+                setMkSymbols(next)
+                setMkQueries(next)
+                setCityQuery('')
+            }
+            if (widgetType === 'holidays') {
+                const countries = Array.isArray(cfg?.countries) ? (cfg?.countries as unknown[]) : null
+                let norm = normalizeCountryCodes(countries ? countries.map((x) => String(x ?? '')) : [])
+                if (norm.length === 0) {
+                    const qp = widgetQueryFromUrl(item.url)
+                    const raw = String(qp.get('countries') || qp.get('c') || '').trim()
+                    if (raw) norm = normalizeCountryCodes(raw.split(/[,;\s]+/g).filter(Boolean))
+                }
+                setHCountryCodes(norm.length ? norm : ['CN', 'US'])
+                setHCountryQuery('')
+                setCityQuery('')
             }
         } else {
             setWidgetKind(null)
@@ -405,6 +483,12 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             showNet: !!mShowNet,
                             refreshSec: mRefreshSec,
                         })
+                    } else if (widgetKind === 'markets') {
+                        const symbols = ensureFourMarketSymbols(mkSymbols)
+                        description = JSON.stringify({ symbols })
+                    } else if (widgetKind === 'holidays') {
+                        const countries = normalizeCountryCodes(hCountryCodes)
+                        description = JSON.stringify({ countries })
                     } else if (widgetKind === 'timezones') {
                         // IMPORTANT: do NOT auto-resolve/overwrite city strings while typing.
                         // We only resolve (city->timezone & full city label) when the user picks a suggestion.
@@ -463,6 +547,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         mShowDisk,
         mShowNet,
         mRefreshSec,
+        mkSymbols,
+        ensureFourMarketSymbols,
+        hCountryCodes,
+        hCountryQuery,
     ])
 
     const saveItem = async (e: FormEvent) => {
@@ -595,7 +683,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }
 
-    const addWidget = async (kind: 'weather' | 'metrics' | 'timezones') => {
+    const addWidget = async (kind: 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays') => {
         if (!isAdmin) return
         setAddErr(null)
         const groupId = addItemGroupId
@@ -604,7 +692,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 ? t('天气', 'Weather')
                 : kind === 'metrics'
                     ? t('系统状态', 'System Status')
-                    : t('世界时钟', 'World Clock')
+                    : kind === 'markets'
+                        ? t('行情', 'Markets')
+                        : kind === 'holidays'
+                            ? t('未来假日', 'Upcoming Holidays')
+                            : t('世界时钟', 'World Clock')
         try {
             await apiPost('/api/apps', {
                 groupId,
@@ -617,7 +709,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         ? JSON.stringify({ city: 'Shanghai, Shanghai, China' })
                         : kind === 'metrics'
                             ? JSON.stringify({ showCpu: true, showMem: true, showDisk: true, showNet: true, refreshSec: 1 })
-                            : null,
+                            : kind === 'markets'
+                                ? JSON.stringify({ symbols: DEFAULT_MARKET_SYMBOLS })
+                                : kind === 'holidays'
+                                    ? JSON.stringify({ countries: ['CN', 'US'] })
+                                    : null,
             })
             setAddItemOpen(false)
             await reloadDashboard()
@@ -734,7 +830,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     // Per-weather-widget fetch (supports multiple locations via query params).
     useEffect(() => {
         let cancelled = false
-        const ws = apps.filter((a) => a.url === 'widget:weather')
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'weather')
         if (ws.length === 0) {
             setWeatherById({})
             setWeatherErrById({})
@@ -781,8 +877,106 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     useEffect(() => {
         let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'markets')
+        if (ws.length === 0) {
+            setMarketsById({})
+            setMarketsErrById({})
+            return
+        }
 
-        const metricsWidgets = apps.filter((a) => a.url === 'widget:metrics')
+        const run = async () => {
+            const next: Record<string, MarketsResponse | null> = {}
+            const nextErr: Record<string, string | null> = {}
+
+            await Promise.all(
+                ws.map(async (a) => {
+                    const cfg = safeParseJSON(a.description)
+                    const rawSymbols = Array.isArray(cfg?.symbols) ? (cfg?.symbols as unknown[]) : []
+                    const symbols = rawSymbols.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 4)
+                    if (symbols.length === 0) {
+                        next[a.id] = null
+                        nextErr[a.id] = null
+                        return
+                    }
+                    try {
+                        const qs = new URLSearchParams({ symbols: symbols.join(',') })
+                        const res = await apiGet<MarketsResponse>(`/api/widgets/markets?${qs.toString()}`)
+                        next[a.id] = res
+                        nextErr[a.id] = null
+                    } catch (e2) {
+                        next[a.id] = null
+                        nextErr[a.id] = e2 instanceof Error ? e2.message : 'failed'
+                    }
+                }),
+            )
+
+            if (!cancelled) {
+                setMarketsById(next)
+                setMarketsErrById(nextErr)
+            }
+        }
+
+        void run()
+        const id = window.setInterval(run, 5 * 60 * 1000)
+        return () => {
+            cancelled = true
+            window.clearInterval(id)
+        }
+    }, [apps])
+
+    useEffect(() => {
+        let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'holidays')
+        if (ws.length === 0) {
+            setHolidaysById({})
+            setHolidaysErrById({})
+            return
+        }
+
+        const run = async () => {
+            const next: Record<string, HolidaysResponse | null> = {}
+            const nextErr: Record<string, string | null> = {}
+
+            await Promise.all(
+                ws.map(async (a) => {
+                    const cfg = safeParseJSON(a.description)
+                    const rawCountries = Array.isArray(cfg?.countries) ? (cfg?.countries as unknown[]) : []
+                    const countries = normalizeCountryCodes(rawCountries.map((x) => String(x ?? '')))
+                    if (countries.length === 0) {
+                        next[a.id] = null
+                        nextErr[a.id] = null
+                        return
+                    }
+                    try {
+                        const qs = new URLSearchParams({ countries: countries.join(',') })
+                        const res = await apiGet<HolidaysResponse>(`/api/widgets/holidays?${qs.toString()}`)
+                        next[a.id] = res
+                        nextErr[a.id] = null
+                    } catch (e2) {
+                        next[a.id] = null
+                        nextErr[a.id] = e2 instanceof Error ? e2.message : 'failed'
+                    }
+                }),
+            )
+
+            if (!cancelled) {
+                setHolidaysById(next)
+                setHolidaysErrById(nextErr)
+            }
+        }
+
+        void run()
+        const id = window.setInterval(run, 5 * 60 * 1000)
+        return () => {
+            cancelled = true
+            window.clearInterval(id)
+        }
+    }, [apps])
+
+    useEffect(() => {
+        let cancelled = false
+
+        const metricsWidgets = apps.filter((a) => widgetKindFromUrl(a.url) === 'metrics')
         const intervalMs = (() => {
             if (metricsWidgets.length === 0) return 5000
             let best = 1000
@@ -1114,6 +1308,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             weatherErr={weatherErr}
                             weatherById={weatherById}
                             weatherErrById={weatherErrById}
+                            marketsById={marketsById}
+                            marketsErrById={marketsErrById}
+                            holidaysById={holidaysById}
+                            holidaysErrById={holidaysErrById}
                             metrics={metrics}
                             netRate={netRate}
                             localTimezone={systemTimezone}
@@ -1137,6 +1335,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             weatherErr={weatherErr}
                             weatherById={weatherById}
                             weatherErrById={weatherErrById}
+                            marketsById={marketsById}
+                            marketsErrById={marketsErrById}
+                            holidaysById={holidaysById}
+                            holidaysErrById={holidaysErrById}
                             metrics={metrics}
                             netRate={netRate}
                             localTimezone={systemTimezone}
@@ -1487,6 +1689,19 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         >
                             <div className="flex h-full w-full items-center justify-center text-center leading-tight">{t('系统状态', 'System Status')}</div>
                         </button>
+
+                        <button
+                            onClick={() => addWidget('markets')}
+                            className="h-10 rounded-lg border border-white/10 bg-black/40 px-2 text-xs hover:bg-black/30"
+                        >
+                            <div className="flex h-full w-full items-center justify-center text-center leading-tight">{t('行情', 'Markets')}</div>
+                        </button>
+                        <button
+                            onClick={() => addWidget('holidays')}
+                            className="h-10 rounded-lg border border-white/10 bg-black/40 px-2 text-xs hover:bg-black/30"
+                        >
+                            <div className="flex h-full w-full items-center justify-center text-center leading-tight">{t('未来假日', 'Upcoming Holidays')}</div>
+                        </button>
                     </div>
                 ) : (
                     <form onSubmit={addAppLink} className="space-y-3">
@@ -1593,6 +1808,56 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         <label className="flex items-center gap-2"><input type="checkbox" checked={mShowDisk} onChange={(e) => setMShowDisk(e.target.checked)} />{t('磁盘', 'Disk')}</label>
                                         <label className="flex items-center gap-2"><input type="checkbox" checked={mShowNet} onChange={(e) => setMShowNet(e.target.checked)} />{t('网络', 'Network')}</label>
                                     </div>
+                                </div>
+                            ) : widgetKind === 'markets' ? (
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('行情', 'Markets')}</div>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {Array.from({ length: 4 }).map((_, idx) => (
+                                            <label key={idx} className="block text-sm">
+                                                <div className="mb-1 text-white/70">{t('搜索选择', 'Search & select')} {idx + 1}</div>
+                                                <MarketSymbolPicker
+                                                    value={String(mkSymbols[idx] ?? '')}
+                                                    query={String(mkQueries[idx] ?? '')}
+                                                    onQueryChange={(q) =>
+                                                        setMkQueries((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push('')
+                                                            next[idx] = q
+                                                            return next
+                                                        })
+                                                    }
+                                                    onSelect={(picked) => {
+                                                        setMkSymbols((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
+                                                            next[idx] = picked
+                                                            return ensureFourMarketSymbols(next)
+                                                        })
+                                                        setMkQueries((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
+                                                            next[idx] = picked
+                                                            return next.slice(0, 4)
+                                                        })
+                                                    }}
+                                                    placeholder={DEFAULT_MARKET_SYMBOLS[idx] || ''}
+                                                    lang={lang}
+                                                />
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : widgetKind === 'holidays' ? (
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('未来假日', 'Upcoming Holidays')}</div>
+                                    <HolidayCountryTags
+                                        lang={lang}
+                                        selected={hCountryCodes}
+                                        query={hCountryQuery}
+                                        onQueryChange={setHCountryQuery}
+                                        onChange={setHCountryCodes}
+                                    />
                                 </div>
                             ) : (
                                 <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-3">
@@ -1814,6 +2079,10 @@ function GroupBlock({
     weatherErr,
     weatherById,
     weatherErrById,
+    marketsById,
+    marketsErrById,
+    holidaysById,
+    holidaysErrById,
     metrics,
     netRate,
     localTimezone,
@@ -1832,6 +2101,10 @@ function GroupBlock({
     weatherErr: string | null
     weatherById?: Record<string, Weather | null>
     weatherErrById?: Record<string, string | null>
+    marketsById?: Record<string, MarketsResponse | null>
+    marketsErrById?: Record<string, string | null>
+    holidaysById?: Record<string, HolidaysResponse | null>
+    holidaysErrById?: Record<string, string | null>
     metrics: HostMetrics | null
     netRate?: { upBps: number; downBps: number } | null
     localTimezone: string
@@ -1854,7 +2127,7 @@ function GroupBlock({
             if (!byWidget.has(widget)) byWidget.set(widget, it)
         }
         const ordered: AppItem[] = []
-        for (const k of ['weather', 'timezones', 'metrics']) {
+        for (const k of ['weather', 'holidays', 'markets', 'timezones', 'metrics']) {
             const it = byWidget.get(k)
             if (it) ordered.push(it)
         }
@@ -1918,7 +2191,11 @@ function GroupBlock({
                                             ? 'col-span-2 sm:col-span-1'
                                             : widget === 'metrics'
                                                 ? 'col-span-2 sm:col-span-1'
-                                                : 'col-span-2'
+                                                : widget === 'markets'
+                                                    ? 'col-span-2 sm:col-span-1'
+                                                    : widget === 'holidays'
+                                                        ? 'col-span-2 sm:col-span-1'
+                                                        : 'col-span-2'
                                     : widget === 'timezones'
                                         ? 'col-span-2 sm:col-span-3 lg:col-span-2'
                                         : widget === 'metrics'
@@ -1995,7 +2272,11 @@ function GroupBlock({
                                             ? t('天气', 'Weather')
                                             : widget === 'metrics'
                                                 ? t('系统状态', 'System Status')
-                                                : t('世界时钟', 'World Clock')}
+                                                : widget === 'markets'
+                                                    ? t('行情', 'Markets')
+                                                    : widget === 'holidays'
+                                                        ? t('未来假日', 'Upcoming Holidays')
+                                                        : t('世界时钟', 'World Clock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
@@ -2049,6 +2330,10 @@ function GroupBlock({
                                             ) : (
                                                 <div className="flex h-full items-center justify-center text-sm text-white/60">{t('暂不可用', 'Unavailable')}</div>
                                             )
+                                        ) : widget === 'markets' ? (
+                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} lang={lang} />
+                                        ) : widget === 'holidays' ? (
+                                            <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} lang={lang} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}
@@ -2399,6 +2684,503 @@ function WeatherWidget({ data, error, lang }: { data: Weather | null; error?: st
                             </div>
                         </div>
                     ))}
+                </div>
+            ) : null}
+        </div>
+    )
+}
+
+function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; error?: string | null; lang: 'zh' | 'en' }) {
+    if (!data) {
+        const msg = String(error || '').trim()
+        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+    }
+
+    const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
+    if (items.length === 0) {
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">—</div>
+    }
+
+    return (
+        <div className="space-y-0.5 pb-4 text-[11.5px]">
+            {items.map((it) => {
+                const sym = String(it.symbol || '').toUpperCase() || '—'
+                const name = prettifyCompanyName(String(it.name || '').trim())
+                const price = typeof it.priceUsd === 'number' && Number.isFinite(it.priceUsd) ? `$${it.priceUsd.toFixed(2)}` : '—'
+                const pct = typeof it.changePct24h === 'number' && Number.isFinite(it.changePct24h) ? it.changePct24h : null
+                const pctLabel = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+                const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼'
+                const series = Array.isArray(it.series) ? (it.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n)) : []
+
+                return (
+                    <div key={sym} className="flex items-center gap-2">
+                        <div className="min-w-0 w-32 shrink-0">
+                            <div className="flex items-baseline gap-1.5">
+                                <MarketLogo symbol={sym} />
+                                <div className="truncate font-medium text-white/90">{sym}</div>
+                                {arrow ? <div className="text-[10.5px] leading-none text-white/60">{arrow}</div> : null}
+                            </div>
+                            <div className="truncate text-[9.5px] font-normal leading-tight text-white/45">{name || '—'}</div>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                            <MiniSparkline series={series} />
+                        </div>
+
+                        <div className="w-20 shrink-0 text-right">
+                            <div className="tabular-nums text-white/90">{price}</div>
+                            <div className="tabular-nums text-[10.5px] leading-tight text-white/60">{pctLabel}</div>
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
+function normalizeMarketSymbol(symbol: string): 'AAPL' | 'MSFT' | 'BTC' | 'ETH' | '' {
+    const raw = String(symbol || '').trim().toUpperCase()
+    if (!raw) return ''
+    const compact = raw.replace(/[^A-Z0-9]/g, '')
+    if (compact.startsWith('AAPL')) return 'AAPL'
+    if (compact.startsWith('MSFT')) return 'MSFT'
+    if (compact.startsWith('BTC')) return 'BTC'
+    if (compact.startsWith('ETH')) return 'ETH'
+    return ''
+}
+
+function iconForMarketSymbol(symbol: string) {
+    switch (normalizeMarketSymbol(symbol)) {
+        case 'AAPL':
+            return FaApple
+        case 'MSFT':
+            return FaMicrosoft
+        case 'BTC':
+            return FaBitcoin
+        case 'ETH':
+            return FaEthereum
+        default:
+            return null
+    }
+}
+
+function MarketLogo({ symbol }: { symbol: string }) {
+    const norm = useMemo(() => normalizeMarketSymbol(symbol), [symbol])
+    const Icon = useMemo(() => iconForMarketSymbol(symbol), [symbol])
+    const localUrl = useMemo(() => (norm ? `/market-icons/${norm}.png` : ''), [norm])
+    const cachedUrl = useMemo(() => {
+        if (!symbol) return ''
+        const qs = new URLSearchParams({ symbol: String(symbol) })
+        return `/api/widgets/markets/icon?${qs.toString()}`
+    }, [symbol])
+
+    const [maskUrl, setMaskUrl] = useState<string>('')
+    useEffect(() => {
+        let cancelled = false
+
+        const tryLoad = (url: string) =>
+            new Promise<boolean>((resolve) => {
+                if (!url) return resolve(false)
+                const img = new Image()
+                img.onload = () => resolve(true)
+                img.onerror = () => resolve(false)
+                img.src = url
+            })
+
+        ;(async () => {
+            // Keep previous maskUrl while loading to avoid flicker.
+            if (localUrl && (await tryLoad(localUrl))) {
+                if (!cancelled) setMaskUrl(localUrl)
+                return
+            }
+            if (cachedUrl && (await tryLoad(cachedUrl))) {
+                if (!cancelled) setMaskUrl(cachedUrl)
+                return
+            }
+            if (!cancelled) setMaskUrl('')
+        })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [localUrl, cachedUrl])
+
+    if (maskUrl) {
+        return (
+            <span
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 self-center text-white/70"
+                style={{
+                    display: 'inline-block',
+                    backgroundColor: 'currentColor',
+                    WebkitMaskImage: `url(${maskUrl})`,
+                    WebkitMaskRepeat: 'no-repeat',
+                    WebkitMaskSize: 'contain',
+                    WebkitMaskPosition: 'center',
+                    maskImage: `url(${maskUrl})`,
+                    maskRepeat: 'no-repeat',
+                    maskSize: 'contain',
+                    maskPosition: 'center',
+                }}
+            />
+        )
+    }
+
+    if (!Icon) return null
+    return <Icon aria-hidden="true" className="h-3 w-3 shrink-0 self-center text-white/70" />
+}
+
+function prettifyCompanyName(name: string) {
+    const s = String(name || '').trim()
+    if (!s) return ''
+    const hasLetters = /[A-Za-z]/.test(s)
+    const isAllCaps = hasLetters && s === s.toUpperCase() && s !== s.toLowerCase()
+    if (!isAllCaps) return s
+    return s
+        .toLowerCase()
+        .split(/\s+/g)
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(' ')
+}
+
+function MiniSparkline({ series }: { series: number[] }) {
+    const pts = Array.isArray(series) ? series.filter((n) => Number.isFinite(n)) : []
+    if (pts.length < 2) {
+        return <div className="h-6 w-full rounded bg-white/5" />
+    }
+
+    const width = 120
+    const height = 24
+    const min = Math.min(...pts)
+    const max = Math.max(...pts)
+    const span = max - min
+    const yOf = (v: number) => {
+        if (!Number.isFinite(v)) return height / 2
+        if (span <= 0) return height / 2
+        const t = (v - min) / span
+        // Keep a bit of room for the x-axis.
+        return (1 - t) * (height - 6) + 2
+    }
+
+    const step = width / (pts.length - 1)
+    const d = pts.map((v, i) => `${(i * step).toFixed(2)},${yOf(v).toFixed(2)}`).join(' ')
+
+    return (
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-6 w-full" aria-hidden="true">
+            <g className="text-white/20">
+                <line x1="0" y1={height - 1} x2={width} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1="0" y1={height - 4} x2="0" y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1={width / 2} y1={height - 4} x2={width / 2} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1={width} y1={height - 4} x2={width} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+            </g>
+            <g className="text-white/65">
+                <polyline points={d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+            </g>
+        </svg>
+    )
+}
+
+function HolidaysWidget({ data, error, lang }: { data: HolidaysResponse | null; error?: string | null; lang: 'zh' | 'en' }) {
+    if (!data) {
+        const msg = String(error || '').trim()
+        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+    }
+
+    const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
+    if (items.length === 0) {
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">—</div>
+    }
+
+    return (
+        <div className="flex h-full flex-col gap-1 py-1">
+            {items.map((it, idx) => {
+                const days = typeof it.daysUntil === 'number' && Number.isFinite(it.daysUntil) ? it.daysUntil : null
+                const label = (lang === 'zh' ? String(it.localName || '').trim() : '') || String(it.name || '').trim() || '—'
+                const country = String(it.country || '').trim().toUpperCase()
+                const date = String(it.date || '').trim()
+                const daysLabel =
+                    days == null
+                        ? '—'
+                        : days <= 0
+                            ? lang === 'en'
+                                ? 'Today'
+                                : '今天'
+                            : lang === 'en'
+                                ? `In ${days} days`
+                                : `还有 ${days} 天`
+
+                return (
+                    <div key={`${country}-${date}-${idx}`} className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                            <div className="truncate text-[15px] font-semibold leading-tight text-white/95">
+                                {label}
+                                {country ? <span className="text-white/60"> · {country}</span> : null}
+                            </div>
+                        </div>
+                        <div className="shrink-0 text-right tabular-nums">
+                            <div className="text-[11px] leading-tight text-white/70">{daysLabel}</div>
+                            <div className="text-[11px] leading-tight text-white/55">{date || '—'}</div>
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
+function HolidayCountryTags({
+    lang,
+    selected,
+    query,
+    onQueryChange,
+    onChange,
+}: {
+    lang: 'zh' | 'en'
+    selected: string[]
+    query: string
+    onQueryChange: (v: string) => void
+    onChange: (next: string[]) => void
+}) {
+    const [open, setOpen] = useState(false)
+    const [loading, setLoading] = useState(false)
+    const [results, setResults] = useState<HolidayCountry[]>([])
+
+    const normSelected = normalizeCountryCodes(selected)
+
+    useEffect(() => {
+        if (!open) return
+        let cancelled = false
+        const q = String(query ?? '').trim()
+
+        const timer = window.setTimeout(() => {
+            void (async () => {
+                setLoading(true)
+                try {
+                    const res = await apiGet<{ results: HolidayCountry[] }>(
+                        `/api/widgets/holidays/countries?${new URLSearchParams({ query: q, limit: '30' }).toString()}`,
+                    )
+                    if (cancelled) return
+                    const items = Array.isArray(res?.results) ? res.results : []
+                    setResults(items)
+                } catch {
+                    if (cancelled) return
+                    setResults([])
+                } finally {
+                    if (!cancelled) setLoading(false)
+                }
+            })()
+        }, 180)
+
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+        }
+    }, [open, query])
+
+    const remove = (code: string) => {
+        const up = String(code || '').trim().toUpperCase()
+        onChange(normSelected.filter((c) => c !== up))
+    }
+
+    const add = (code: string) => {
+        const up = String(code || '').trim().toUpperCase()
+        const next = normalizeCountryCodes([...normSelected, up])
+        if (next.length === normSelected.length) return
+        onChange(next)
+        onQueryChange('')
+        setOpen(false)
+    }
+
+    return (
+        <div className="space-y-2">
+            <div className="text-sm text-white/70">{lang === 'en' ? 'Countries/regions' : '国家/地区'}</div>
+
+            <div className="flex flex-wrap gap-2">
+                {normSelected.map((c) => (
+                    <button
+                        key={c}
+                        type="button"
+                        onClick={() => remove(c)}
+                        className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
+                        title={lang === 'en' ? 'Remove' : '移除'}
+                    >
+                        {c} ×
+                    </button>
+                ))}
+            </div>
+
+            <div className="relative">
+                <input
+                    value={query}
+                    onChange={(e) => {
+                        onQueryChange(e.target.value)
+                        setOpen(true)
+                    }}
+                    onFocus={() => setOpen(true)}
+                    onBlur={() => {
+                        window.setTimeout(() => setOpen(false), 120)
+                    }}
+                    placeholder={lang === 'en' ? 'Search countries (e.g. CN, United States)…' : '搜索国家/地区（例如 CN / United States）…'}
+                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                />
+
+                {open ? (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/90">
+                        <div className="max-h-56 overflow-auto">
+                            {loading ? (
+                                <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+                            ) : results.length ? (
+                                results.map((r) => {
+                                    const code = String(r.code || '').trim().toUpperCase()
+                                    const name = String(r.name || '').trim()
+                                    const disabled = normSelected.includes(code)
+                                    return (
+                                        <button
+                                            key={`${code}-${name}`}
+                                            type="button"
+                                            disabled={disabled}
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => {
+                                                if (!code) return
+                                                add(code)
+                                            }}
+                                            className={
+                                                'flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ' +
+                                                (disabled ? 'text-white/40' : 'text-white/85 hover:bg-white/10')
+                                            }
+                                        >
+                                            <div className="min-w-0">
+                                                <div className="truncate font-semibold text-white/90">{code}</div>
+                                                <div className="truncate text-xs text-white/60">{name || '—'}</div>
+                                            </div>
+                                            <div className="shrink-0 text-xs text-white/50">{disabled ? (lang === 'en' ? 'Added' : '已添加') : ''}</div>
+                                        </button>
+                                    )
+                                })
+                            ) : (
+                                <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'No results' : '无结果'}</div>
+                            )}
+                        </div>
+                    </div>
+                ) : null}
+            </div>
+
+            <div className="text-xs text-white/50">{lang === 'en' ? 'Click a tag to remove.' : '点击标签可移除。'}</div>
+        </div>
+    )
+}
+
+type MarketSymbolResult = {
+    symbol: string
+    kind?: string
+    name?: string
+}
+
+function MarketSymbolPicker({
+    value,
+    query,
+    onQueryChange,
+    onSelect,
+    placeholder,
+    lang,
+}: {
+    value: string
+    query: string
+    onQueryChange: (v: string) => void
+    onSelect: (symbol: string) => void
+    placeholder?: string
+    lang: 'zh' | 'en'
+}) {
+    const [open, setOpen] = useState(false)
+    const [loading, setLoading] = useState(false)
+    const [results, setResults] = useState<MarketSymbolResult[]>([])
+
+    useEffect(() => {
+        if (!open) return
+        let cancelled = false
+        const q = String(query ?? '').trim()
+
+        const timer = window.setTimeout(() => {
+            void (async () => {
+                setLoading(true)
+                try {
+                    const res = await apiGet<{ results: MarketSymbolResult[] }>(
+                        `/api/widgets/markets/search?${new URLSearchParams({ query: q, limit: '8' }).toString()}`,
+                    )
+                    if (cancelled) return
+                    const items = Array.isArray(res?.results) ? res.results : []
+                    setResults(items)
+                } catch {
+                    if (cancelled) return
+                    setResults([])
+                } finally {
+                    if (!cancelled) setLoading(false)
+                }
+            })()
+        }, 180)
+
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+        }
+    }, [open, query])
+
+    return (
+        <div className="relative">
+            <input
+                value={query}
+                onChange={(e) => {
+                    onQueryChange(e.target.value)
+                    setOpen(true)
+                }}
+                onFocus={() => setOpen(true)}
+                onBlur={() => {
+                    window.setTimeout(() => {
+                        setOpen(false)
+                        onQueryChange(String(value || '').trim() || '')
+                    }, 120)
+                }}
+                placeholder={placeholder}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+            />
+
+            {open ? (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/90">
+                    <div className="max-h-56 overflow-auto">
+                        {loading ? (
+                            <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+                        ) : results.length ? (
+                            results.map((r) => {
+                                const sym = String(r.symbol || '').trim().toUpperCase()
+                                const name = String(r.name || '').trim()
+                                const kind = String(r.kind || '').trim()
+                                return (
+                                    <button
+                                        key={`${sym}-${kind}-${name}`}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => {
+                                            if (!sym) return
+                                            onSelect(sym)
+                                            onQueryChange(sym)
+                                            setOpen(false)
+                                        }}
+                                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                                    >
+                                        <div className="min-w-0">
+                                            <div className="truncate font-semibold text-white/90">{sym}</div>
+                                            <div className="truncate text-xs text-white/60">{name || '—'}</div>
+                                        </div>
+                                        <div className="shrink-0 text-xs text-white/50">{kind ? kind.toUpperCase() : ''}</div>
+                                    </button>
+                                )
+                            })
+                        ) : (
+                            <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'No results' : '无结果'}</div>
+                        )}
+                    </div>
                 </div>
             ) : null}
         </div>

@@ -74,3 +74,35 @@ export type HostMetrics = {
     netBytesSent: number
     netBytesRecv: number
 }
+
+export type MarketQuote = {
+    symbol: string
+    kind: 'stock' | 'crypto' | string
+    name?: string
+    priceUsd: number
+    changePct24h: number
+    series: number[]
+}
+
+export type MarketsResponse = {
+    fetchedAt: number
+    items: MarketQuote[]
+}
+
+export type HolidayItem = {
+    country: string
+    date: string
+    name: string
+    localName: string
+    daysUntil: number
+}
+
+export type HolidaysResponse = {
+    fetchedAt: number
+    items: HolidayItem[]
+}
+
+export type HolidayCountry = {
+    code: string
+    name: string
+}

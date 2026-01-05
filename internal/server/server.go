@@ -142,6 +142,12 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/api/widgets/geocode", s.handleSearchCity)
 	r.Get("/api/widgets/timezone", s.handleGetCityTimezone)
 	r.Get("/api/widgets/timezones", s.handleGetTimezones)
+	r.Get("/api/widgets/markets", s.handleGetMarkets)
+	r.Get("/api/widgets/markets/search", s.handleSearchMarkets)
+	r.Get("/api/widgets/markets/icon", s.handleGetMarketIcon)
+	r.Head("/api/widgets/markets/icon", s.handleGetMarketIcon)
+	r.Get("/api/widgets/holidays", s.handleGetHolidays)
+	r.Get("/api/widgets/holidays/countries", s.handleListHolidayCountries)
 
 	// Host metrics are public (visitor dashboard).
 	r.Get("/api/metrics/host", s.handleGetHostMetrics)
