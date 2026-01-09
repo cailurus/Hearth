@@ -251,12 +251,12 @@ export default function AdminPage() {
         }
     }
 
-    const resolveIcon = async (url: string) => {
+    const resolveIcon = async (url: string, refresh: boolean = false) => {
         const u = url.trim()
         if (!u) return
         setErr(null)
         try {
-            const res = await apiPost<IconResolve>('/api/icon/resolve', { url: u })
+            const res = await apiPost<IconResolve>('/api/icon/resolve', { url: u, refresh })
             setAppForm((prev) => ({
                 ...prev,
                 iconPath: res.iconPath || '',
@@ -614,6 +614,13 @@ export default function AdminPage() {
                                 className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
                             >
                                 {t('解析图标', 'Resolve icon')}
+                            </button>
+                            <button
+                                onClick={() => void resolveIcon(appForm.url, true)}
+                                className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
+                                title={t('强制刷新图标缓存', 'Force refresh icon cache')}
+                            >
+                                {t('刷新图标', 'Refresh icon')}
                             </button>
                             <button onClick={() => void submitApp()} className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20">
                                 {appForm.mode === 'create' ? t('添加项目', 'Add app') : t('保存修改', 'Save changes')}

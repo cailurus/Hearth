@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -43,10 +44,13 @@ func (r *Resolver) ResolveAndCache(ctx context.Context, pageURL string) (Result,
 		return Result{}, errors.New("invalid url")
 	}
 
+	// Generate a unique key based on the original page URL
+	pageKey := hashString(pageURL)
+
 	htmlBytes, finalURL, err := r.fetchHTML(ctx, u.String())
 	if err != nil {
 		fallback := resolveURL(finalURL, "/favicon.ico")
-		iconFile, err2 := r.downloadIcon(ctx, fallback)
+		iconFile, err2 := r.downloadIconForPage(ctx, fallback, pageKey)
 		if err2 != nil {
 			return Result{}, err
 		}
@@ -56,23 +60,42 @@ func (r *Resolver) ResolveAndCache(ctx context.Context, pageURL string) (Result,
 	title, iconHref := parseTitleAndIcon(finalURL, htmlBytes)
 	if iconHref == "" {
 		iconHref = resolveURL(finalURL, "/favicon.ico")
-		iconFile, err := r.downloadIcon(ctx, iconHref)
+		iconFile, err := r.downloadIconForPage(ctx, iconHref, pageKey)
 		if err != nil {
 			return Result{Title: title}, nil
 		}
 		return Result{Title: title, IconPath: iconFile, IconSource: "fallback"}, nil
 	}
 
-	iconFile, err := r.downloadIcon(ctx, iconHref)
+	// Handle data: URI (base64 encoded icons)
+	if strings.HasPrefix(iconHref, "data:") {
+		iconFile, err := r.saveDataURI(iconHref, pageKey)
+		if err != nil {
+			fallback := resolveURL(finalURL, "/favicon.ico")
+			if iconFile2, err2 := r.downloadIconForPage(ctx, fallback, pageKey); err2 == nil {
+				return Result{Title: title, IconPath: iconFile2, IconSource: "fallback"}, nil
+			}
+			return Result{Title: title}, nil
+		}
+		return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
+	}
+
+	iconFile, err := r.downloadIconForPage(ctx, iconHref, pageKey)
 	if err != nil {
 		fallback := resolveURL(finalURL, "/favicon.ico")
-		if iconFile2, err2 := r.downloadIcon(ctx, fallback); err2 == nil {
+		if iconFile2, err2 := r.downloadIconForPage(ctx, fallback, pageKey); err2 == nil {
 			return Result{Title: title, IconPath: iconFile2, IconSource: "fallback"}, nil
 		}
 		return Result{Title: title}, nil
 	}
 
 	return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
+}
+
+// hashString returns a short hash of the input string
+func hashString(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:8]) // Use first 8 bytes (16 hex chars)
 }
 
 func (r *Resolver) fetchHTML(ctx context.Context, pageURL string) ([]byte, string, error) {
@@ -159,6 +182,76 @@ func resolveURL(base, href string) string {
 }
 
 func (r *Resolver) downloadIcon(ctx context.Context, iconURL string) (string, error) {
+	return r.downloadIconForPage(ctx, iconURL, "")
+}
+
+// saveDataURI handles data: URI (base64 encoded) icons and saves them to disk
+func (r *Resolver) saveDataURI(dataURI string, pageKey string) (string, error) {
+	// Format: data:[<mediatype>][;base64],<data>
+	// Example: data:image/x-icon;base64,AAABAAMAEBAAAAEAIABoBAA...
+	if !strings.HasPrefix(dataURI, "data:") {
+		return "", errors.New("not a data URI")
+	}
+
+	commaIdx := strings.Index(dataURI, ",")
+	if commaIdx == -1 {
+		return "", errors.New("invalid data URI format")
+	}
+
+	header := dataURI[5:commaIdx] // skip "data:"
+	dataStr := dataURI[commaIdx+1:]
+
+	// Check if base64 encoded
+	isBase64 := strings.Contains(header, ";base64")
+
+	var data []byte
+	var err error
+	if isBase64 {
+		data, err = base64.StdEncoding.DecodeString(dataStr)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		// URL encoded data
+		decoded, err := url.QueryUnescape(dataStr)
+		if err != nil {
+			return "", err
+		}
+		data = []byte(decoded)
+	}
+
+	if len(data) == 0 {
+		return "", errors.New("empty data URI")
+	}
+
+	// Determine extension from media type
+	mediaType := strings.Split(header, ";")[0]
+	ext := extFromMediaType(mediaType)
+	if ext == "" {
+		ext = ".ico" // default
+	}
+
+	// Include pageKey in the hash to ensure each page URL gets its own icon file
+	h := sha256.New()
+	if pageKey != "" {
+		h.Write([]byte(pageKey))
+		h.Write([]byte(":"))
+	}
+	h.Write(data)
+	sum := hex.EncodeToString(h.Sum(nil))
+
+	filename := sum + ext
+	full := filepath.Join(r.IconsDir, filename)
+	if err := osWriteFileAtomic(full, data); err != nil {
+		return "", err
+	}
+	return filename, nil
+}
+
+// downloadIconForPage downloads an icon and saves it with a filename that includes
+// the page key to ensure different pages get different icon files even if the
+// actual icon content is the same.
+func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, pageKey string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, iconURL, nil)
 	req.Header.Set("User-Agent", "Hearth/0.1")
 	resp, err := r.Client.Do(req)
@@ -178,8 +271,14 @@ func (r *Resolver) downloadIcon(ctx context.Context, iconURL string) (string, er
 		return "", errors.New("empty")
 	}
 
-	h := sha256.Sum256(data)
-	sum := hex.EncodeToString(h[:])
+	// Include pageKey in the hash to ensure each page URL gets its own icon file
+	h := sha256.New()
+	if pageKey != "" {
+		h.Write([]byte(pageKey))
+		h.Write([]byte(":"))
+	}
+	h.Write(data)
+	sum := hex.EncodeToString(h.Sum(nil))
 
 	ext := extFromContentType(resp.Header.Get("Content-Type"))
 	if ext == "" {
@@ -202,6 +301,10 @@ func (r *Resolver) downloadIcon(ctx context.Context, iconURL string) (string, er
 
 func extFromContentType(ct string) string {
 	mt, _, _ := mime.ParseMediaType(ct)
+	return extFromMediaType(mt)
+}
+
+func extFromMediaType(mt string) string {
 	switch strings.ToLower(mt) {
 	case "image/png":
 		return ".png"
@@ -213,6 +316,8 @@ func extFromContentType(ct string) string {
 		return ".svg"
 	case "image/x-icon", "image/vnd.microsoft.icon":
 		return ".ico"
+	case "image/gif":
+		return ".gif"
 	default:
 		return ""
 	}

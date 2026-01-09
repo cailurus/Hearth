@@ -15,7 +15,8 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY README.md LICENSE ./
 COPY --from=webbuild /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/hearth
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/hearth && \
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/reset-password ./cmd/reset-password
 
 # Prepare default writable data dirs for the nonroot runtime.
 # When a named volume is first attached to /data, Docker copies existing image
@@ -31,9 +32,10 @@ RUN apk add --no-cache ca-certificates
 # Note: run as root by default to avoid volume permission issues across hosts and
 # existing volumes created by older image versions.
 FROM gcr.io/distroless/base-debian12
-WORKDIR /app
-COPY --from=gobuild /out/hearth /app/hearth
-COPY --from=gobuild /src/web/dist /app/web/dist
+WORKDIR /hearth
+COPY --from=gobuild /out/hearth /hearth/hearth
+COPY --from=gobuild /out/reset-password /hearth/reset-password
+COPY --from=gobuild /src/web/dist /hearth/web/dist
 COPY --from=gobuild /out/data /data
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 0
@@ -42,4 +44,4 @@ ENV HEARTH_DATA_DIR=/data
 ENV HEARTH_DB_DSN=/data/hearth.db
 EXPOSE 8787
 VOLUME ["/data"]
-ENTRYPOINT ["/app/hearth"]
+ENTRYPOINT ["/hearth/hearth"]

@@ -34,3 +34,9 @@ func (s *Store) SetIconCache(cacheKey, iconPath, iconSource string) error {
 	)
 	return err
 }
+
+// DeleteIconCache removes a specific entry from the icon cache
+func (s *Store) DeleteIconCache(cacheKey string) error {
+	_, err := s.db.Exec(`DELETE FROM icon_cache WHERE cache_key = ?`, cacheKey)
+	return err
+}

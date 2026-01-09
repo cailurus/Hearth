@@ -17,6 +17,11 @@ func New(db *sql.DB) *Store {
 	return &Store{db: db}
 }
 
+// Ping checks database connectivity.
+func (s *Store) Ping() error {
+	return s.db.Ping()
+}
+
 func (s *Store) Migrate() error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS kv (

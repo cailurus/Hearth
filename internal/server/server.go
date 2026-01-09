@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,9 @@ import (
 	"github.com/morezhou/hearth/internal/icon"
 	"github.com/morezhou/hearth/internal/store"
 )
+
+// Version is set at build time via ldflags.
+var Version = "dev"
 
 type Server struct {
 	cfg          Config
@@ -50,9 +54,21 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	// SQLite pragmas
-	_, _ = db.Exec("PRAGMA journal_mode = WAL;")
-	_, _ = db.Exec("PRAGMA foreign_keys = ON;")
+
+	// Configure connection pool for SQLite.
+	// SQLite doesn't benefit from multiple connections for writes (due to locking),
+	// but this helps manage connection lifecycle.
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	// SQLite pragmas for better performance and reliability.
+	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
+		slog.Warn("failed to set WAL mode", "error", err)
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		slog.Warn("failed to enable foreign keys", "error", err)
+	}
 
 	st := store.New(db)
 	if err := st.Migrate(); err != nil {
@@ -101,7 +117,16 @@ func (s *Server) buildRouter() chi.Router {
 	r.Handle("/assets/icons/*", http.StripPrefix("/assets/icons/", withNoCache(http.FileServer(iconsDir))))
 
 	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		dbOK := s.store.Ping() == nil
+		status := http.StatusOK
+		if !dbOK {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, map[string]any{
+			"ok":       dbOK,
+			"version":  Version,
+			"database": dbOK,
+		})
 	})
 
 	r.Group(func(r chi.Router) {
@@ -111,6 +136,8 @@ func (s *Server) buildRouter() chi.Router {
 	// Auth endpoints are public
 	r.Post("/api/auth/login", s.handleLogin)
 	r.Post("/api/auth/logout", s.handleLogout)
+	// Password change requires admin
+	r.With(s.requireAdmin).Post("/api/auth/password", s.handleChangePassword)
 
 	// Settings: GET is public; PUT requires admin.
 	r.Get("/api/settings", s.handleGetSettings)

@@ -53,7 +53,9 @@ go-build:
 	@set -e; \
 	mkdir -p dist; \
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/hearth ./cmd/hearth; \
-	echo "Built: dist/hearth"
+	echo "Built: dist/hearth"; \
+	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o dist/reset-password ./cmd/reset-password; \
+	echo "Built: dist/reset-password"
 
 docker:
 	docker build -t hearth:local .

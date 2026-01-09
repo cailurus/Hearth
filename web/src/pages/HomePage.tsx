@@ -122,9 +122,18 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const [loginOpen, setLoginOpen] = useState(false)
     const [settingsOpen, setSettingsOpen] = useState(false)
+    const [settingsTab, setSettingsTab] = useState<'general' | 'time' | 'background' | 'account'>('general')
     const [loginErr, setLoginErr] = useState<string | null>(null)
     const [username, setUsername] = useState('admin')
     const [password, setPassword] = useState('')
+
+    // Password change state
+    const [oldPassword, setOldPassword] = useState('')
+    const [newPassword, setNewPassword] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
+    const [passwordErr, setPasswordErr] = useState<string | null>(null)
+    const [passwordSuccess, setPasswordSuccess] = useState(false)
+    const [changingPassword, setChangingPassword] = useState(false)
 
     const [ctxOpen, setCtxOpen] = useState(false)
     const [ctxPos, setCtxPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -1205,6 +1214,38 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }
 
+    const onChangePassword = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setPasswordErr(null)
+        setPasswordSuccess(false)
+
+        if (!oldPassword || !newPassword || !confirmPassword) {
+            setPasswordErr(lang === 'en' ? 'All fields are required' : '请填写所有字段')
+            return
+        }
+        if (newPassword.length < 4) {
+            setPasswordErr(lang === 'en' ? 'Password must be at least 4 characters' : '密码至少需要4个字符')
+            return
+        }
+        if (newPassword !== confirmPassword) {
+            setPasswordErr(lang === 'en' ? 'Passwords do not match' : '两次输入的密码不一致')
+            return
+        }
+
+        setChangingPassword(true)
+        try {
+            await apiPost('/api/auth/password', { oldPassword, newPassword })
+            setPasswordSuccess(true)
+            setOldPassword('')
+            setNewPassword('')
+            setConfirmPassword('')
+        } catch (err) {
+            setPasswordErr(err instanceof Error ? err.message : (lang === 'en' ? 'Failed to change password' : '修改密码失败'))
+        } finally {
+            setChangingPassword(false)
+        }
+    }
+
     useEffect(() => {
         if (!settings || siteDraft) return
         const allowedIntervals = new Set(['0', '1h', '3h', '6h', '12h', '24h'])
@@ -1219,12 +1260,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             time: settings.time ? { ...settings.time, timezone: systemTimezone } : settings.time,
         })
     }, [settings, siteDraft])
-
-    // Force a reload when background provider changes; the image URL path stays the same.
-    useEffect(() => {
-        if (!settings?.background?.provider) return
-        setBgNonce(Date.now())
-    }, [settings?.background?.provider])
 
     const hasUngrouped = (appsByGroup.get(null) ?? []).length > 0
     const groupItems = (groupId: string | null) => appsByGroup.get(groupId) ?? []
@@ -1408,62 +1443,89 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 title={t('系统设置', 'Settings')}
                 onClose={() => setSettingsOpen(false)}
                 closeText={t('关闭', 'Close')}
-                maxWidthClass="max-w-lg"
-                containerClassName="items-start pt-[18vh] sm:pt-[22vh]"
+                maxWidthClass="max-w-2xl"
+                containerClassName="items-start pt-[12vh] sm:pt-[16vh]"
             >
-                <div className="space-y-6">
-                    <div className="mb-4 flex items-center justify-between">
-                        <div className="text-sm text-white/70">{t('管理员', 'Admin')}</div>
+                <div className="flex min-h-[400px]">
+                    {/* Left sidebar tabs */}
+                    <div className="flex w-32 flex-shrink-0 flex-col border-r border-white/10 pr-4">
                         <button
-                            onClick={onLogout}
-                            className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
+                            onClick={() => setSettingsTab('general')}
+                            className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'general' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'
+                                }`}
                         >
-                            {t('登出', 'Logout')}
+                            {t('通用', 'General')}
+                        </button>
+                        <button
+                            onClick={() => setSettingsTab('time')}
+                            className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'time' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'
+                                }`}
+                        >
+                            {t('时间', 'Time')}
+                        </button>
+                        <button
+                            onClick={() => setSettingsTab('background')}
+                            className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'background' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'
+                                }`}
+                        >
+                            {t('背景', 'Background')}
+                        </button>
+                        <button
+                            onClick={() => setSettingsTab('account')}
+                            className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'account' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'
+                                }`}
+                        >
+                            {t('账户', 'Account')}
                         </button>
                     </div>
-                    {siteSaveErr ? <div className="rounded-lg border border-white/10 bg-black/40 p-3 text-sm">{siteSaveErr}</div> : null}
-                    <div className="space-y-6">
-                        <section className="rounded-xl border border-white/10 bg-black/40 p-4">
-                            <div className="mb-3 text-sm font-semibold text-white/80">{t('通用', 'General')}</div>
-                            <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('标题', 'Title')}</div>
-                                <input
-                                    value={siteDraft?.siteTitle ?? ''}
-                                    onChange={(e) =>
-                                        setSiteDraft((prev) => {
-                                            if (!prev) return prev
-                                            const next = { ...prev, siteTitle: e.target.value }
-                                            schedulePersistSiteDraft(next, 'debounce')
-                                            return next
-                                        })
-                                    }
-                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                                />
-                            </label>
 
-                            <label className="mt-3 block text-sm">
-                                <div className="mb-1 text-white/70">{t('语言', 'Language')}</div>
-                                <select
-                                    value={siteDraft?.language || 'zh'}
-                                    onChange={(e) =>
-                                        setSiteDraft((prev) => {
-                                            if (!prev) return prev
-                                            const next = { ...prev, language: e.target.value }
-                                            schedulePersistSiteDraft(next, 'now')
-                                            return next
-                                        })
-                                    }
-                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                                >
-                                    <option value="zh">{t('中文', 'Chinese')}</option>
-                                    <option value="en">{t('英文', 'English')}</option>
-                                </select>
-                            </label>
-                        </section>
+                    {/* Right content area */}
+                    <div className="flex-1 pl-4">
+                        {siteSaveErr ? <div className="mb-4 rounded-lg border border-white/10 bg-black/40 p-3 text-sm">{siteSaveErr}</div> : null}
 
-                        <section className="rounded-xl border border-white/10 bg-black/40 p-4">
-                            <div className="mb-3 text-sm font-semibold text-white/80">{t('时间', 'Time')}</div>
-                            <div className="space-y-3">
+                        {/* General Tab */}
+                        {settingsTab === 'general' && (
+                            <div className="space-y-4">
+                                <label className="block text-sm">
+                                    <div className="mb-1 text-white/70">{t('标题', 'Title')}</div>
+                                    <input
+                                        value={siteDraft?.siteTitle ?? ''}
+                                        onChange={(e) =>
+                                            setSiteDraft((prev) => {
+                                                if (!prev) return prev
+                                                const next = { ...prev, siteTitle: e.target.value }
+                                                schedulePersistSiteDraft(next, 'debounce')
+                                                return next
+                                            })
+                                        }
+                                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                    />
+                                </label>
+
+                                <label className="block text-sm">
+                                    <div className="mb-1 text-white/70">{t('语言', 'Language')}</div>
+                                    <select
+                                        value={siteDraft?.language || 'zh'}
+                                        onChange={(e) =>
+                                            setSiteDraft((prev) => {
+                                                if (!prev) return prev
+                                                const next = { ...prev, language: e.target.value }
+                                                schedulePersistSiteDraft(next, 'now')
+                                                return next
+                                            })
+                                        }
+                                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                    >
+                                        <option value="zh">{t('中文', 'Chinese')}</option>
+                                        <option value="en">{t('英文', 'English')}</option>
+                                    </select>
+                                </label>
+                            </div>
+                        )}
+
+                        {/* Time Tab */}
+                        {settingsTab === 'time' && (
+                            <div className="space-y-4">
                                 <div className="flex flex-wrap items-center gap-4">
                                     <label className="flex items-center gap-2 text-sm text-white/80">
                                         <input
@@ -1515,27 +1577,25 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                     </label>
                                 </div>
 
-                                <div className="grid grid-cols-1 gap-3">
-                                    <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('当前时区', 'Current timezone')}</div>
-                                        <TimezonePicker
-                                            value={systemTimezone}
-                                            onChange={() => {
-                                                // Read-only: timezone is taken from the user's system/browser.
-                                            }}
-                                            options={[systemTimezone]}
-                                            placeholder={systemTimezone}
-                                        />
-                                        <div className="mt-1 text-xs text-white/50">{t('自动从系统读取', 'Auto from system')}</div>
-                                    </label>
-                                </div>
+                                <label className="block text-sm">
+                                    <div className="mb-1 text-white/70">{t('当前时区', 'Current timezone')}</div>
+                                    <TimezonePicker
+                                        value={systemTimezone}
+                                        onChange={() => {
+                                            // Read-only: timezone is taken from the user's system/browser.
+                                        }}
+                                        options={[systemTimezone]}
+                                        placeholder={systemTimezone}
+                                    />
+                                    <div className="mt-1 text-xs text-white/50">{t('自动从系统读取', 'Auto from system')}</div>
+                                </label>
                             </div>
-                        </section>
+                        )}
 
-                        <section className="rounded-xl border border-white/10 bg-black/40 p-4">
-                            <div className="mb-3 text-sm font-semibold text-white/80">{t('背景', 'Background')}</div>
-                            <div className="space-y-3">
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {/* Background Tab */}
+                        {settingsTab === 'background' && (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <label className="block text-sm">
                                         <div className="mb-1 text-white/70">{t('背景来源', 'Provider')}</div>
                                         <select
@@ -1615,8 +1675,72 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                     ) : null}
                                 </div>
                             </div>
-                        </section>
+                        )}
 
+                        {/* Account Tab */}
+                        {settingsTab === 'account' && (
+                            <div className="space-y-6">
+                                {/* Logout section */}
+                                <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 p-3">
+                                    <div className="text-sm text-white/70">{t('当前登录', 'Logged in as')} <span className="text-white">admin</span></div>
+                                    <button
+                                        onClick={onLogout}
+                                        className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
+                                    >
+                                        {t('登出', 'Logout')}
+                                    </button>
+                                </div>
+
+                                {/* Password Change Section */}
+                                <div>
+                                    <div className="mb-3 text-sm font-semibold text-white/80">{t('修改密码', 'Change Password')}</div>
+                                    {passwordErr ? (
+                                        <div className="mb-3 rounded-lg border border-red-400/30 bg-red-900/20 p-2 text-sm text-red-300">{passwordErr}</div>
+                                    ) : null}
+                                    {passwordSuccess ? (
+                                        <div className="mb-3 rounded-lg border border-green-400/30 bg-green-900/20 p-2 text-sm text-green-300">
+                                            {t('密码已更新', 'Password updated successfully')}
+                                        </div>
+                                    ) : null}
+                                    <form onSubmit={onChangePassword} className="space-y-3">
+                                        <label className="block text-sm">
+                                            <div className="mb-1 text-white/70">{t('当前密码', 'Current password')}</div>
+                                            <input
+                                                type="password"
+                                                value={oldPassword}
+                                                onChange={(e) => setOldPassword(e.target.value)}
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                            />
+                                        </label>
+                                        <label className="block text-sm">
+                                            <div className="mb-1 text-white/70">{t('新密码', 'New password')}</div>
+                                            <input
+                                                type="password"
+                                                value={newPassword}
+                                                onChange={(e) => setNewPassword(e.target.value)}
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                            />
+                                        </label>
+                                        <label className="block text-sm">
+                                            <div className="mb-1 text-white/70">{t('确认新密码', 'Confirm new password')}</div>
+                                            <input
+                                                type="password"
+                                                value={confirmPassword}
+                                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                            />
+                                        </label>
+                                        <button
+                                            type="submit"
+                                            disabled={changingPassword}
+                                            className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-50"
+                                        >
+                                            {changingPassword ? (t('更新中...', 'Updating...')) : (t('更新密码', 'Update password'))}
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </Modal>
@@ -2703,13 +2827,14 @@ function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; er
     }
 
     return (
-        <div className="space-y-0.5 pb-4 text-[11.5px]">
+        <div className="space-y-1.5 text-[11.5px]">
             {items.map((it) => {
                 const sym = String(it.symbol || '').toUpperCase() || '—'
                 const name = prettifyCompanyName(String(it.name || '').trim())
                 const price = typeof it.priceUsd === 'number' && Number.isFinite(it.priceUsd) ? `$${it.priceUsd.toFixed(2)}` : '—'
                 const pct = typeof it.changePct24h === 'number' && Number.isFinite(it.changePct24h) ? it.changePct24h : null
                 const pctLabel = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+                const pctColor = pct == null ? 'text-white/60' : pct >= 0 ? 'text-green-400/80' : 'text-red-400/80'
                 const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼'
                 const series = Array.isArray(it.series) ? (it.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n)) : []
 
@@ -2719,7 +2844,7 @@ function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; er
                             <div className="flex items-baseline gap-1.5">
                                 <MarketLogo symbol={sym} />
                                 <div className="truncate font-medium text-white/90">{sym}</div>
-                                {arrow ? <div className="text-[10.5px] leading-none text-white/60">{arrow}</div> : null}
+                                {arrow ? <div className={`text-[10.5px] leading-none ${pctColor}`}>{arrow}</div> : null}
                             </div>
                             <div className="truncate text-[9.5px] font-normal leading-tight text-white/45">{name || '—'}</div>
                         </div>
@@ -2730,7 +2855,7 @@ function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; er
 
                         <div className="w-20 shrink-0 text-right">
                             <div className="tabular-nums text-white/90">{price}</div>
-                            <div className="tabular-nums text-[10.5px] leading-tight text-white/60">{pctLabel}</div>
+                            <div className={`tabular-nums text-[10.5px] leading-tight ${pctColor}`}>{pctLabel}</div>
                         </div>
                     </div>
                 )
@@ -2788,18 +2913,18 @@ function MarketLogo({ symbol }: { symbol: string }) {
                 img.src = url
             })
 
-        ;(async () => {
-            // Keep previous maskUrl while loading to avoid flicker.
-            if (localUrl && (await tryLoad(localUrl))) {
-                if (!cancelled) setMaskUrl(localUrl)
-                return
-            }
-            if (cachedUrl && (await tryLoad(cachedUrl))) {
-                if (!cancelled) setMaskUrl(cachedUrl)
-                return
-            }
-            if (!cancelled) setMaskUrl('')
-        })()
+            ; (async () => {
+                // Keep previous maskUrl while loading to avoid flicker.
+                if (localUrl && (await tryLoad(localUrl))) {
+                    if (!cancelled) setMaskUrl(localUrl)
+                    return
+                }
+                if (cachedUrl && (await tryLoad(cachedUrl))) {
+                    if (!cancelled) setMaskUrl(cachedUrl)
+                    return
+                }
+                if (!cancelled) setMaskUrl('')
+            })()
 
         return () => {
             cancelled = true

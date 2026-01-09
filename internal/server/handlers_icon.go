@@ -10,7 +10,8 @@ import (
 )
 
 type resolveIconRequest struct {
-	URL string `json:"url"`
+	URL     string `json:"url"`
+	Refresh bool   `json:"refresh,omitempty"` // Force refresh, bypass cache
 }
 
 type resolveIconResponse struct {
@@ -32,16 +33,23 @@ func (s *Server) handleResolveIcon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cacheKey := sha256Hex(req.URL)
-	if e, ok, err := s.store.GetIconCache(cacheKey); err == nil && ok {
-		full := filepath.Join(s.cfg.DataDir, "icons", e.IconPath)
-		if _, err := os.Stat(full); err == nil {
-			writeJSON(w, http.StatusOK, resolveIconResponse{
-				Title:      "",
-				IconURL:    "/assets/icons/" + e.IconPath,
-				IconPath:   e.IconPath,
-				IconSource: e.IconSource,
-			})
-			return
+
+	// If refresh is requested, delete the existing cache entry
+	if req.Refresh {
+		_ = s.store.DeleteIconCache(cacheKey)
+	} else {
+		// Check cache only if not refreshing
+		if e, ok, err := s.store.GetIconCache(cacheKey); err == nil && ok {
+			full := filepath.Join(s.cfg.DataDir, "icons", e.IconPath)
+			if _, err := os.Stat(full); err == nil {
+				writeJSON(w, http.StatusOK, resolveIconResponse{
+					Title:      "",
+					IconURL:    "/assets/icons/" + e.IconPath,
+					IconPath:   e.IconPath,
+					IconSource: e.IconSource,
+				})
+				return
+			}
 		}
 	}
 
