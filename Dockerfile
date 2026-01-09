@@ -8,6 +8,7 @@ RUN npm run build
 
 # Build backend (must satisfy go.mod `go 1.24.0`)
 FROM golang:1.24-alpine AS gobuild
+RUN apk add --no-cache upx
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -16,7 +17,8 @@ COPY internal/ ./internal/
 COPY README.md LICENSE ./
 COPY --from=webbuild /src/web/dist ./web/dist
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/hearth && \
-    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/reset-password ./cmd/reset-password
+    CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/reset-password ./cmd/reset-password && \
+    upx --best --lzma /out/hearth /out/reset-password
 
 # Prepare default writable data dirs for the nonroot runtime.
 # When a named volume is first attached to /data, Docker copies existing image
