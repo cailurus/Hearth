@@ -28,16 +28,17 @@ RUN mkdir -p /out/data/icons /out/data/cache \
 FROM alpine:3.20 AS certs
 RUN apk add --no-cache ca-certificates
 
-# Runtime - use distroless base which includes glibc (required by modernc.org/sqlite's libc implementation)
-FROM gcr.io/distroless/base-debian12:nonroot
+# Runtime
+# Note: run as root by default to avoid volume permission issues across hosts and
+# existing volumes created by older image versions.
+FROM gcr.io/distroless/base-debian12
 WORKDIR /hearth
 COPY --from=gobuild /out/hearth /hearth/hearth
 COPY --from=gobuild /out/reset-password /hearth/reset-password
 COPY --from=gobuild /src/web/dist /hearth/web/dist
 COPY --from=gobuild /out/data /data
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-# Run as nonroot user (uid 65532) for security
-USER nonroot
+USER 0
 ENV HEARTH_ADDR=:8787
 ENV HEARTH_DATA_DIR=/data
 ENV HEARTH_DB_DSN=/data/hearth.db
