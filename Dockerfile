@@ -21,23 +21,20 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/heart
 # Prepare default writable data dirs for the nonroot runtime.
 # When a named volume is first attached to /data, Docker copies existing image
 # contents into it (including permissions), so this avoids permission issues.
-# Also create /tmp which is required by modernc.org/sqlite for temporary files.
-RUN mkdir -p /out/data/icons /out/data/cache /out/tmp \
-	&& chmod -R 0777 /out/data /out/tmp
+RUN mkdir -p /out/data/icons /out/data/cache \
+	&& chmod -R 0777 /out/data
 
 # CA certificates (needed for HTTPS background providers like Bing/Unsplash/Picsum).
 FROM alpine:3.20 AS certs
 RUN apk add --no-cache ca-certificates
 
-# Runtime - use static distroless for minimal size (~2MB base)
-# Since we use CGO_ENABLED=0, we don't need glibc
-FROM gcr.io/distroless/static-debian12:nonroot
+# Runtime - use distroless base which includes glibc (required by modernc.org/sqlite's libc implementation)
+FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /hearth
 COPY --from=gobuild /out/hearth /hearth/hearth
 COPY --from=gobuild /out/reset-password /hearth/reset-password
 COPY --from=gobuild /src/web/dist /hearth/web/dist
 COPY --from=gobuild /out/data /data
-COPY --from=gobuild /out/tmp /tmp
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # Run as nonroot user (uid 65532) for security
 USER nonroot
