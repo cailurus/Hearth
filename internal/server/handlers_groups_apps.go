@@ -97,16 +97,16 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// PRD: delete group -> move apps to ungrouped
-	if err := s.store.MoveGroupAppsToUngrouped(id); err != nil {
-		slog.Warn("failed to move apps to ungrouped", "groupId", id, "error", err)
+	// Delete all apps in the group first
+	if err := s.store.DeleteAppsByGroupID(id); err != nil {
+		slog.Warn("failed to delete apps in group", "groupId", id, "error", err)
 	}
 	if err := s.store.DeleteGroup(id); err != nil {
 		slog.Error("failed to delete group", "error", err, "id", id)
 		writeError(w, http.StatusInternalServerError, "failed to delete group")
 		return
 	}
-	slog.Info("group deleted", "id", id)
+	slog.Info("group deleted with all apps", "id", id)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

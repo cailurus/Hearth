@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -20,6 +21,7 @@ const (
 	kvTimeTimezone            = "settings.time.timezone"    // IANA timezone
 	kvTimeShowSeconds         = "settings.time.showSeconds" // "true"|"false"
 	kvTimeMode                = "settings.time.mode"        // digital|clock
+	kvTitleSortOrder          = "settings.title.sortOrder"  // int, position of title block among groups
 )
 
 const defaultWeatherCity = "Shanghai, Shanghai, China"
@@ -41,6 +43,8 @@ type Settings struct {
 	} `json:"weather"`
 
 	Time *TimeSettings `json:"time"`
+
+	TitleSortOrder int `json:"titleSortOrder"` // Position of title block among groups, default 0 (top)
 }
 
 type TimeSettings struct {
@@ -91,6 +95,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	if len(st.Timezones) == 0 {
 		st.Timezones = []string{"Asia/Shanghai", "America/New_York"}
 	}
+
+	// Title sort order (default 0 = at top)
+	st.TitleSortOrder = s.getIntSetting(kvTitleSortOrder, 0)
 
 	writeJSON(w, http.StatusOK, st)
 }
@@ -152,6 +159,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.SetKV(kvTimeMode, "digital")
 	}
 
+	// Save title sort order
+	_ = s.store.SetKV(kvTitleSortOrder, fmt.Sprintf("%d", req.TitleSortOrder))
+
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -164,4 +174,16 @@ func (s *Server) getStringSetting(key, def string) string {
 		return def
 	}
 	return v
+}
+
+func (s *Server) getIntSetting(key string, def int) int {
+	v, ok, err := s.store.GetKV(key)
+	if err != nil || !ok {
+		return def
+	}
+	var i int
+	if _, err := fmt.Sscanf(v, "%d", &i); err != nil {
+		return def
+	}
+	return i
 }

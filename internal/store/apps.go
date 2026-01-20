@@ -85,6 +85,11 @@ func (s *Store) MoveGroupAppsToUngrouped(groupID string) error {
 	return err
 }
 
+func (s *Store) DeleteAppsByGroupID(groupID string) error {
+	_, err := s.db.Exec(`DELETE FROM apps WHERE group_id = ?`, groupID)
+	return err
+}
+
 func (s *Store) AppByID(id string) (AppItem, bool, error) {
 	var a AppItem
 	err := s.db.QueryRow(`SELECT id, group_id, name, description, url, icon_path, icon_source, sort_order, created_at FROM apps WHERE id = ?`, id).

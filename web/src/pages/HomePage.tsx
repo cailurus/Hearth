@@ -1,4 +1,5 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { FaApple, FaBitcoin, FaEthereum, FaMicrosoft } from 'react-icons/fa'
 import { apiDelete, apiGet, apiPost, apiPut } from '../api'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
@@ -145,6 +146,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [addItemGroupId, setAddItemGroupId] = useState<string | null>(null)
     const [addItemGroupKind, setAddItemGroupKind] = useState<'system' | 'app'>('app')
     const [newAppName, setNewAppName] = useState('')
+    const [newAppDesc, setNewAppDesc] = useState('')
     const [newAppUrl, setNewAppUrl] = useState('')
     const [addErr, setAddErr] = useState<string | null>(null)
 
@@ -199,6 +201,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const [siteDraft, setSiteDraft] = useState<Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'> | null>(null)
     const [siteSaveErr, setSiteSaveErr] = useState<string | null>(null)
+
+    // Group drag-and-drop states
+    const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
+    const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null)
+    const draggingGroupIdRef = useRef<string | null>(null)
 
     const siteSaveSeqRef = useRef(0)
     const siteSaveTimerRef = useRef<number | null>(null)
@@ -268,6 +275,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         const kind = g && (g.kind === 'system' || g.name === '系统组件' || g.name === 'System Tools' || g.name === 'System Widgets') ? 'system' : 'app'
         setAddItemGroupKind(kind)
         setNewAppName('')
+        setNewAppDesc('')
         setNewAppUrl('')
         setAddItemOpen(true)
     }
@@ -363,12 +371,18 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const wNormalizeSeqRef = useRef(0)
 
     const editItemUrl = editItem?.url
-    const editItemDesc = editItem?.description
+    const editItemId = editItem?.id
+    // editItemDesc is accessed via editItem?.description when needed
 
+    // Initialize widgetLastSavedDescRef only when the modal opens or when switching to a different item.
+    // Do NOT re-run when editItemDesc changes (that would reset the ref after each save).
     useEffect(() => {
         if (!editOpen || !editItemUrl || !editItemUrl.startsWith('widget:')) return
-        widgetLastSavedDescRef.current = String(editItemDesc ?? '')
-    }, [editOpen, editItemUrl, editItemDesc])
+        // Read the current description from editItem at the time this effect runs
+        const desc = editItem?.description
+        widgetLastSavedDescRef.current = String(desc ?? '')
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editOpen, editItemId])
 
     const resolveCityToTimezone = useCallback(async (city: string) => {
         const res = await apiGet<{ timezone: string; city?: string }>(
@@ -665,6 +679,40 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }
 
+    const deleteGroup = async (groupId: string) => {
+        if (!isAdmin) return
+        try {
+            await apiDelete(`/api/groups/${groupId}`)
+            await reloadDashboard()
+        } catch {
+            // ignore
+        }
+    }
+
+    // Reorder groups, including title bar position
+    const reorderGroupsWithTitle = async (result: { groupIds: string[]; titlePosition: number }) => {
+        if (!isAdmin) return
+
+        const { groupIds, titlePosition } = result
+
+        try {
+            // First, reorder groups
+            if (groupIds.length > 0) {
+                await apiPost('/api/groups/reorder', { ids: groupIds })
+            }
+
+            // Then, update title sort order if it changed
+            if (settings && titlePosition !== (settings.titleSortOrder ?? 0)) {
+                const newSettings = { ...settings, titleSortOrder: titlePosition }
+                await apiPut('/api/settings', newSettings)
+            }
+
+            await reloadDashboard()
+        } catch (e2) {
+            setError(e2 instanceof Error ? e2.message : 'failed')
+        }
+    }
+
     const reorderItems = async (groupId: string | null, ids: string[]) => {
         if (!isAdmin) return
         if (!Array.isArray(ids) || ids.length === 0) return
@@ -751,7 +799,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             await apiPost('/api/apps', {
                 groupId: addItemGroupId,
                 name,
-                description: null,
+                description: newAppDesc.trim() || null,
                 url,
                 iconPath,
                 iconSource,
@@ -1043,6 +1091,44 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         })
     }, [groups])
 
+    // Helper function to compute new group order after drag (including title)
+    // Returns: { groupIds: string[], titlePosition: number }
+    const getNextGroupOrder = (fromId: string, toId: string): { groupIds: string[]; titlePosition: number } | null => {
+        // Build current order: title inserted among groups based on titlePosition
+        const titlePosition = settings?.titleSortOrder ?? 0
+        const groupIds = sortedGroups.map((g) => g.id)
+
+        // Build current visual order (same as render logic)
+        const currentOrder: string[] = []
+        let titleInserted = false
+        for (let i = 0; i < groupIds.length; i++) {
+            if (!titleInserted && i >= titlePosition) {
+                currentOrder.push('__title__')
+                titleInserted = true
+            }
+            currentOrder.push(groupIds[i])
+        }
+        if (!titleInserted) {
+            currentOrder.push('__title__')
+        }
+
+        const fromIndex = currentOrder.indexOf(fromId)
+        const toIndex = currentOrder.indexOf(toId)
+        if (fromIndex < 0 || toIndex < 0) return null
+        if (fromIndex === toIndex) return null
+
+        // Perform the move
+        const next = [...currentOrder]
+        next.splice(fromIndex, 1)
+        next.splice(toIndex, 0, fromId)
+
+        // Extract new titlePosition and groupIds
+        const newTitlePosition = next.indexOf('__title__')
+        const newGroupIds = next.filter((id) => id !== '__title__')
+
+        return { groupIds: newGroupIds, titlePosition: newTitlePosition }
+    }
+
     const hasSystemGroup = useMemo(() => {
         return groups.some((g) => g.kind === 'system' || g.name === '系统组件' || g.name === 'System Tools' || g.name === 'System Widgets')
     }, [groups])
@@ -1307,20 +1393,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             </div>
 
             <main className="mx-auto max-w-6xl px-4 pb-10 pt-[20vh] text-white">
-                <div className="mb-8 text-center">
-                    <h1 className="text-4xl font-semibold tracking-tight">{title}</h1>
-                    {settings?.time?.enabled ? (
-                        <div className="mt-3 flex items-center justify-center">
-                            <TimeDisplay
-                                now={now}
-                                timezone={systemTimezone}
-                                showSeconds={!!settings.time?.showSeconds}
-                                mode={settings.time?.mode || 'digital'}
-                            />
-                        </div>
-                    ) : null}
-                </div>
-
                 {error ? (
                     <div className="rounded-lg border border-white/10 bg-black/40 p-4 text-sm text-white/80">
                         {error}
@@ -1328,58 +1400,193 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 ) : null}
 
                 <div className="space-y-6">
-                    {hasUngrouped ? (
-                        <GroupBlock
-                            groupId={null}
-                            name={t('未分组', 'Ungrouped')}
-                            groupKind={'app'}
-                            items={groupItems(null)}
-                            isAdmin={isAdmin}
-                            onAdd={openAddForGroup}
-                            onEdit={openEditItem}
-                            onDelete={deleteItem}
-                            onReorder={reorderItems}
-                            weather={weather}
-                            weatherErr={weatherErr}
-                            weatherById={weatherById}
-                            weatherErrById={weatherErrById}
-                            marketsById={marketsById}
-                            marketsErrById={marketsErrById}
-                            holidaysById={holidaysById}
-                            holidaysErrById={holidaysErrById}
-                            metrics={metrics}
-                            netRate={netRate}
-                            localTimezone={systemTimezone}
-                            lang={lang}
-                        />
-                    ) : null}
+                    {/* Title block - draggable among groups */}
+                    {(() => {
+                        // titleSortOrder represents the index position of title among groups
+                        // 0 = before all groups, 1 = after first group, etc.
+                        const titlePosition = settings?.titleSortOrder ?? 0
 
-                    {sortedGroups.map((g) => (
-                        <GroupBlock
-                            key={g.id}
-                            groupId={g.id}
-                            name={displayGroupName(g.name)}
-                            groupKind={g.kind || 'app'}
-                            items={groupItems(g.id)}
-                            isAdmin={isAdmin}
-                            onAdd={openAddForGroup}
-                            onEdit={openEditItem}
-                            onDelete={deleteItem}
-                            onReorder={reorderItems}
-                            weather={weather}
-                            weatherErr={weatherErr}
-                            weatherById={weatherById}
-                            weatherErrById={weatherErrById}
-                            marketsById={marketsById}
-                            marketsErrById={marketsErrById}
-                            holidaysById={holidaysById}
-                            holidaysErrById={holidaysErrById}
-                            metrics={metrics}
-                            netRate={netRate}
-                            localTimezone={systemTimezone}
-                            lang={lang}
-                        />
-                    ))}
+                        // Build ordered list: groups first, then insert title at the right position
+                        const groupBlocks: { type: 'group'; id: string; group: Group }[] = sortedGroups.map((g) => ({
+                            type: 'group',
+                            id: g.id,
+                            group: g,
+                        }))
+
+                        // Build final render order
+                        const allBlocks: { type: 'title' | 'ungrouped' | 'group'; id: string; group?: Group }[] = []
+
+                        // Add ungrouped at the very beginning (always)
+                        if (hasUngrouped) {
+                            allBlocks.push({ type: 'ungrouped', id: '__ungrouped__' })
+                        }
+
+                        // Insert title at the right position among groups
+                        let titleInserted = false
+                        for (let i = 0; i < groupBlocks.length; i++) {
+                            if (!titleInserted && i >= titlePosition) {
+                                allBlocks.push({ type: 'title', id: '__title__' })
+                                titleInserted = true
+                            }
+                            allBlocks.push(groupBlocks[i])
+                        }
+                        // If title should be at the end
+                        if (!titleInserted) {
+                            allBlocks.push({ type: 'title', id: '__title__' })
+                        }
+
+                        // Render each block
+                        return allBlocks.map((block) => {
+                            if (block.type === 'title') {
+                                return (
+                                    <div
+                                        key="__title__"
+                                        draggable={isAdmin}
+                                        onDragStart={(e) => {
+                                            draggingGroupIdRef.current = '__title__'
+                                            e.dataTransfer.setData('text/plain', '__title__')
+                                            setTimeout(() => setDraggingGroupId('__title__'), 0)
+                                        }}
+                                        onDragEnd={() => {
+                                            draggingGroupIdRef.current = null
+                                            setDraggingGroupId(null)
+                                            setDropTargetGroupId(null)
+                                        }}
+                                        onDragOver={(e) => e.preventDefault()}
+                                        onDragEnter={(e) => {
+                                            e.preventDefault()
+                                            if (dropTargetGroupId !== '__title__') {
+                                                setDropTargetGroupId('__title__')
+                                            }
+                                        }}
+                                        onDrop={async (e) => {
+                                            e.preventDefault()
+                                            const fromId = draggingGroupIdRef.current || e.dataTransfer.getData('text/plain')
+                                            draggingGroupIdRef.current = null
+                                            setDraggingGroupId(null)
+                                            setDropTargetGroupId(null)
+                                            if (!fromId || fromId === '__title__') return
+                                            // Compute new order: move dragged group to title's position
+                                            const next = getNextGroupOrder(fromId, '__title__')
+                                            if (next) await reorderGroupsWithTitle(next)
+                                        }}
+                                        className={`mb-8 text-center transition-all ${isAdmin ? 'cursor-grab' : ''} ${draggingGroupId === '__title__' ? 'opacity-30' : ''
+                                            } ${dropTargetGroupId === '__title__' && draggingGroupId !== '__title__'
+                                                ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-transparent scale-[1.01]'
+                                                : ''
+                                            }`}
+                                    >
+                                        <h1 className="text-4xl font-semibold tracking-tight">{title}</h1>
+                                        {settings?.time?.enabled ? (
+                                            <div className="mt-3 flex items-center justify-center">
+                                                <TimeDisplay
+                                                    now={now}
+                                                    timezone={systemTimezone}
+                                                    showSeconds={!!settings.time?.showSeconds}
+                                                    mode={settings.time?.mode || 'digital'}
+                                                />
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                )
+                            }
+
+                            if (block.type === 'ungrouped') {
+                                return (
+                                    <GroupBlock
+                                        key="__ungrouped__"
+                                        groupId={null}
+                                        name={t('未分组', 'Ungrouped')}
+                                        groupKind={'app'}
+                                        items={groupItems(null)}
+                                        isAdmin={isAdmin}
+                                        onAdd={openAddForGroup}
+                                        onEdit={openEditItem}
+                                        onDelete={deleteItem}
+                                        onReorder={reorderItems}
+                                        weather={weather}
+                                        weatherErr={weatherErr}
+                                        weatherById={weatherById}
+                                        weatherErrById={weatherErrById}
+                                        marketsById={marketsById}
+                                        marketsErrById={marketsErrById}
+                                        holidaysById={holidaysById}
+                                        holidaysErrById={holidaysErrById}
+                                        metrics={metrics}
+                                        netRate={netRate}
+                                        localTimezone={systemTimezone}
+                                        lang={lang}
+                                    />
+                                )
+                            }
+
+                            // block.type === 'group'
+                            const g = block.group!
+                            return (
+                                <div
+                                    key={g.id}
+                                    draggable={isAdmin}
+                                    onDragStart={(e) => {
+                                        draggingGroupIdRef.current = g.id
+                                        e.dataTransfer.setData('text/plain', g.id)
+                                        setTimeout(() => setDraggingGroupId(g.id), 0)
+                                    }}
+                                    onDragEnd={() => {
+                                        draggingGroupIdRef.current = null
+                                        setDraggingGroupId(null)
+                                        setDropTargetGroupId(null)
+                                    }}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDragEnter={(e) => {
+                                        e.preventDefault()
+                                        if (dropTargetGroupId !== g.id) {
+                                            setDropTargetGroupId(g.id)
+                                        }
+                                    }}
+                                    onDrop={async (e) => {
+                                        e.preventDefault()
+                                        const fromId = draggingGroupIdRef.current || e.dataTransfer.getData('text/plain')
+                                        draggingGroupIdRef.current = null
+                                        setDraggingGroupId(null)
+                                        setDropTargetGroupId(null)
+                                        if (!fromId || fromId === g.id) return
+                                        const next = getNextGroupOrder(fromId, g.id)
+                                        if (next) await reorderGroupsWithTitle(next)
+                                    }}
+                                    className={`transition-all ${isAdmin ? 'cursor-grab' : ''} ${draggingGroupId === g.id ? 'opacity-30' : ''
+                                        } ${dropTargetGroupId === g.id && draggingGroupId !== g.id
+                                            ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-transparent scale-[1.01]'
+                                            : ''
+                                        }`}
+                                >
+                                    <GroupBlock
+                                        groupId={g.id}
+                                        name={displayGroupName(g.name)}
+                                        groupKind={g.kind || 'app'}
+                                        items={groupItems(g.id)}
+                                        isAdmin={isAdmin}
+                                        onAdd={openAddForGroup}
+                                        onEdit={openEditItem}
+                                        onDelete={deleteItem}
+                                        onDeleteGroup={deleteGroup}
+                                        onReorder={reorderItems}
+                                        weather={weather}
+                                        weatherErr={weatherErr}
+                                        weatherById={weatherById}
+                                        weatherErrById={weatherErrById}
+                                        marketsById={marketsById}
+                                        marketsErrById={marketsErrById}
+                                        holidaysById={holidaysById}
+                                        holidaysErrById={holidaysErrById}
+                                        metrics={metrics}
+                                        netRate={netRate}
+                                        localTimezone={systemTimezone}
+                                        lang={lang}
+                                    />
+                                </div>
+                            )
+                        })
+                    })()}
                 </div>
             </main>
 
@@ -1838,6 +2045,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             />
                         </label>
                         <label className="block text-sm">
+                            <div className="mb-1 text-white/70">{t('描述', 'Description')}</div>
+                            <input
+                                value={newAppDesc}
+                                onChange={(e) => setNewAppDesc(e.target.value)}
+                                placeholder={t('可选', 'Optional')}
+                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                            />
+                        </label>
+                        <label className="block text-sm">
                             <div className="mb-1 text-white/70">URL</div>
                             <input
                                 value={newAppUrl}
@@ -2198,6 +2414,7 @@ function GroupBlock({
     onAdd,
     onEdit,
     onDelete,
+    onDeleteGroup,
     onReorder,
     weather,
     weatherErr,
@@ -2220,6 +2437,7 @@ function GroupBlock({
     onAdd: (groupId: string | null) => void
     onEdit: (item: AppItem) => void
     onDelete: (id: string) => void
+    onDeleteGroup?: (groupId: string) => void
     onReorder: (groupId: string | null, ids: string[]) => Promise<void>
     weather: Weather | null
     weatherErr: string | null
@@ -2235,6 +2453,8 @@ function GroupBlock({
     lang: 'zh' | 'en'
 }) {
     const [draggingId, setDraggingId] = useState<string | null>(null)
+    const [dropTargetId, setDropTargetId] = useState<string | null>(null)
+    const draggingIdRef = useRef<string | null>(null)
 
     const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
 
@@ -2242,27 +2462,7 @@ function GroupBlock({
     const isWidgetItem = (it: AppItem) => !!it.url?.startsWith('widget:')
     const isSystemWidgetsOnly = isSystemGroup && items.length > 0 && items.every(isWidgetItem)
 
-    const renderItems = useMemo(() => {
-        if (!isSystemWidgetsOnly) return items
-        const byWidget = new Map<string, AppItem>()
-        for (const it of items) {
-            const widget = it.url?.startsWith('widget:') ? it.url.slice('widget:'.length) : null
-            if (!widget) continue
-            if (!byWidget.has(widget)) byWidget.set(widget, it)
-        }
-        const ordered: AppItem[] = []
-        for (const k of ['weather', 'holidays', 'markets', 'timezones', 'metrics']) {
-            const it = byWidget.get(k)
-            if (it) ordered.push(it)
-        }
-        // Append any unexpected widgets to keep behavior safe.
-        for (const it of items) {
-            if (!ordered.includes(it)) ordered.push(it)
-        }
-        return ordered
-    }, [isSystemWidgetsOnly, items])
-
-    const dragItems = isSystemWidgetsOnly ? renderItems : items
+    const dragItems = items
 
     const getNextOrder = (fromId: string, toId: string) => {
         const ids = dragItems.map((it) => it.id)
@@ -2273,8 +2473,7 @@ function GroupBlock({
 
         const next = [...ids]
         next.splice(fromIndex, 1)
-        const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex
-        next.splice(insertAt, 0, fromId)
+        next.splice(toIndex, 0, fromId)
         return next
     }
 
@@ -2283,14 +2482,30 @@ function GroupBlock({
             <div className="mb-3 flex items-center gap-2">
                 <h2 className="text-base font-semibold text-white/80">{name}</h2>
                 {isAdmin ? (
-                    <button
-                        onClick={() => onAdd(groupId)}
-                        className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-white/20 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
-                        aria-label="add"
-                        title={t('添加', 'Add')}
-                    >
-                        +
-                    </button>
+                    <>
+                        <button
+                            onClick={() => onAdd(groupId)}
+                            className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-white/20 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
+                            aria-label="add"
+                            title={t('添加', 'Add')}
+                        >
+                            +
+                        </button>
+                        {groupId && onDeleteGroup ? (
+                            <button
+                                onClick={() => {
+                                    if (window.confirm(t('确定要删除这个组及其所有内容吗？', 'Delete this group and all its contents?'))) {
+                                        onDeleteGroup(groupId)
+                                    }
+                                }}
+                                className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-red-500/50 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
+                                aria-label="delete group"
+                                title={t('删除组', 'Delete Group')}
+                            >
+                                −
+                            </button>
+                        ) : null}
+                    </>
                 ) : null}
             </div>
             <div
@@ -2303,7 +2518,7 @@ function GroupBlock({
                 {items.length === 0 ? (
                     <div className="col-span-full rounded-2xl border border-white/10 bg-black/40 p-3 text-sm text-white/60">{t('暂无内容', 'No items')}</div>
                 ) : (
-                    renderItems.map((a) => {
+                    items.map((a) => {
                         const widget = a.url?.startsWith('widget:') ? a.url.slice('widget:'.length) : null
                         if (widget) {
                             const cfg = safeParseJSON(a.description)
@@ -2326,39 +2541,62 @@ function GroupBlock({
                                             ? 'col-span-2 sm:col-span-1'
                                             : ''
 
-                            const widgetFixedHeightClass = isSystemWidgetsOnly ? 'h-[174px] sm:h-[194px]' : ''
+                            // For timezones widget on mobile, we need more height since it's 2x2 grid
+                            const widgetFixedHeightClass = isSystemWidgetsOnly
+                                ? (widget === 'timezones' ? 'h-auto min-h-[174px] sm:h-[194px]' : 'h-[174px] sm:h-[194px]')
+                                : (widget === 'timezones' ? 'h-auto' : '')
 
                             const widgetPadClass =
                                 widget === 'timezones' ? 'p-4' : widget === 'weather' ? 'p-4' : 'p-4'
 
+                            // When being dragged, show a ghost placeholder
+                            const isDragging = draggingId === a.id
+                            const isDropTarget = dropTargetId === a.id && draggingId && draggingId !== a.id
+
                             return (
                                 <div
                                     key={a.id}
-                                    className={`group/card relative flex flex-col rounded-2xl border border-white/10 bg-black/40 ${widgetPadClass} transition-colors transition-shadow hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 ${widgetCardClass} ${widgetFixedHeightClass} ${isAdmin && !isSystemWidgetsOnly ? 'cursor-move' : ''} ${draggingId === a.id ? 'opacity-80' : ''}`}
-                                    draggable={isAdmin && !isSystemWidgetsOnly}
+                                    className={`group/card relative flex flex-col rounded-2xl border bg-black/40 ${widgetPadClass} transition-all duration-200 ease-out ${widgetCardClass} ${widgetFixedHeightClass} ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30 border-dashed border-white/30 bg-white/5' : isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 border-white/10'}`}
+                                    draggable={isAdmin}
                                     onDragStart={(e) => {
-                                        if (isSystemWidgetsOnly) return
                                         if (!isAdmin) return
-                                        setDraggingId(a.id)
+                                        draggingIdRef.current = a.id
                                         e.dataTransfer.effectAllowed = 'move'
                                         e.dataTransfer.setData('text/plain', a.id)
+                                        // Delay state update so browser can capture drag image first
+                                        setTimeout(() => {
+                                            setDraggingId(a.id)
+                                        }, 0)
                                     }}
-                                    onDragEnd={() => setDraggingId(null)}
-                                    onDragOver={(e) => {
-                                        if (isSystemWidgetsOnly) return
+                                    onDragEnd={() => {
+                                        draggingIdRef.current = null
+                                        setDraggingId(null)
+                                        setDropTargetId(null)
+                                    }}
+                                    onDragEnter={(e) => {
                                         if (!isAdmin) return
-                                        const fromId = draggingId || e.dataTransfer.getData('text/plain')
+                                        const fromId = draggingIdRef.current
                                         if (!fromId || fromId === a.id) return
-                                        if (dragItems.findIndex((it) => it.id === fromId) < 0) return
+                                        e.preventDefault()
+                                        setDropTargetId(a.id)
+                                    }}
+                                    onDragOver={(e) => {
+                                        if (!isAdmin) return
+                                        const fromId = draggingIdRef.current
+                                        if (!fromId || fromId === a.id) return
                                         e.preventDefault()
                                         e.dataTransfer.dropEffect = 'move'
+                                        if (dropTargetId !== a.id) {
+                                            setDropTargetId(a.id)
+                                        }
                                     }}
                                     onDrop={async (e) => {
-                                        if (isSystemWidgetsOnly) return
                                         if (!isAdmin) return
                                         e.preventDefault()
-                                        const fromId = draggingId || e.dataTransfer.getData('text/plain')
+                                        const fromId = draggingIdRef.current || e.dataTransfer.getData('text/plain')
+                                        draggingIdRef.current = null
                                         setDraggingId(null)
+                                        setDropTargetId(null)
                                         if (!fromId || fromId === a.id) return
                                         const next = getNextOrder(fromId, a.id)
                                         if (!next) return
@@ -2411,41 +2649,41 @@ function GroupBlock({
                                             />
                                         ) : widget === 'metrics' ? (
                                             metrics ? (
-                                                <div className="space-y-3 text-xs text-white/85">
+                                                <div className="space-y-2 sm:space-y-3 text-[11px] sm:text-xs text-white/85 overflow-hidden">
                                                     {cfg?.showCpu !== false ? (
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="flex items-center gap-2"><Cpu className="h-4 w-4 text-white/70" />CPU</span>
-                                                            <span className="text-right">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />CPU</span>
+                                                            <span className="text-right min-w-0 truncate">
                                                                 {metrics.cpuModel ? <span className="mr-1">{shortenCpuModelName(metrics.cpuModel)} ·</span> : null}
                                                                 <span className="tabular-nums">{metrics.cpuPercent.toFixed(1)}%</span>
                                                             </span>
                                                         </div>
                                                     ) : null}
                                                     {cfg?.showMem !== false ? (
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="flex items-center gap-2"><MemoryStick className="h-4 w-4 text-white/70" />{t('内存', 'Memory')}</span>
-                                                            <span className="tabular-nums">
-                                                                {formatGiB(metrics.memUsed)}/{formatGiB(metrics.memTotal)} · {metrics.memPercent.toFixed(1)}%
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><MemoryStick className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('内存', 'Mem')}</span>
+                                                            <span className="tabular-nums text-right min-w-0 truncate">
+                                                                {formatGiB(metrics.memUsed)}/{formatGiB(metrics.memTotal)} · {metrics.memPercent.toFixed(0)}%
                                                             </span>
                                                         </div>
                                                     ) : null}
                                                     {cfg?.showDisk !== false ? (
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="flex items-center gap-2"><HardDrive className="h-4 w-4 text-white/70" />{t('磁盘', 'Disk')}</span>
-                                                            <span className="tabular-nums">
-                                                                {formatGiB(metrics.diskUsed)}/{formatGiB(metrics.diskTotal)} · {metrics.diskPercent.toFixed(1)}%
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><HardDrive className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('磁盘', 'Disk')}</span>
+                                                            <span className="tabular-nums text-right min-w-0 truncate">
+                                                                {formatGiB(metrics.diskUsed)}/{formatGiB(metrics.diskTotal)} · {metrics.diskPercent.toFixed(0)}%
                                                             </span>
                                                         </div>
                                                     ) : null}
 
                                                     {cfg?.showNet !== false ? (
                                                         <>
-                                                            <div className="flex items-center justify-between">
-                                                                <span className="flex items-center gap-2 text-white/85"><Upload className="h-4 w-4 text-white/70" />{t('上传', 'Upload')}</span>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('上传', 'Up')}</span>
                                                                 <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.upBps) : '—'}</span>
                                                             </div>
-                                                            <div className="flex items-center justify-between">
-                                                                <span className="flex items-center gap-2 text-white/85"><Download className="h-4 w-4 text-white/70" />{t('下载', 'Download')}</span>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('下载', 'Down')}</span>
                                                                 <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.downBps) : '—'}</span>
                                                             </div>
                                                         </>
@@ -2466,31 +2704,54 @@ function GroupBlock({
                             )
                         }
 
+                        // When being dragged, show a ghost placeholder
+                        const isDragging = draggingId === a.id
+                        const isDropTarget = dropTargetId === a.id && draggingId && draggingId !== a.id
+
                         return (
                             <div
                                 key={a.id}
-                                className={`group/card relative ${isAdmin ? 'cursor-move' : ''} ${draggingId === a.id ? 'opacity-80' : ''}`}
+                                className={`group/card relative transition-all duration-200 ease-out ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30' : ''}`}
                                 draggable={isAdmin}
                                 onDragStart={(e) => {
                                     if (!isAdmin) return
-                                    setDraggingId(a.id)
+                                    draggingIdRef.current = a.id
                                     e.dataTransfer.effectAllowed = 'move'
                                     e.dataTransfer.setData('text/plain', a.id)
+                                    // Delay state update so browser can capture drag image first
+                                    setTimeout(() => {
+                                        setDraggingId(a.id)
+                                    }, 0)
                                 }}
-                                onDragEnd={() => setDraggingId(null)}
+                                onDragEnd={() => {
+                                    draggingIdRef.current = null
+                                    setDraggingId(null)
+                                    setDropTargetId(null)
+                                }}
+                                onDragEnter={(e) => {
+                                    if (!isAdmin) return
+                                    const fromId = draggingIdRef.current
+                                    if (!fromId || fromId === a.id) return
+                                    e.preventDefault()
+                                    setDropTargetId(a.id)
+                                }}
                                 onDragOver={(e) => {
                                     if (!isAdmin) return
-                                    const fromId = draggingId || e.dataTransfer.getData('text/plain')
+                                    const fromId = draggingIdRef.current
                                     if (!fromId || fromId === a.id) return
-                                    if (dragItems.findIndex((it) => it.id === fromId) < 0) return
                                     e.preventDefault()
                                     e.dataTransfer.dropEffect = 'move'
+                                    if (dropTargetId !== a.id) {
+                                        setDropTargetId(a.id)
+                                    }
                                 }}
                                 onDrop={async (e) => {
                                     if (!isAdmin) return
                                     e.preventDefault()
-                                    const fromId = draggingId || e.dataTransfer.getData('text/plain')
+                                    const fromId = draggingIdRef.current || e.dataTransfer.getData('text/plain')
+                                    draggingIdRef.current = null
                                     setDraggingId(null)
+                                    setDropTargetId(null)
                                     if (!fromId || fromId === a.id) return
                                     const next = getNextOrder(fromId, a.id)
                                     if (!next) return
@@ -2531,21 +2792,10 @@ function GroupBlock({
                                     target="_blank"
                                     rel="noreferrer"
                                     draggable={false}
-                                    className="group block rounded-2xl border border-white/10 bg-black/40 p-3 transition-colors transition-shadow hover:bg-black/30 hover:shadow-lg hover:shadow-black/20"
+                                    className={`group block rounded-2xl border bg-black/40 p-3 transition-all duration-200 ease-out hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 ${isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'border-white/10'}`}
                                 >
                                     <div className="flex items-center gap-3">
-                                        {a.iconPath ? (
-                                            <img
-                                                src={`/assets/icons/${a.iconPath}`}
-                                                alt=""
-                                                className="h-9 w-9 rounded-lg bg-white/10 object-contain"
-                                                loading="lazy"
-                                            />
-                                        ) : (
-                                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-semibold">
-                                                {a.name.slice(0, 1).toUpperCase()}
-                                            </div>
-                                        )}
+                                        <AppIcon iconPath={a.iconPath} name={a.name} />
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-medium text-white">{a.name}</div>
                                             {a.description ? (
@@ -2604,27 +2854,83 @@ function ComboBox<T>({
     onPick: (opt: T) => void
 }) {
     const [open, setOpen] = useState(false)
-    const [query, setQuery] = useState('')
+    const [query, setQuery] = useState(value) // Initialize with value
     const inputId = useId()
+    const inputRef = useRef<HTMLInputElement>(null)
+    const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
 
     useEffect(() => {
         setQuery(value)
     }, [value])
 
+    // Calculate dropdown position when opening
+    useLayoutEffect(() => {
+        if (!open || !inputRef.current) {
+            setDropdownPos(null)
+            return
+        }
+        const rect = inputRef.current.getBoundingClientRect()
+        const viewportHeight = window.innerHeight
+        const spaceBelow = viewportHeight - rect.bottom
+        const spaceAbove = rect.top
+        const dropdownHeight = 224 // max-h-56 = 14rem = 224px
+
+        // Open upward if not enough space below and more space above
+        const openUp = spaceBelow < dropdownHeight && spaceAbove > spaceBelow
+
+        setDropdownPos({
+            top: openUp ? rect.top : rect.bottom + 4,
+            left: rect.left,
+            width: rect.width,
+            openUp,
+        })
+    }, [open])
+
     const filtered = useMemo(() => {
-        const q = (query || '').trim().toLowerCase()
-        const list = q
-            ? options
-                .map((o) => ({ o, label: getOptionLabel(o) }))
-                .filter(({ label }) => label.toLowerCase().includes(q))
-                .slice(0, 20)
-            : options.map((o) => ({ o, label: getOptionLabel(o) })).slice(0, 12)
-        return list
-    }, [query, options, getOptionLabel])
+        // Don't filter the options - the API already returns search results
+        // Just take the first 12 options as-is
+        return options.map((o) => ({ o, label: getOptionLabel(o) })).slice(0, 12)
+    }, [options, getOptionLabel])
+
+    const dropdown = open && filtered.length > 0 && dropdownPos ? (
+        createPortal(
+            <div
+                className="fixed z-[9999] overflow-hidden rounded-lg border border-white/10 bg-black/90 text-white shadow-lg shadow-black/40 backdrop-blur"
+                style={{
+                    top: dropdownPos.openUp ? 'auto' : dropdownPos.top,
+                    bottom: dropdownPos.openUp ? `${window.innerHeight - dropdownPos.top + 4}px` : 'auto',
+                    left: dropdownPos.left,
+                    width: dropdownPos.width,
+                }}
+            >
+                <div
+                    className="max-h-56 overflow-auto overscroll-contain py-1"
+                    onWheel={(e) => e.stopPropagation()}
+                >
+                    {filtered.map(({ o, label }) => (
+                        <button
+                            key={label}
+                            type="button"
+                            className="flex w-full items-center px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                            onMouseDown={(e) => {
+                                e.preventDefault()
+                                onPick(o)
+                                setOpen(false)
+                            }}
+                        >
+                            {highlightMatch(label, query)}
+                        </button>
+                    ))}
+                </div>
+            </div>,
+            document.body
+        )
+    ) : null
 
     return (
         <div className="relative">
             <input
+                ref={inputRef}
                 id={inputId}
                 value={value}
                 onChange={(e) => {
@@ -2639,30 +2945,10 @@ function ComboBox<T>({
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                 autoComplete="off"
             />
-            {open && filtered.length > 0 ? (
-                <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/80 text-white shadow-lg shadow-black/40 backdrop-blur">
-                    <div className="max-h-56 overflow-auto py-1">
-                        {filtered.map(({ o, label }) => (
-                            <button
-                                key={label}
-                                type="button"
-                                className="flex w-full items-center px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
-                                onMouseDown={(e) => {
-                                    // prevent blur before click
-                                    e.preventDefault()
-                                    onPick(o)
-                                    setOpen(false)
-                                }}
-                            >
-                                {highlightMatch(label, query)}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            ) : null}
+            {dropdown}
             {open ? (
                 <div
-                    className="fixed inset-0 z-40"
+                    className="fixed inset-0 z-[9998]"
                     onMouseDown={() => setOpen(false)}
                     aria-hidden="true"
                 />
@@ -2685,6 +2971,37 @@ function highlightMatch(text: string, query: string): ReactNode {
             <span className="font-semibold text-white">{mid}</span>
             <span className="text-white/80">{post}</span>
         </>
+    )
+}
+
+/**
+ * App 图标组件，带错误处理
+ * 如果图标加载失败，显示名称首字母作为 fallback
+ */
+function AppIcon({ iconPath, name }: { iconPath: string | null; name: string }) {
+    const [hasError, setHasError] = useState(false)
+
+    // Reset error state when iconPath changes
+    useEffect(() => {
+        setHasError(false)
+    }, [iconPath])
+
+    if (!iconPath || hasError) {
+        return (
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-sm font-semibold">
+                {name.slice(0, 1).toUpperCase()}
+            </div>
+        )
+    }
+
+    return (
+        <img
+            src={`/assets/icons/${iconPath}`}
+            alt=""
+            className="h-9 w-9 rounded-lg bg-white/10 object-contain"
+            loading="lazy"
+            onError={() => setHasError(true)}
+        />
     )
 }
 
@@ -2783,26 +3100,26 @@ function WeatherWidget({ data, error, lang }: { data: Weather | null; error?: st
     const daily = (Array.isArray(data.daily) ? data.daily : []).slice(0, 5)
 
     return (
-        <div className="space-y-2">
-            <div className="flex items-center gap-3">
-                <WeatherGlyph code={data.weatherCode} windKph={data.windSpeedKph} size={42} />
-                <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold text-white">{cityShort(data.city) || (lang === 'en' ? 'Configured location' : '已配置位置')}</div>
-                    <div className="mt-1 flex items-baseline gap-3 overflow-hidden text-white/80">
-                        <span className="text-xl font-semibold text-white">{data.temperatureC.toFixed(1)}°C</span>
-                        <span className="min-w-0 truncate text-sm text-white/70">{cond}</span>
-                        <span className="shrink-0 whitespace-nowrap text-sm text-white/70">{lang === 'en' ? 'Wind' : '风'} {data.windSpeedKph.toFixed(1)} km/h</span>
+        <div className="space-y-2 overflow-hidden">
+            <div className="flex items-center gap-2 sm:gap-3">
+                <WeatherGlyph code={data.weatherCode} windKph={data.windSpeedKph} size={38} />
+                <div className="min-w-0 flex-1">
+                    <div className="truncate text-[13px] sm:text-sm font-semibold text-white">{cityShort(data.city) || (lang === 'en' ? 'Configured location' : '已配置位置')}</div>
+                    <div className="mt-0.5 sm:mt-1 flex flex-wrap items-baseline gap-x-2 sm:gap-x-3 gap-y-0.5 overflow-hidden text-white/80">
+                        <span className="text-lg sm:text-xl font-semibold text-white">{data.temperatureC.toFixed(1)}°C</span>
+                        <span className="min-w-0 truncate text-[12px] sm:text-sm text-white/70">{cond}</span>
+                        <span className="hidden sm:inline shrink-0 whitespace-nowrap text-sm text-white/70">{lang === 'en' ? 'Wind' : '风'} {data.windSpeedKph.toFixed(1)} km/h</span>
                     </div>
                 </div>
             </div>
 
             {daily.length ? (
-                <div className="-mt-1 grid grid-cols-5 gap-1.5">
+                <div className="-mt-1 grid grid-cols-5 gap-0.5 sm:gap-1.5">
                     {daily.map((d) => (
-                        <div key={d.date} className="flex flex-col items-center gap-0.5 px-1 py-0.5 text-center">
-                            <div className="text-[12px] leading-tight text-white/65">{weekdayLabel(d.date, lang)}</div>
-                            <WeatherGlyph code={d.weatherCode ?? 0} windKph={0} size={34} />
-                            <div className="tabular-nums text-[12px] leading-tight text-white/80">
+                        <div key={d.date} className="flex flex-col items-center gap-0 sm:gap-0.5 px-0.5 sm:px-1 py-0.5 text-center">
+                            <div className="text-[10px] sm:text-[12px] leading-tight text-white/65">{weekdayLabel(d.date, lang)}</div>
+                            <WeatherGlyph code={d.weatherCode ?? 0} windKph={0} size={28} />
+                            <div className="tabular-nums text-[10px] sm:text-[12px] leading-tight text-white/80">
                                 <span className="text-white/90">{Math.round(d.tempMaxC)}°</span>
                                 <span className="text-white/50">/{Math.round(d.tempMinC)}°</span>
                             </div>
@@ -2827,7 +3144,7 @@ function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; er
     }
 
     return (
-        <div className="space-y-1.5 text-[11.5px]">
+        <div className="space-y-1.5 text-[10.5px] sm:text-[11.5px] overflow-hidden">
             {items.map((it) => {
                 const sym = String(it.symbol || '').toUpperCase() || '—'
                 const name = prettifyCompanyName(String(it.name || '').trim())
@@ -2839,23 +3156,23 @@ function MarketsWidget({ data, error, lang }: { data: MarketsResponse | null; er
                 const series = Array.isArray(it.series) ? (it.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n)) : []
 
                 return (
-                    <div key={sym} className="flex items-center gap-2">
-                        <div className="min-w-0 w-32 shrink-0">
-                            <div className="flex items-baseline gap-1.5">
+                    <div key={sym} className="flex items-center gap-1.5 sm:gap-2">
+                        <div className="min-w-0 w-20 sm:w-32 shrink-0">
+                            <div className="flex items-baseline gap-1 sm:gap-1.5">
                                 <MarketLogo symbol={sym} />
                                 <div className="truncate font-medium text-white/90">{sym}</div>
-                                {arrow ? <div className={`text-[10.5px] leading-none ${pctColor}`}>{arrow}</div> : null}
+                                {arrow ? <div className={`text-[9.5px] sm:text-[10.5px] leading-none ${pctColor}`}>{arrow}</div> : null}
                             </div>
-                            <div className="truncate text-[9.5px] font-normal leading-tight text-white/45">{name || '—'}</div>
+                            <div className="hidden sm:block truncate text-[9.5px] font-normal leading-tight text-white/45">{name || '—'}</div>
                         </div>
 
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 hidden sm:block">
                             <MiniSparkline series={series} />
                         </div>
 
-                        <div className="w-20 shrink-0 text-right">
+                        <div className="w-16 sm:w-20 shrink-0 text-right">
                             <div className="tabular-nums text-white/90">{price}</div>
-                            <div className={`tabular-nums text-[10.5px] leading-tight ${pctColor}`}>{pctLabel}</div>
+                            <div className={`tabular-nums text-[9.5px] sm:text-[10.5px] leading-tight ${pctColor}`}>{pctLabel}</div>
                         </div>
                     </div>
                 )
@@ -3405,28 +3722,30 @@ const DEFAULT_CLOCKS: WorldClockCity[] = [
 function TimezonesWidget({ localTimezone, clocks }: { localTimezone: string; clocks: WorldClockCity[] }) {
     const smoothNow = useNow(200)
 
-    // English-only: do not translate or localize labels; keep it deterministic.
+    // Prefer user-configured city name; fall back to timezone-derived label only if city is empty.
     const labels = useMemo(() => {
         return clocks.map((c) => {
-            const tzLabel = ianaCityLabel(String(c.timezone ?? '').trim())
-            if (tzLabel) return tzLabel
             const raw = String(c.city ?? '').trim()
-            return cityShort(raw) || raw
+            const short = cityShort(raw)
+            if (short) return short
+            if (raw) return raw
+            // Fallback: extract city name from timezone (e.g., "Asia/Shanghai" → "Shanghai")
+            return ianaCityLabel(String(c.timezone ?? '').trim()) || 'City'
         })
     }, [clocks])
 
     return (
         <div className="flex h-full w-full flex-col justify-start pt-1">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                 {clocks.map((c, idx) => {
                     const meta = tzDeltaMeta(smoothNow, localTimezone, c.timezone)
                     return (
                         <div key={`${c.timezone}-${idx}`} className="flex w-full flex-col items-center text-center">
                             <AppleClock now={smoothNow} timezone={c.timezone} day={meta.isDay} />
-                            <div className="mt-2.5">
-                                <div className="text-[12px] font-semibold leading-tight text-white/90">{labels[idx] || cityShort(c.city) || c.city}</div>
-                                <div className="text-[11px] leading-tight text-white/60">{meta.dayLabel}</div>
-                                <div className="text-[11px] leading-tight text-white/60">{meta.offsetLabel}</div>
+                            <div className="mt-1.5 sm:mt-2.5 min-w-0 max-w-full">
+                                <div className="truncate text-[11px] sm:text-[12px] font-semibold leading-tight text-white/90">{labels[idx] || cityShort(c.city) || c.city}</div>
+                                <div className="text-[10px] sm:text-[11px] leading-tight text-white/60">{meta.dayLabel}</div>
+                                <div className="text-[10px] sm:text-[11px] leading-tight text-white/60">{meta.offsetLabel}</div>
                             </div>
                         </div>
                     )

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,9 +32,12 @@ type Resolver struct {
 	IconsDir string
 }
 
+// Common browser User-Agent for better compatibility with websites
+const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 func New(iconsDir string) *Resolver {
 	return &Resolver{
-		Client:   &http.Client{Timeout: 12 * time.Second},
+		Client:   &http.Client{Timeout: 15 * time.Second},
 		IconsDir: iconsDir,
 	}
 }
@@ -100,7 +104,9 @@ func hashString(s string) string {
 
 func (r *Resolver) fetchHTML(ctx context.Context, pageURL string) ([]byte, string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
-	req.Header.Set("User-Agent", "Hearth/0.1")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return nil, pageURL, err
@@ -133,7 +139,14 @@ func parseTitleAndIcon(baseURL string, htmlBytes []byte) (string, string) {
 	}
 
 	var title string
-	var iconHref string
+
+	// Collect all icon candidates with priority
+	type iconCandidate struct {
+		href     string
+		priority int // higher is better
+		size     int // parsed from sizes attribute
+	}
+	var icons []iconCandidate
 
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
@@ -141,19 +154,63 @@ func parseTitleAndIcon(baseURL string, htmlBytes []byte) (string, string) {
 			title = strings.TrimSpace(n.FirstChild.Data)
 		}
 		if n.Type == html.ElementNode && n.Data == "link" {
-			var rel, href string
+			var rel, href, sizes string
 			for _, a := range n.Attr {
 				switch strings.ToLower(a.Key) {
 				case "rel":
 					rel = strings.ToLower(a.Val)
 				case "href":
 					href = a.Val
+				case "sizes":
+					sizes = strings.ToLower(a.Val)
 				}
 			}
 			if href != "" && strings.Contains(rel, "icon") {
-				if iconHref == "" || strings.Contains(rel, "apple-touch-icon") {
-					iconHref = resolveURL(baseURL, href)
+				priority := 0
+				size := 0
+
+				// Priority based on rel type
+				if strings.Contains(rel, "apple-touch-icon") {
+					priority = 100 // Apple touch icons are usually high quality
+				} else if strings.Contains(rel, "icon") {
+					priority = 50
+				} else if strings.Contains(rel, "shortcut") {
+					priority = 10
 				}
+
+				// Parse size (e.g., "192x192" -> 192)
+				if sizes != "" && sizes != "any" {
+					parts := strings.Split(sizes, "x")
+					if len(parts) >= 1 {
+						if s, err := strconv.Atoi(parts[0]); err == nil {
+							size = s
+							// Prefer larger icons up to 192px
+							if size >= 128 && size <= 192 {
+								priority += 30
+							} else if size >= 64 {
+								priority += 20
+							} else if size >= 32 {
+								priority += 10
+							}
+						}
+					}
+				}
+
+				// Prefer PNG and SVG over ICO
+				hrefLower := strings.ToLower(href)
+				if strings.HasSuffix(hrefLower, ".svg") {
+					priority += 25
+				} else if strings.HasSuffix(hrefLower, ".png") {
+					priority += 20
+				} else if strings.HasSuffix(hrefLower, ".webp") {
+					priority += 15
+				}
+
+				icons = append(icons, iconCandidate{
+					href:     resolveURL(baseURL, href),
+					priority: priority,
+					size:     size,
+				})
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -162,7 +219,17 @@ func parseTitleAndIcon(baseURL string, htmlBytes []byte) (string, string) {
 	}
 	walk(doc)
 
-	return title, iconHref
+	// Select best icon
+	var bestIcon string
+	bestPriority := -1
+	for _, ic := range icons {
+		if ic.priority > bestPriority {
+			bestPriority = ic.priority
+			bestIcon = ic.href
+		}
+	}
+
+	return title, bestIcon
 }
 
 func resolveURL(base, href string) string {
@@ -253,7 +320,8 @@ func (r *Resolver) saveDataURI(dataURI string, pageKey string) (string, error) {
 // actual icon content is the same.
 func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, pageKey string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, iconURL, nil)
-	req.Header.Set("User-Agent", "Hearth/0.1")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
 	resp, err := r.Client.Do(req)
 	if err != nil {
 		return "", err

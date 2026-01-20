@@ -17,11 +17,14 @@ dev:
 	@set -e; \
 	ADDR="$${HEARTH_ADDR:-$(HEARTH_ADDR)}"; \
 	echo "Starting Hearth dev (backend + web)..."; \
-	echo "- Backend: http://localhost$$ADDR"; \
-	echo "- Web dev:  http://localhost:5173"; \
-	(cd web && npm run dev) & WEB_PID=$$!; \
+	echo "- Installing frontend deps if needed..."; \
+	(cd web && npm ci --prefer-offline --silent 2>/dev/null || npm ci); \
+	echo "- Backend: http://0.0.0.0$$ADDR"; \
+	echo "- Web dev:  http://0.0.0.0:5173"; \
+	echo "  (Access from phone using your local IP)"; \
+	(cd web && npm run dev -- --host 0.0.0.0) & WEB_PID=$$!; \
 	trap 'kill $$WEB_PID 2>/dev/null || true' INT TERM EXIT; \
-	HEARTH_ADDR="$$ADDR" go run ./cmd/hearth
+	HEARTH_ADDR="0.0.0.0$$ADDR" go run ./cmd/hearth
 
 clean:
 	@set -e; \

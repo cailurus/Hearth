@@ -18,6 +18,8 @@ export type Settings = {
     weather: {
         city: string
     }
+
+    titleSortOrder?: number // Position of title block among groups, default 0 (top)
 }
 
 export type Group = {
