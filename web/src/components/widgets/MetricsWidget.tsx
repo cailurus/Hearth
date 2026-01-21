@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Cpu, HardDrive, MemoryStick, Upload, Download } from 'lucide-react'
 import type { HostMetrics } from '../../types'
-import { formatBytes, formatPercent } from '../../utils/helpers'
+import { formatBytes, formatPercent } from '../../utils'
 
 /**
  * 智能缩减 CPU 型号名称

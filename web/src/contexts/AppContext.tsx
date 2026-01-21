@@ -1,8 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
-import type { AppItem, BackgroundInfo, Group, Settings } from '../types'
+import type { AppItem, BackgroundInfo, Group, Settings, Me, Language, CreateAppRequest, UpdateAppRequest } from '../types'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api'
-
-type Me = { admin: boolean }
 
 interface AppContextType {
     // State
@@ -13,7 +11,7 @@ interface AppContextType {
     apps: AppItem[]
     loading: boolean
     error: string | null
-    lang: 'zh' | 'en'
+    lang: Language
 
     // Computed
     isAdmin: boolean
@@ -27,8 +25,8 @@ interface AppContextType {
     updateGroup: (id: string, name: string) => Promise<void>
     deleteGroup: (id: string) => Promise<void>
     reorderGroups: (ids: string[]) => Promise<void>
-    createApp: (data: CreateAppData) => Promise<AppItem>
-    updateApp: (id: string, data: UpdateAppData) => Promise<void>
+    createApp: (data: CreateAppRequest) => Promise<AppItem>
+    updateApp: (id: string, data: UpdateAppRequest) => Promise<void>
     deleteApp: (id: string) => Promise<void>
     reorderApps: (groupId: string | null, ids: string[]) => Promise<void>
     refreshBackground: (provider?: string) => Promise<void>
@@ -36,24 +34,6 @@ interface AppContextType {
 
     // Translation helper
     t: (zh: string, en: string) => string
-}
-
-interface CreateAppData {
-    groupId: string | null
-    name: string
-    description: string | null
-    url: string
-    iconPath: string | null
-    iconSource: string | null
-}
-
-interface UpdateAppData {
-    groupId: string | null
-    name: string
-    description: string | null
-    url: string
-    iconPath: string | null
-    iconSource: string | null
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -67,7 +47,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
-    const lang: 'zh' | 'en' = settings?.language === 'en' ? 'en' : 'zh'
+    const lang: Language = settings?.language === 'en' ? 'en' : 'zh'
     const isAdmin = !!me?.admin
 
     const t = useCallback(
@@ -157,7 +137,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
 
     const createApp = useCallback(
-        async (data: CreateAppData) => {
+        async (data: CreateAppRequest) => {
             const app = await apiPost<AppItem>('/api/apps', data)
             await reload()
             return app
@@ -166,7 +146,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
 
     const updateApp = useCallback(
-        async (id: string, data: UpdateAppData) => {
+        async (id: string, data: UpdateAppRequest) => {
             await apiPut(`/api/apps/${id}`, data)
             await reload()
         },

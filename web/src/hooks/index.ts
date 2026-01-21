@@ -1,2 +1,5 @@
 export { useNow } from './useNow'
 export { useDashboard } from './useDashboard'
+export { useAuth, type UseAuthResult } from './useAuth'
+export { useDragSort, type UseDragSortResult, type DragHandlers, type UseDragSortOptions } from './useDragSort'
+export { useWidgets, type UseWidgetsResult } from './useWidgets'

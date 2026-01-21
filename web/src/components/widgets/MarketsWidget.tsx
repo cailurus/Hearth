@@ -1,5 +1,6 @@
+import { useEffect, useMemo, useState } from 'react'
 import { FaApple, FaMicrosoft, FaBitcoin, FaEthereum } from 'react-icons/fa'
-import type { MarketsResponse, MarketQuote } from '../../types'
+import type { MarketsResponse } from '../../types'
 
 interface MarketsWidgetProps {
     data: MarketsResponse | null
@@ -8,129 +9,199 @@ interface MarketsWidgetProps {
 }
 
 /**
- * 行情组件
+ * 行情组件 - 显示股票/加密货币行情
  */
 export function MarketsWidget({ data, error, lang }: MarketsWidgetProps) {
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
-
-    if (error) {
-        return (
-            <div className="flex items-center justify-center h-full text-red-400 text-sm">
-                {error}
-            </div>
-        )
+    if (!data) {
+        const msg = String(error || '').trim()
+        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
     }
 
-    if (!data || !data.items || data.items.length === 0) {
-        return (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                {t('加载中...', 'Loading...')}
-            </div>
-        )
+    const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
+    if (items.length === 0) {
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">—</div>
     }
 
     return (
-        <div className="grid grid-cols-2 gap-2 p-4 h-full">
-            {data.items.slice(0, 4).map((quote, i) => (
-                <MarketCard key={i} quote={quote} />
-            ))}
+        <div className="flex flex-col gap-1.5 sm:gap-2">
+            {items.map((it) => {
+                const sym = String(it.symbol || '').toUpperCase() || '—'
+                const name = prettifyCompanyName(String(it.name || '').trim())
+                const price = typeof it.priceUsd === 'number' && Number.isFinite(it.priceUsd) ? `$${it.priceUsd.toFixed(2)}` : '—'
+                const pct = typeof it.changePct24h === 'number' && Number.isFinite(it.changePct24h) ? it.changePct24h : null
+                const pctLabel = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+                const pctColor = pct == null ? 'text-white/60' : pct >= 0 ? 'text-green-400/80' : 'text-red-400/80'
+                const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼'
+                const series = Array.isArray(it.series) ? (it.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n)) : []
+
+                return (
+                    <div key={sym} className="flex items-center gap-2 text-[10px] sm:text-[11px]">
+                        {/* Symbol and name - fixed width */}
+                        <div className="w-[72px] sm:w-20 shrink-0">
+                            <div className="flex items-center gap-1">
+                                <MarketLogo symbol={sym} />
+                                <span className="truncate font-medium text-white/90">{sym}</span>
+                                {arrow ? <span className={`text-[9px] sm:text-[10px] ${pctColor}`}>{arrow}</span> : null}
+                            </div>
+                            <div className="truncate text-[8px] sm:text-[9px] text-white/45">{name || '—'}</div>
+                        </div>
+
+                        {/* Sparkline - always visible, fills remaining space */}
+                        <div className="min-w-[40px] flex-1">
+                            <MiniSparkline series={series} />
+                        </div>
+
+                        {/* Price and change - fixed width */}
+                        <div className="w-[60px] sm:w-[68px] shrink-0 text-right">
+                            <div className="tabular-nums text-white/90">{price}</div>
+                            <div className={`tabular-nums text-[9px] sm:text-[10px] ${pctColor}`}>{pctLabel}</div>
+                        </div>
+                    </div>
+                )
+            })}
         </div>
     )
 }
 
-function MarketCard({ quote }: { quote: MarketQuote }) {
-    const isPositive = quote.changePct24h >= 0
-    const changeColor = isPositive ? 'text-green-500' : 'text-red-500'
-    const changePrefix = isPositive ? '+' : ''
-
-    return (
-        <div className="flex flex-col bg-white/50 dark:bg-gray-800/50 rounded-lg p-2">
-            <div className="flex items-center gap-1.5 mb-1">
-                <MarketIcon symbol={quote.symbol} />
-                <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">
-                    {quote.symbol}
-                </span>
-            </div>
-
-            <div className="text-sm font-mono text-gray-900 dark:text-white">
-                ${formatPrice(quote.priceUsd)}
-            </div>
-
-            <div className={`text-xs font-mono ${changeColor}`}>
-                {changePrefix}
-                {quote.changePct24h.toFixed(2)}%
-            </div>
-
-            {quote.series && quote.series.length > 1 && (
-                <MiniChart series={quote.series} positive={isPositive} />
-            )}
-        </div>
-    )
+function normalizeMarketSymbol(symbol: string): 'AAPL' | 'MSFT' | 'BTC' | 'ETH' | '' {
+    const raw = String(symbol || '').trim().toUpperCase()
+    if (!raw) return ''
+    const compact = raw.replace(/[^A-Z0-9]/g, '')
+    if (compact.startsWith('AAPL')) return 'AAPL'
+    if (compact.startsWith('MSFT')) return 'MSFT'
+    if (compact.startsWith('BTC')) return 'BTC'
+    if (compact.startsWith('ETH')) return 'ETH'
+    return ''
 }
 
-function MarketIcon({ symbol }: { symbol: string }) {
-    const normalized = symbol.toUpperCase()
-    const iconClass = 'w-4 h-4'
-
-    switch (normalized) {
+function iconForMarketSymbol(symbol: string) {
+    switch (normalizeMarketSymbol(symbol)) {
         case 'AAPL':
-            return <FaApple className={iconClass} />
+            return FaApple
         case 'MSFT':
-            return <FaMicrosoft className={iconClass} />
+            return FaMicrosoft
         case 'BTC':
-            return <FaBitcoin className={`${iconClass} text-orange-500`} />
+            return FaBitcoin
         case 'ETH':
-            return <FaEthereum className={`${iconClass} text-indigo-500`} />
+            return FaEthereum
         default:
-            return (
-                <span className="w-4 h-4 flex items-center justify-center text-[10px] font-bold bg-gray-200 dark:bg-gray-700 rounded">
-                    {normalized.charAt(0)}
-                </span>
-            )
+            return null
     }
 }
 
-function MiniChart({ series, positive }: { series: number[]; positive: boolean }) {
-    if (series.length < 2) return null
+function MarketLogo({ symbol }: { symbol: string }) {
+    const norm = useMemo(() => normalizeMarketSymbol(symbol), [symbol])
+    const Icon = useMemo(() => iconForMarketSymbol(symbol), [symbol])
+    const localUrl = useMemo(() => (norm ? `/market-icons/${norm}.png` : ''), [norm])
+    const cachedUrl = useMemo(() => {
+        if (!symbol) return ''
+        const qs = new URLSearchParams({ symbol: String(symbol) })
+        return `/api/widgets/markets/icon?${qs.toString()}`
+    }, [symbol])
 
-    const min = Math.min(...series)
-    const max = Math.max(...series)
-    const range = max - min || 1
+    const [maskUrl, setMaskUrl] = useState<string>('')
+    useEffect(() => {
+        let cancelled = false
 
-    const height = 20
-    const width = 60
-    const points = series
-        .map((v, i) => {
-            const x = (i / (series.length - 1)) * width
-            const y = height - ((v - min) / range) * height
-            return `${x},${y}`
-        })
+        const tryLoad = (url: string) =>
+            new Promise<boolean>((resolve) => {
+                if (!url) return resolve(false)
+                const img = new Image()
+                img.onload = () => resolve(true)
+                img.onerror = () => resolve(false)
+                img.src = url
+            })
+
+            ; (async () => {
+                if (localUrl && (await tryLoad(localUrl))) {
+                    if (!cancelled) setMaskUrl(localUrl)
+                    return
+                }
+                if (cachedUrl && (await tryLoad(cachedUrl))) {
+                    if (!cancelled) setMaskUrl(cachedUrl)
+                    return
+                }
+                if (!cancelled) setMaskUrl('')
+            })()
+
+        return () => {
+            cancelled = true
+        }
+    }, [localUrl, cachedUrl])
+
+    if (maskUrl) {
+        return (
+            <span
+                aria-hidden="true"
+                className="h-3 w-3 shrink-0 self-center text-white/70"
+                style={{
+                    display: 'inline-block',
+                    backgroundColor: 'currentColor',
+                    WebkitMaskImage: `url(${maskUrl})`,
+                    WebkitMaskRepeat: 'no-repeat',
+                    WebkitMaskSize: 'contain',
+                    WebkitMaskPosition: 'center',
+                    maskImage: `url(${maskUrl})`,
+                    maskRepeat: 'no-repeat',
+                    maskSize: 'contain',
+                    maskPosition: 'center',
+                }}
+            />
+        )
+    }
+
+    if (!Icon) return null
+    return <Icon aria-hidden="true" className="h-3 w-3 shrink-0 self-center text-white/70" />
+}
+
+function prettifyCompanyName(name: string) {
+    const s = String(name || '').trim()
+    if (!s) return ''
+    const hasLetters = /[A-Za-z]/.test(s)
+    const isAllCaps = hasLetters && s === s.toUpperCase() && s !== s.toLowerCase()
+    if (!isAllCaps) return s
+    return s
+        .toLowerCase()
+        .split(/\s+/g)
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
         .join(' ')
+}
 
-    const color = positive ? '#22c55e' : '#ef4444'
+function MiniSparkline({ series }: { series: number[] }) {
+    const pts = Array.isArray(series) ? series.filter((n) => Number.isFinite(n)) : []
+    if (pts.length < 2) {
+        return <div className="h-6 w-full rounded bg-white/5" />
+    }
+
+    const width = 120
+    const height = 24
+    const min = Math.min(...pts)
+    const max = Math.max(...pts)
+    const span = max - min
+    const yOf = (v: number) => {
+        if (!Number.isFinite(v)) return height / 2
+        if (span <= 0) return height / 2
+        const t = (v - min) / span
+        return (1 - t) * (height - 6) + 2
+    }
+
+    const step = width / (pts.length - 1)
+    const d = pts.map((v, i) => `${(i * step).toFixed(2)},${yOf(v).toFixed(2)}`).join(' ')
 
     return (
-        <svg className="mt-1" width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-            <polyline
-                points={points}
-                fill="none"
-                stroke={color}
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-6 w-full" aria-hidden="true">
+            <g className="text-white/20">
+                <line x1="0" y1={height - 1} x2={width} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1="0" y1={height - 4} x2="0" y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1={width / 2} y1={height - 4} x2={width / 2} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+                <line x1={width} y1={height - 4} x2={width} y2={height - 1} stroke="currentColor" strokeWidth="1" />
+            </g>
+            <g className="text-white/65">
+                <polyline points={d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+            </g>
         </svg>
     )
-}
-
-function formatPrice(price: number): string {
-    if (price >= 1000) {
-        return price.toLocaleString('en-US', { maximumFractionDigits: 0 })
-    }
-    if (price >= 1) {
-        return price.toFixed(2)
-    }
-    return price.toFixed(4)
 }
 
 export default MarketsWidget

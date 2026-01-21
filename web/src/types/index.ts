@@ -1,7 +1,5 @@
 /**
  * 类型定义统一导出
- * 
- * 为保持向后兼容，此文件重新导出 types/ 目录中的所有类型
  */
 
 // 业务模型
@@ -25,7 +23,7 @@ export type {
     GroupKind,
     BackgroundProvider,
     MarketKind,
-} from './types/models'
+} from './models'
 
 // API 类型
 export type {
@@ -46,7 +44,7 @@ export type {
     CreateAppRequest,
     UpdateAppRequest,
     IconResolveRequest,
-} from './types/api'
+} from './api'
 
 // UI 类型
 export type {
@@ -62,4 +60,4 @@ export type {
     DragState,
     NetRate,
     Position,
-} from './types/ui'
+} from './ui'

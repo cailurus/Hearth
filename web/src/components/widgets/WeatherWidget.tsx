@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import type { Weather } from '../../types'
 import { cityShort } from '../../utils/helpers'
 
@@ -9,144 +8,171 @@ interface WeatherWidgetProps {
 }
 
 /**
- * 天气组件
+ * 天气组件 - 显示当前天气和5日预报
  */
 export function WeatherWidget({ data, error, lang }: WeatherWidgetProps) {
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
-
-    const weatherDescription = useMemo(() => {
-        if (!data) return ''
-        return getWeatherDescription(data.weatherCode, lang)
-    }, [data, lang])
-
-    if (error) {
-        return (
-            <div className="flex items-center justify-center h-full text-red-400 text-sm">
-                {error}
-            </div>
-        )
-    }
-
     if (!data) {
-        return (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                {t('加载中...', 'Loading...')}
-            </div>
-        )
+        const msg = String(error || '').trim()
+        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
     }
+    const cond = weatherCodeLabel(data.weatherCode, lang)
 
-    const weatherIcon = getWeatherIcon(data.weatherCode)
+    const daily = (Array.isArray(data.daily) ? data.daily : []).slice(0, 5)
 
     return (
-        <div className="flex flex-col h-full p-4">
-            <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
-                    {cityShort(data.city)}
-                </span>
-                <span className="text-3xl">{weatherIcon}</span>
+        <div className="flex flex-col gap-2">
+            {/* Current weather - responsive layout */}
+            <div className="grid grid-cols-5 gap-1.5 items-center">
+                <div className="flex items-center justify-center">
+                    <WeatherGlyph code={data.weatherCode} windKph={data.windSpeedKph} className="w-10 h-10 sm:w-11 sm:h-11" />
+                </div>
+                <div className="col-span-4 min-w-0 flex flex-col justify-center">
+                    <div className="truncate text-sm font-semibold text-white">{cityShort(data.city) || (lang === 'en' ? 'Configured location' : '已配置位置')}</div>
+                    <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-white/80">
+                        <span className="text-lg sm:text-xl font-semibold text-white">{data.temperatureC.toFixed(1)}°C</span>
+                        <span className="text-xs sm:text-sm text-white/70">{cond}</span>
+                        <span className="text-xs sm:text-sm text-white/70 whitespace-nowrap">{lang === 'en' ? 'Wind' : '风'} {data.windSpeedKph.toFixed(1)} km/h</span>
+                    </div>
+                </div>
             </div>
 
-            <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-light text-gray-900 dark:text-white">
-                    {Math.round(data.temperatureC)}
-                </span>
-                <span className="text-xl text-gray-400">°C</span>
-            </div>
-
-            <div className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                {weatherDescription}
-            </div>
-
-            {data.daily && data.daily.length > 0 && (
-                <div className="mt-auto pt-3 flex gap-2 overflow-x-auto">
-                    {data.daily.slice(0, 5).map((day, i) => (
-                        <div
-                            key={i}
-                            className="flex flex-col items-center text-xs text-gray-500 dark:text-gray-400 min-w-[40px]"
-                        >
-                            <span>{formatDayName(day.date, lang)}</span>
-                            <span className="text-lg my-1">{getWeatherIcon(day.weatherCode)}</span>
-                            <span>
-                                {Math.round(day.tempMaxC)}° / {Math.round(day.tempMinC)}°
-                            </span>
+            {/* 5-day forecast - responsive */}
+            {daily.length ? (
+                <div className="grid grid-cols-5 gap-1">
+                    {daily.map((d) => (
+                        <div key={d.date} className="flex flex-col items-center gap-0.5 text-center">
+                            <div className="text-[10px] sm:text-[11px] leading-tight text-white/65">{weekdayLabel(d.date, lang)}</div>
+                            <WeatherGlyph code={d.weatherCode ?? 0} windKph={0} className="w-7 h-7 sm:w-8 sm:h-8" />
+                            <div className="tabular-nums text-[10px] sm:text-[11px] leading-tight text-white/80">
+                                <span className="text-white/90">{Math.round(d.tempMaxC)}°</span>
+                                <span className="text-white/50">/{Math.round(d.tempMinC)}°</span>
+                            </div>
                         </div>
                     ))}
                 </div>
-            )}
+            ) : null}
         </div>
     )
 }
 
-function formatDayName(dateStr: string, lang: 'zh' | 'en'): string {
-    try {
-        const date = new Date(dateStr)
-        const today = new Date()
-        const tomorrow = new Date(today)
-        tomorrow.setDate(today.getDate() + 1)
-
-        if (date.toDateString() === today.toDateString()) {
-            return lang === 'en' ? 'Today' : '今天'
-        }
-        if (date.toDateString() === tomorrow.toDateString()) {
-            return lang === 'en' ? 'Tmrw' : '明天'
-        }
-
-        return date.toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN', { weekday: 'short' })
-    } catch {
-        return dateStr
+function WeatherGlyph({ code, windKph, className = 'w-10 h-10' }: { code: number; windKph: number; className?: string }) {
+    const kind = weatherKind(code)
+    if (kind === 'sun') {
+        return (
+            <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" className="text-white" />
+                <g className="animate-pulse text-white/90">
+                    <path d="M12 2v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M12 19v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M2 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M19 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M4.2 4.2l2.1 2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M17.7 17.7l2.1 2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M19.8 4.2l-2.1 2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M6.3 17.7l-2.1 2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </g>
+            </svg>
+        )
     }
+    if (kind === 'rain') {
+        return (
+            <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 16a4 4 0 0 1 0-8 5 5 0 0 1 9.8 1.3A3.5 3.5 0 0 1 17.5 16H7Z" stroke="currentColor" strokeWidth="2" className="text-white" />
+                <g className="text-white/90">
+                    <path d="M9 18l-1 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-bounce" />
+                    <path d="M13 18l-1 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-bounce" style={{ animationDelay: '120ms' }} />
+                    <path d="M17 18l-1 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-bounce" style={{ animationDelay: '240ms' }} />
+                </g>
+            </svg>
+        )
+    }
+    if (kind === 'snow') {
+        return (
+            <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 16a4 4 0 0 1 0-8 5 5 0 0 1 9.8 1.3A3.5 3.5 0 0 1 17.5 16H7Z" stroke="currentColor" strokeWidth="2" className="text-white" />
+                <g className="text-white/90 animate-pulse">
+                    <circle cx="9" cy="19" r="1" fill="currentColor" />
+                    <circle cx="13" cy="19" r="1" fill="currentColor" />
+                    <circle cx="17" cy="19" r="1" fill="currentColor" />
+                </g>
+            </svg>
+        )
+    }
+    if (kind === 'storm') {
+        return (
+            <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 16a4 4 0 0 1 0-8 5 5 0 0 1 9.8 1.3A3.5 3.5 0 0 1 17.5 16H7Z" stroke="currentColor" strokeWidth="2" className="text-white" />
+                <path d="M13 16l-2 4h2l-1 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white animate-pulse" />
+            </svg>
+        )
+    }
+    if (kind === 'fog') {
+        return (
+            <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 12h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-white/90" />
+                <path d="M6 16h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-white/70" />
+                <path d="M8 20h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-white/60" />
+            </svg>
+        )
+    }
+    // clouds / default
+    return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M7 16a4 4 0 0 1 0-8 5 5 0 0 1 9.8 1.3A3.5 3.5 0 0 1 17.5 16H7Z" stroke="currentColor" strokeWidth="2" className="text-white" />
+            {windKph >= 18 ? (
+                <path d="M5 19h9c2 0 2-2 0-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="text-white/80 animate-pulse" />
+            ) : null}
+        </svg>
+    )
 }
 
-function getWeatherIcon(code: number): string {
-    // WMO Weather interpretation codes
-    // https://open-meteo.com/en/docs
-    if (code === 0) return '☀️' // Clear sky
-    if (code === 1) return '🌤️' // Mainly clear
-    if (code === 2) return '⛅' // Partly cloudy
-    if (code === 3) return '☁️' // Overcast
-    if (code >= 45 && code <= 48) return '🌫️' // Fog
-    if (code >= 51 && code <= 55) return '🌧️' // Drizzle
-    if (code >= 56 && code <= 57) return '🌧️' // Freezing drizzle
-    if (code >= 61 && code <= 65) return '🌧️' // Rain
-    if (code >= 66 && code <= 67) return '🌧️' // Freezing rain
-    if (code >= 71 && code <= 77) return '❄️' // Snow
-    if (code >= 80 && code <= 82) return '🌦️' // Rain showers
-    if (code >= 85 && code <= 86) return '🌨️' // Snow showers
-    if (code === 95) return '⛈️' // Thunderstorm
-    if (code >= 96 && code <= 99) return '⛈️' // Thunderstorm with hail
-    return '🌡️'
+function weatherKind(code: number): 'sun' | 'cloud' | 'rain' | 'snow' | 'storm' | 'fog' {
+    if (code === 0) return 'sun'
+    if (code === 1 || code === 2 || code === 3) return 'cloud'
+    if (code === 45 || code === 48) return 'fog'
+    if ((code >= 51 && code <= 57) || (code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return 'rain'
+    if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) return 'snow'
+    if (code >= 95) return 'storm'
+    return 'cloud'
 }
 
-function getWeatherDescription(code: number, lang: 'zh' | 'en'): string {
-    const descriptions: Record<number, [string, string]> = {
-        0: ['晴', 'Clear sky'],
-        1: ['晴间多云', 'Mainly clear'],
-        2: ['多云', 'Partly cloudy'],
-        3: ['阴', 'Overcast'],
-        45: ['雾', 'Fog'],
-        48: ['雾凇', 'Depositing rime fog'],
-        51: ['小毛毛雨', 'Light drizzle'],
-        53: ['毛毛雨', 'Moderate drizzle'],
-        55: ['大毛毛雨', 'Dense drizzle'],
-        61: ['小雨', 'Slight rain'],
-        63: ['中雨', 'Moderate rain'],
-        65: ['大雨', 'Heavy rain'],
-        71: ['小雪', 'Slight snow'],
-        73: ['中雪', 'Moderate snow'],
-        75: ['大雪', 'Heavy snow'],
-        77: ['雪粒', 'Snow grains'],
-        80: ['小阵雨', 'Slight rain showers'],
-        81: ['阵雨', 'Moderate rain showers'],
-        82: ['大阵雨', 'Violent rain showers'],
-        85: ['小阵雪', 'Slight snow showers'],
-        86: ['大阵雪', 'Heavy snow showers'],
-        95: ['雷暴', 'Thunderstorm'],
-        96: ['雷暴伴有小冰雹', 'Thunderstorm with slight hail'],
-        99: ['雷暴伴有大冰雹', 'Thunderstorm with heavy hail'],
+function weatherCodeLabel(code: number, lang: 'zh' | 'en'): string {
+    const zh = {
+        clear: '晴',
+        partly: '多云',
+        overcast: '阴',
+        fog: '雾',
+        rain: '雨',
+        snow: '雪',
+        storm: '雷暴',
+        code: (c: number) => `天气码 ${c}`,
     }
+    const en = {
+        clear: 'Clear',
+        partly: 'Partly cloudy',
+        overcast: 'Overcast',
+        fog: 'Fog',
+        rain: 'Rain',
+        snow: 'Snow',
+        storm: 'Thunderstorm',
+        code: (c: number) => `Code ${c}`,
+    }
+    const dict = lang === 'en' ? en : zh
+    if (code === 0) return dict.clear
+    if (code === 1 || code === 2) return dict.partly
+    if (code === 3) return dict.overcast
+    if (code === 45 || code === 48) return dict.fog
+    if ((code >= 51 && code <= 57) || (code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return dict.rain
+    if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) return dict.snow
+    if (code >= 95) return dict.storm
+    return dict.code(code)
+}
 
-    const [zh, en] = descriptions[code] || ['未知', 'Unknown']
-    return lang === 'en' ? en : zh
+function weekdayLabel(dateStr: string, lang: 'zh' | 'en'): string {
+    const d = new Date(`${dateStr}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return dateStr
+    return new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'zh-CN', { weekday: 'short' }).format(d)
 }
 
 export default WeatherWidget

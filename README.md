@@ -96,15 +96,36 @@ make build
 ./dist/hearth
 ```
 
-## 📁 Data Storage
+## 📁 Data Storage & Persistence
 
-Data is stored in `/data` (container) or `./data` (local):
+All data (including user credentials, app links, settings) is stored in `/data`:
 
 ```
 data/
-├── hearth.db    # SQLite database
+├── hearth.db    # SQLite database (users, apps, settings)
 ├── icons/       # Cached app icons
 └── cache/       # Background images
+```
+
+### Persisting Data Across Container Updates
+
+To ensure your data survives container updates, mount a volume or host directory:
+
+**Using Docker named volume (recommended):**
+```bash
+docker run -d -v hearth-data:/data cailurus/hearth:latest
+```
+
+**Using host directory:**
+```bash
+docker run -d -v /path/to/my/data:/data cailurus/hearth:latest
+```
+
+When updating the container, your data remains intact:
+```bash
+docker pull cailurus/hearth:latest
+docker stop hearth && docker rm hearth
+docker run -d --name hearth -p 8787:8787 -v hearth-data:/data cailurus/hearth:latest
 ```
 
 ## 📄 License
