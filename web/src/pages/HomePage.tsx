@@ -170,12 +170,19 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         if (initialDialog === 'login') setLoginOpen(true)
     }, [initialDialog])
 
-    // Background refresh favicons for all custom apps on page load
+    // Background refresh favicons for custom apps in auto mode on page load
     useEffect(() => {
         if (apps.length === 0) return
 
-        // Only refresh non-widget apps that have URLs
-        const customApps = apps.filter((a) => !a.url.startsWith('widget:') && a.url.trim())
+        const autoIconSources = new Set(['site', 'fallback', 'google', 'auto'])
+
+        // Only refresh non-widget apps that have URLs and auto icon sources
+        const customApps = apps.filter((a) => {
+            if (a.url.startsWith('widget:') || !a.url.trim()) return false
+            if (a.iconPath?.startsWith('lucide:')) return false
+            if (!a.iconSource) return true
+            return autoIconSources.has(a.iconSource)
+        })
         if (customApps.length === 0) return
 
         let cancelled = false
@@ -240,11 +247,16 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         if (item.iconPath?.startsWith('lucide:')) {
             setEditLucideIcon(item.iconPath.slice('lucide:'.length))
             setEditIconMode('lucide')
+            setEditIconUrl('')
+        } else if (item.iconSource === 'url') {
+            setEditLucideIcon(null)
+            setEditIconMode('url')
+            setEditIconUrl(item.iconPath ?? '')
         } else {
             setEditLucideIcon(null)
             setEditIconMode('auto')
+            setEditIconUrl('')
         }
-        setEditIconUrl('')
         setIconResolving(false)
 
         const widgetType = widgetKindFromUrl(item.url)
@@ -591,22 +603,21 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
         if (!isWidget) {
             // Handle Lucide icon selection
-            if (editIconMode === 'lucide' && editLucideIcon) {
-                iconPath = `lucide:${editLucideIcon}`
-                iconSource = 'lucide'
-            } else {
-                setIconResolving(true)
-                try {
-                    if (editIconMode === 'auto') {
-                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
-                        iconPath = res.iconPath || null
-                        iconSource = res.iconSource || null
-                    } else if (editIconMode === 'url' && editIconUrl.trim()) {
-                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url: editIconUrl.trim() })
-                        iconPath = res.iconPath || null
-                        iconSource = res.iconSource || null
-                    }
-                } catch {
+                if (editIconMode === 'lucide' && editLucideIcon) {
+                    iconPath = `lucide:${editLucideIcon}`
+                    iconSource = 'lucide'
+                } else {
+                    setIconResolving(true)
+                    try {
+                        if (editIconMode === 'auto') {
+                            const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
+                            iconPath = res.iconPath || null
+                            iconSource = res.iconSource || null
+                        } else if (editIconMode === 'url' && editIconUrl.trim()) {
+                            iconPath = editIconUrl.trim()
+                            iconSource = 'url'
+                        }
+                    } catch {
                     // keep existing icon if resolve fails
                 } finally {
                     setIconResolving(false)

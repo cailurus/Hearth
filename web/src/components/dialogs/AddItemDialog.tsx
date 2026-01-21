@@ -209,21 +209,16 @@ export function AddItemDialog({
 
                 // If using custom icon URL
                 if (iconMode === 'url' && iconUrl.trim()) {
-                    try {
-                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url: iconUrl.trim() })
-                        await onSubmit({
-                            groupId,
-                            name: trimmedName,
-                            description: desc || null,
-                            url: trimmedUrl,
-                            iconPath: res.iconPath || null,
-                            iconSource: res.iconSource || null,
-                        })
-                        onClose()
-                        return
-                    } catch {
-                        // If icon URL resolution fails, continue without icon
-                    }
+                    await onSubmit({
+                        groupId,
+                        name: trimmedName,
+                        description: desc || null,
+                        url: trimmedUrl,
+                        iconPath: iconUrl.trim(),
+                        iconSource: 'url',
+                    })
+                    onClose()
+                    return
                 }
 
                 // Auto mode: Use pre-resolved icon if available, otherwise fetch again
@@ -273,6 +268,9 @@ export function AddItemDialog({
     const getCurrentPreviewIcon = () => {
         if (iconMode === 'lucide' && selectedLucideIcon) {
             return { type: 'lucide' as const, name: selectedLucideIcon }
+        }
+        if (iconMode === 'url' && iconUrl.trim()) {
+            return { type: 'url' as const, src: iconUrl.trim() }
         }
         if (iconMode === 'auto' && previewIcon) {
             return { type: 'url' as const, src: previewIcon }

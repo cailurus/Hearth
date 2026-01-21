@@ -51,9 +51,13 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         )
     }
 
+    const src = iconPath.startsWith('http') || iconPath.startsWith('data:')
+        ? iconPath
+        : `/assets/icons/${iconPath}`
+
     return (
         <img
-            src={`/assets/icons/${iconPath}`}
+            src={src}
             alt=""
             className={`${sizeClass} rounded-lg bg-white/10 object-contain`}
             loading="lazy"

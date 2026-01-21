@@ -130,9 +130,11 @@ export function EditItemDialog({
     }, [setEditLucideIcon, setEditIconMode, setEditIconUrl])
 
     // Get current icon for preview
-    const currentIconPath = editLucideIcon 
-        ? `lucide:${editLucideIcon}` 
-        : editItem?.iconPath
+    const currentIconPath = editIconMode === 'lucide' && editLucideIcon
+        ? `lucide:${editLucideIcon}`
+        : editIconMode === 'url'
+            ? editIconUrl
+            : editItem?.iconPath
 
     return (
         <Modal
