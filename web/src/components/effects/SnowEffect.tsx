@@ -17,6 +17,8 @@ interface Snowflake {
     speed: number
     drift: number
     opacity: number
+    rotation: number
+    spin: number
 }
 
 function SnowCanvas() {
@@ -53,6 +55,8 @@ function SnowCanvas() {
             speed: 0.6 + Math.random() * 1.6,
             drift: -0.6 + Math.random() * 1.2,
             opacity: 0.35 + Math.random() * 0.45,
+            rotation: Math.random() * Math.PI * 2,
+            spin: -0.01 + Math.random() * 0.02,
         })
 
         const initFlakes = () => {
@@ -75,13 +79,41 @@ function SnowCanvas() {
             for (let i = 0; i < flakesRef.current.length; i++) {
                 const flake = flakesRef.current[i]
 
-                ctx.beginPath()
-                ctx.fillStyle = `rgba(255, 255, 255, ${flake.opacity})`
-                ctx.arc(flake.x, flake.y, flake.radius, 0, Math.PI * 2)
-                ctx.fill()
+                ctx.save()
+                ctx.translate(flake.x, flake.y)
+                ctx.rotate(flake.rotation)
+                ctx.strokeStyle = `rgba(255, 255, 255, ${flake.opacity})`
+                ctx.lineWidth = Math.max(0.6, flake.radius * 0.35)
+
+                const arm = flake.radius * 3.2
+                const twig = flake.radius * 1.4
+
+                for (let k = 0; k < 6; k++) {
+                    const angle = (Math.PI / 3) * k
+                    const x = Math.cos(angle) * arm
+                    const y = Math.sin(angle) * arm
+
+                    ctx.beginPath()
+                    ctx.moveTo(0, 0)
+                    ctx.lineTo(x, y)
+
+                    const nx = Math.cos(angle + Math.PI / 6) * twig
+                    const ny = Math.sin(angle + Math.PI / 6) * twig
+                    const px = Math.cos(angle - Math.PI / 6) * twig
+                    const py = Math.sin(angle - Math.PI / 6) * twig
+
+                    ctx.moveTo(x * 0.6, y * 0.6)
+                    ctx.lineTo(x * 0.6 + nx, y * 0.6 + ny)
+                    ctx.moveTo(x * 0.6, y * 0.6)
+                    ctx.lineTo(x * 0.6 + px, y * 0.6 + py)
+                    ctx.stroke()
+                }
+
+                ctx.restore()
 
                 flake.x += flake.drift
                 flake.y += flake.speed
+                flake.rotation += flake.spin
 
                 if (flake.y > height + 8 || flake.x < -10 || flake.x > width + 10) {
                     flakesRef.current[i] = createFlake(false)
