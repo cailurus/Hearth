@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -24,12 +27,13 @@ import (
 type Result struct {
 	Title      string
 	IconPath   string // local file name within icons dir
-	IconSource string // site|fallback
+	IconSource string // site|fallback|google
 }
 
 type Resolver struct {
-	Client   *http.Client
-	IconsDir string
+	Client         *http.Client
+	InsecureClient *http.Client // For sites with self-signed certs
+	IconsDir       string
 }
 
 // Common browser User-Agent for better compatibility with websites
@@ -37,7 +41,13 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 
 func New(iconsDir string) *Resolver {
 	return &Resolver{
-		Client:   &http.Client{Timeout: 15 * time.Second},
+		Client: &http.Client{Timeout: 15 * time.Second},
+		InsecureClient: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
 		IconsDir: iconsDir,
 	}
 }
@@ -51,49 +61,110 @@ func (r *Resolver) ResolveAndCache(ctx context.Context, pageURL string) (Result,
 	// Generate a unique key based on the original page URL
 	pageKey := hashString(pageURL)
 
+	// Try to fetch HTML and parse icons
 	htmlBytes, finalURL, err := r.fetchHTML(ctx, u.String())
 	if err != nil {
-		fallback := resolveURL(finalURL, "/favicon.ico")
-		iconFile, err2 := r.downloadIconForPage(ctx, fallback, pageKey)
-		if err2 != nil {
-			return Result{}, err
-		}
-		return Result{IconPath: iconFile, IconSource: "fallback"}, nil
+		slog.Debug("failed to fetch HTML", "url", pageURL, "error", err)
+		// Try direct favicon paths as fallback
+		return r.tryFallbacks(ctx, u, pageKey)
 	}
 
 	title, iconHref := parseTitleAndIcon(finalURL, htmlBytes)
-	if iconHref == "" {
-		iconHref = resolveURL(finalURL, "/favicon.ico")
-		iconFile, err := r.downloadIconForPage(ctx, iconHref, pageKey)
-		if err != nil {
-			return Result{Title: title}, nil
-		}
-		return Result{Title: title, IconPath: iconFile, IconSource: "fallback"}, nil
-	}
 
-	// Handle data: URI (base64 encoded icons)
-	if strings.HasPrefix(iconHref, "data:") {
-		iconFile, err := r.saveDataURI(iconHref, pageKey)
-		if err != nil {
-			fallback := resolveURL(finalURL, "/favicon.ico")
-			if iconFile2, err2 := r.downloadIconForPage(ctx, fallback, pageKey); err2 == nil {
-				return Result{Title: title, IconPath: iconFile2, IconSource: "fallback"}, nil
+	// If we found an icon in HTML, try to download it
+	if iconHref != "" {
+		// Handle data: URI (base64 encoded icons)
+		if strings.HasPrefix(iconHref, "data:") {
+			iconFile, err := r.saveDataURI(iconHref, pageKey)
+			if err == nil {
+				return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
 			}
-			return Result{Title: title}, nil
+			slog.Debug("failed to save data URI", "error", err)
+		} else {
+			iconFile, err := r.downloadIconForPage(ctx, iconHref, pageKey)
+			if err == nil {
+				return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
+			}
+			slog.Debug("failed to download icon from HTML", "url", iconHref, "error", err)
 		}
-		return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
 	}
 
-	iconFile, err := r.downloadIconForPage(ctx, iconHref, pageKey)
-	if err != nil {
-		fallback := resolveURL(finalURL, "/favicon.ico")
-		if iconFile2, err2 := r.downloadIconForPage(ctx, fallback, pageKey); err2 == nil {
-			return Result{Title: title, IconPath: iconFile2, IconSource: "fallback"}, nil
-		}
-		return Result{Title: title}, nil
+	// Try fallback methods
+	result, err := r.tryFallbacks(ctx, u, pageKey)
+	if err == nil {
+		result.Title = title
+		return result, nil
 	}
 
-	return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
+	// If all failed, return title only
+	return Result{Title: title}, nil
+}
+
+// tryFallbacks tries multiple fallback methods to get an icon
+func (r *Resolver) tryFallbacks(ctx context.Context, u *url.URL, pageKey string) (Result, error) {
+	baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+
+	// Common favicon paths to try
+	fallbackPaths := []string{
+		"/favicon.ico",
+		"/favicon.png",
+		"/apple-touch-icon.png",
+		"/apple-touch-icon-precomposed.png",
+		"/apple-touch-icon-180x180.png",
+		"/apple-touch-icon-152x152.png",
+		"/apple-touch-icon-120x120.png",
+	}
+
+	for _, p := range fallbackPaths {
+		iconURL := baseURL + p
+		iconFile, err := r.downloadIconForPage(ctx, iconURL, pageKey)
+		if err == nil {
+			return Result{IconPath: iconFile, IconSource: "fallback"}, nil
+		}
+	}
+
+	// Try Google's favicon service as last resort (only for public domains)
+	if !isPrivateHost(u.Host) {
+		googleURL := fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=128", u.Host)
+		iconFile, err := r.downloadIconForPage(ctx, googleURL, pageKey)
+		if err == nil {
+			return Result{IconPath: iconFile, IconSource: "google"}, nil
+		}
+		slog.Debug("google favicon service failed", "host", u.Host, "error", err)
+	}
+
+	return Result{}, errors.New("no icon found")
+}
+
+// isPrivateHost checks if the host is a private/internal address
+func isPrivateHost(host string) bool {
+	// Remove port if present
+	h := host
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		h = host[:idx]
+	}
+
+	// Check common private patterns
+	if h == "localhost" || strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".lan") {
+		return true
+	}
+
+	// Check private IP ranges (simplified)
+	if strings.HasPrefix(h, "10.") ||
+		strings.HasPrefix(h, "192.168.") ||
+		strings.HasPrefix(h, "172.16.") ||
+		strings.HasPrefix(h, "172.17.") ||
+		strings.HasPrefix(h, "172.18.") ||
+		strings.HasPrefix(h, "172.19.") ||
+		strings.HasPrefix(h, "172.2") ||
+		strings.HasPrefix(h, "172.30.") ||
+		strings.HasPrefix(h, "172.31.") ||
+		h == "127.0.0.1" ||
+		h == "::1" {
+		return true
+	}
+
+	return false
 }
 
 // hashString returns a short hash of the input string
@@ -103,11 +174,30 @@ func hashString(s string) string {
 }
 
 func (r *Resolver) fetchHTML(ctx context.Context, pageURL string) ([]byte, string, error) {
+	// Try with regular client first
+	htmlBytes, finalURL, err := r.fetchHTMLWithClient(ctx, pageURL, r.Client)
+	if err != nil {
+		// If it failed due to TLS error, retry with insecure client
+		if strings.Contains(err.Error(), "certificate") ||
+			strings.Contains(err.Error(), "x509") ||
+			strings.Contains(err.Error(), "tls") {
+			slog.Debug("retrying with insecure client due to TLS error", "url", pageURL)
+			return r.fetchHTMLWithClient(ctx, pageURL, r.InsecureClient)
+		}
+		return nil, pageURL, err
+	}
+	return htmlBytes, finalURL, nil
+}
+
+func (r *Resolver) fetchHTMLWithClient(ctx context.Context, pageURL string, client *http.Client) ([]byte, string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	resp, err := r.Client.Do(req)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
+	req.Header.Set("Accept-Encoding", "identity") // Avoid gzip issues
+	req.Header.Set("Connection", "keep-alive")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, pageURL, err
 	}
@@ -115,7 +205,7 @@ func (r *Resolver) fetchHTML(ctx context.Context, pageURL string) ([]byte, strin
 
 	finalURL := resp.Request.URL.String()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, finalURL, errors.New("bad status")
+		return nil, finalURL, fmt.Errorf("bad status: %d", resp.StatusCode)
 	}
 	ct := resp.Header.Get("Content-Type")
 	if ct != "" {
@@ -319,16 +409,32 @@ func (r *Resolver) saveDataURI(dataURI string, pageKey string) (string, error) {
 // the page key to ensure different pages get different icon files even if the
 // actual icon content is the same.
 func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, pageKey string) (string, error) {
+	// Try with regular client first
+	iconFile, err := r.downloadIconWithClient(ctx, iconURL, pageKey, r.Client)
+	if err != nil {
+		// If it failed due to TLS error, retry with insecure client
+		if strings.Contains(err.Error(), "certificate") ||
+			strings.Contains(err.Error(), "x509") ||
+			strings.Contains(err.Error(), "tls") {
+			slog.Debug("retrying icon download with insecure client", "url", iconURL)
+			return r.downloadIconWithClient(ctx, iconURL, pageKey, r.InsecureClient)
+		}
+		return "", err
+	}
+	return iconFile, nil
+}
+
+func (r *Resolver) downloadIconWithClient(ctx context.Context, iconURL string, pageKey string, client *http.Client) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, iconURL, nil)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "image/*,*/*;q=0.8")
-	resp, err := r.Client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", errors.New("bad status")
+		return "", fmt.Errorf("bad status: %d", resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -336,7 +442,12 @@ func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, page
 		return "", err
 	}
 	if len(data) == 0 {
-		return "", errors.New("empty")
+		return "", errors.New("empty response")
+	}
+
+	// Validate that it looks like an image (basic check)
+	if !looksLikeImage(data) {
+		return "", errors.New("response doesn't look like an image")
 	}
 
 	// Include pageKey in the hash to ensure each page URL gets its own icon file
@@ -352,8 +463,12 @@ func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, page
 	if ext == "" {
 		ext = path.Ext(resp.Request.URL.Path)
 		if ext == "" {
-			ext = ".ico"
+			// Try to detect from content
+			ext = detectImageExt(data)
 		}
+	}
+	if ext == "" {
+		ext = ".ico"
 	}
 	if !strings.HasPrefix(ext, ".") {
 		ext = "." + ext
@@ -365,6 +480,76 @@ func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, page
 		return "", err
 	}
 	return filename, nil
+}
+
+// looksLikeImage does a basic check to see if the data might be an image
+func looksLikeImage(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+
+	// Check common image magic bytes
+	// PNG: 89 50 4E 47
+	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+		return true
+	}
+	// JPEG: FF D8 FF
+	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return true
+	}
+	// GIF: 47 49 46 38
+	if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38 {
+		return true
+	}
+	// ICO: 00 00 01 00 or 00 00 02 00
+	if data[0] == 0x00 && data[1] == 0x00 && (data[2] == 0x01 || data[2] == 0x02) && data[3] == 0x00 {
+		return true
+	}
+	// WebP: RIFF....WEBP
+	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return true
+	}
+	// SVG: starts with < (XML)
+	if data[0] == '<' {
+		s := strings.ToLower(string(data[:min(len(data), 256)]))
+		if strings.Contains(s, "<svg") || strings.Contains(s, "<?xml") {
+			return true
+		}
+	}
+	// BMP: 42 4D
+	if data[0] == 0x42 && data[1] == 0x4D {
+		return true
+	}
+
+	return false
+}
+
+// detectImageExt tries to detect the image format from content
+func detectImageExt(data []byte) string {
+	if len(data) < 4 {
+		return ""
+	}
+
+	if data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 {
+		return ".png"
+	}
+	if data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
+		return ".jpg"
+	}
+	if data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x38 {
+		return ".gif"
+	}
+	if data[0] == 0x00 && data[1] == 0x00 && (data[2] == 0x01 || data[2] == 0x02) && data[3] == 0x00 {
+		return ".ico"
+	}
+	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return ".webp"
+	}
+	if data[0] == '<' {
+		return ".svg"
+	}
+
+	return ""
 }
 
 func extFromContentType(ct string) string {

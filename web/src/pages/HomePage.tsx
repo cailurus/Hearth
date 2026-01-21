@@ -8,6 +8,7 @@ import { TimeDisplay } from '../components/layout/TimeDisplay'
 import { GroupBlock } from '../components/layout/GroupBlock'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog } from '../components/dialogs'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
+import { SnowEffect } from '../components/effects/SnowEffect'
 import {
     normalizeIanaTimeZone,
     fetchWithTimeout,
@@ -50,8 +51,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [editName, setEditName] = useState('')
     const [editDesc, setEditDesc] = useState('')
     const [editUrl, setEditUrl] = useState('')
-    const [editIconMode, setEditIconMode] = useState<'auto' | 'url'>('auto')
+    const [editIconMode, setEditIconMode] = useState<'auto' | 'url' | 'lucide'>('auto')
     const [editIconUrl, setEditIconUrl] = useState('')
+    const [editLucideIcon, setEditLucideIcon] = useState<string | null>(null)
     const [iconResolving, setIconResolving] = useState(false)
 
     const [widgetKind, setWidgetKind] = useState<'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null>(null)
@@ -87,6 +89,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         { city: 'London, England, United Kingdom', timezone: 'Europe/London' },
     ])
 
+    const [showSnowEffect, setShowSnowEffect] = useState(false)
+
     const [mShowCpu, setMShowCpu] = useState(true)
     const [mShowMem, setMShowMem] = useState(true)
     const [mShowDisk, setMShowDisk] = useState(true)
@@ -103,6 +107,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const siteSaveSeqRef = useRef(0)
     const siteSaveTimerRef = useRef<number | null>(null)
+    const citySearchSeqRef = useRef(0)
 
     const now = useNow(1000)
     // Timezone is now auto-detected from the user's system.
@@ -230,7 +235,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         setEditName(item.name)
         setEditDesc(item.description ?? '')
         setEditUrl(item.url)
-        setEditIconMode('auto')
+        
+        // Initialize icon mode based on existing icon
+        if (item.iconPath?.startsWith('lucide:')) {
+            setEditLucideIcon(item.iconPath.slice('lucide:'.length))
+            setEditIconMode('lucide')
+        } else {
+            setEditLucideIcon(null)
+            setEditIconMode('auto')
+        }
         setEditIconUrl('')
         setIconResolving(false)
 
@@ -577,21 +590,27 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         let iconSource: string | null = editItem.iconSource
 
         if (!isWidget) {
-            setIconResolving(true)
-            try {
-                if (editIconMode === 'auto') {
-                    const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
-                    iconPath = res.iconPath || null
-                    iconSource = res.iconSource || null
-                } else if (editIconMode === 'url' && editIconUrl.trim()) {
-                    const res = await apiPost<IconResolve>('/api/icon/resolve', { url: editIconUrl.trim() })
-                    iconPath = res.iconPath || null
-                    iconSource = res.iconSource || null
+            // Handle Lucide icon selection
+            if (editIconMode === 'lucide' && editLucideIcon) {
+                iconPath = `lucide:${editLucideIcon}`
+                iconSource = 'lucide'
+            } else {
+                setIconResolving(true)
+                try {
+                    if (editIconMode === 'auto') {
+                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
+                        iconPath = res.iconPath || null
+                        iconSource = res.iconSource || null
+                    } else if (editIconMode === 'url' && editIconUrl.trim()) {
+                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url: editIconUrl.trim() })
+                        iconPath = res.iconPath || null
+                        iconSource = res.iconSource || null
+                    }
+                } catch {
+                    // keep existing icon if resolve fails
+                } finally {
+                    setIconResolving(false)
                 }
-            } catch {
-                // keep existing icon if resolve fails
-            } finally {
-                setIconResolving(false)
             }
         }
 
@@ -818,22 +837,33 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     }, [lang, settings?.siteTitle])
 
     useEffect(() => {
-        if (!editOpen) return
+        if (!editOpen) {
+            // Reset when dialog closes
+            setCityOptions([])
+            citySearchSeqRef.current = 0
+            return
+        }
         if (widgetKind !== 'weather' && widgetKind !== 'timezones') return
         const q = (cityQuery || '').trim()
         if (!q) {
             setCityOptions([])
             return
         }
+        
+        const seq = ++citySearchSeqRef.current
+        
         const id = window.setTimeout(async () => {
             try {
                 const reqLang = widgetKind === 'timezones' ? 'en' : lang
                 const res = await apiGet<{ results: Array<{ displayName: string }> }>(
                     `/api/widgets/geocode?${new URLSearchParams({ query: q, lang: reqLang }).toString()}`,
                 )
+                // Only update if this is still the latest search
+                if (seq !== citySearchSeqRef.current) return
                 const next = (res?.results || []).map((x) => x.displayName).filter(Boolean)
                 setCityOptions(Array.from(new Set(next)).slice(0, 12))
             } catch {
+                if (seq !== citySearchSeqRef.current) return
                 setCityOptions([])
             }
         }, 250)
@@ -1189,8 +1219,19 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
             {/* Footer */}
             <footer className="py-6 text-center text-xs text-white/40">
-                <span>&copy; {new Date().getFullYear()} Hearth</span>
+                <span>
+                    <button
+                        onClick={() => setShowSnowEffect((prev) => !prev)}
+                        className="cursor-pointer transition-colors hover:text-white/60"
+                        title="❄️"
+                    >
+                        &copy;
+                    </button>
+                    {' '}{new Date().getFullYear()} Hearth
+                </span>
             </footer>
+
+            {showSnowEffect ? <SnowEffect /> : null}
 
             {ctxOpen ? (
                 <div className="fixed inset-0 z-30" onClick={() => setCtxOpen(false)}>
@@ -1278,6 +1319,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 setEditIconMode={setEditIconMode}
                 editIconUrl={editIconUrl}
                 setEditIconUrl={setEditIconUrl}
+                editLucideIcon={editLucideIcon}
+                setEditLucideIcon={setEditLucideIcon}
                 iconResolving={iconResolving}
                 saveItem={saveItem}
                 widgetKind={widgetKind}

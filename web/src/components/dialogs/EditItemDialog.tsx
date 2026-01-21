@@ -2,12 +2,14 @@
  * 编辑组件/App 对话框
  */
 
-import { type FormEvent } from 'react'
+import { type FormEvent, useState, useCallback } from 'react'
 import { Modal } from '../ui/Modal'
 import { Spinner } from '../ui/Spinner'
 import { CityPicker } from '../pickers/CityPicker'
 import { MarketSymbolPicker } from '../pickers/MarketSymbolPicker'
 import { HolidayCountryTags } from '../pickers/HolidayCountryTags'
+import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
+import { Image as ImageIcon } from 'lucide-react'
 import type { AppItem } from '../../types'
 
 const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
@@ -25,10 +27,12 @@ interface EditItemDialogProps {
     setEditDesc: (v: string) => void
     editUrl: string
     setEditUrl: (v: string) => void
-    editIconMode: 'auto' | 'url'
-    setEditIconMode: (v: 'auto' | 'url') => void
+    editIconMode: 'auto' | 'url' | 'lucide'
+    setEditIconMode: (v: 'auto' | 'url' | 'lucide') => void
     editIconUrl: string
     setEditIconUrl: (v: string) => void
+    editLucideIcon: string | null
+    setEditLucideIcon: (v: string | null) => void
     iconResolving: boolean
     saveItem: (e: FormEvent) => void
     // Widget kind
@@ -82,6 +86,8 @@ export function EditItemDialog({
     setEditIconMode,
     editIconUrl,
     setEditIconUrl,
+    editLucideIcon,
+    setEditLucideIcon,
     iconResolving,
     saveItem,
     widgetKind,
@@ -113,6 +119,20 @@ export function EditItemDialog({
     resolveCityToTimezoneEn,
 }: EditItemDialogProps) {
     const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+
+    // Lucide icon picker state
+    const [showIconPicker, setShowIconPicker] = useState(false)
+
+    const handleSelectLucideIcon = useCallback((iconName: string) => {
+        setEditLucideIcon(iconName)
+        setEditIconMode('lucide')
+        setEditIconUrl('')
+    }, [setEditLucideIcon, setEditIconMode, setEditIconUrl])
+
+    // Get current icon for preview
+    const currentIconPath = editLucideIcon 
+        ? `lucide:${editLucideIcon}` 
+        : editItem?.iconPath
 
     return (
         <Modal
@@ -308,48 +328,117 @@ export function EditItemDialog({
                             </label>
 
                             <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('图标', 'Icon')}</div>
-                                <div className="flex flex-wrap gap-2">
+                                <div className="mb-3 text-sm font-semibold text-white/80">{t('图标', 'Icon')}</div>
+                                
+                                {/* Icon preview */}
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/5">
+                                        {editIconMode === 'lucide' && editLucideIcon ? (
+                                            <LucideIconDisplay name={editLucideIcon} className="h-7 w-7 text-white/80" />
+                                        ) : currentIconPath && !currentIconPath.startsWith('lucide:') ? (
+                                            <img
+                                                src={`/assets/icons/${currentIconPath}`}
+                                                alt=""
+                                                className="h-7 w-7 object-contain"
+                                                onError={(e) => {
+                                                    e.currentTarget.style.display = 'none'
+                                                }}
+                                            />
+                                        ) : (
+                                            <ImageIcon className="h-6 w-6 text-white/30" />
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-white/50">
+                                        {editIconMode === 'lucide' && editLucideIcon 
+                                            ? `Lucide: ${editLucideIcon}`
+                                            : editIconMode === 'url' && editIconUrl.trim()
+                                            ? t('自定义图标 URL', 'Custom Icon URL')
+                                            : t('从链接自动获取', 'Auto from URL')}
+                                    </div>
+                                </div>
+
+                                {/* Three parallel mode buttons */}
+                                <div className="flex flex-wrap gap-2 mb-3">
                                     <button
                                         type="button"
-                                        onClick={() => setEditIconMode('auto')}
+                                        onClick={() => {
+                                            setEditIconMode('auto')
+                                            setEditLucideIcon(null)
+                                            setEditIconUrl('')
+                                        }}
                                         className={
                                             editIconMode === 'auto'
                                                 ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                         }
                                     >
-                                        {t('从 URL 自动获取', 'Auto from URL')}
+                                        {t('自动获取', 'Auto')}
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setEditIconMode('url')}
+                                        onClick={() => {
+                                            setEditIconMode('url')
+                                            setEditLucideIcon(null)
+                                        }}
                                         className={
                                             editIconMode === 'url'
                                                 ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                         }
                                     >
-                                        {t('使用图标 URL', 'Use Icon URL')}
+                                        {t('图标直链', 'Icon URL')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowIconPicker(true)}
+                                        className={
+                                            editIconMode === 'lucide'
+                                                ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
+                                                : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
+                                        }
+                                    >
+                                        {t('图标库', 'Icon Library')}
                                     </button>
                                 </div>
-                                {editIconMode === 'url' ? (
-                                    <div className="mt-3">
-                                        <div className="mb-1 text-sm text-white/70">{t('图标 URL（可粘贴网络 svg/png 等）', 'Icon URL (svg/png, etc.)')}</div>
+
+                                {/* Mode-specific content */}
+                                {editIconMode === 'auto' && (
+                                    <div className="text-xs text-white/50">
+                                        {t('保存时将自动从链接地址获取网站图标', 'Will auto-fetch favicon from URL on save')}
+                                    </div>
+                                )}
+
+                                {editIconMode === 'url' && (
+                                    <div>
+                                        <div className="mb-1 text-xs text-white/70">{t('输入图标的网络地址（svg/png/ico 等）', 'Enter icon URL (svg/png/ico, etc.)')}</div>
                                         <input
                                             value={editIconUrl}
                                             onChange={(e) => setEditIconUrl(e.target.value)}
+                                            placeholder="https://example.com/icon.png"
                                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                         />
                                     </div>
-                                ) : null}
+                                )}
 
-                                {iconResolving ? (
+                                {editIconMode === 'lucide' && editLucideIcon && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs text-white/50">{t('已选择:', 'Selected:')} {editLucideIcon}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowIconPicker(true)}
+                                            className="text-xs text-white/70 hover:text-white underline"
+                                        >
+                                            {t('更换', 'Change')}
+                                        </button>
+                                    </div>
+                                )}
+
+                                {iconResolving && (
                                     <div className="mt-3 flex items-center gap-2 text-sm text-white/70">
                                         <Spinner />
                                         {t('正在获取图标…', 'Resolving icon…')}
                                     </div>
-                                ) : null}
+                                )}
                             </div>
                         </>
                     )}
@@ -361,6 +450,14 @@ export function EditItemDialog({
                     )}
                 </form>
             ) : null}
+
+            {/* Icon Picker Modal */}
+            <IconPicker
+                open={showIconPicker}
+                onClose={() => setShowIconPicker(false)}
+                onSelect={handleSelectLucideIcon}
+                lang={lang}
+            />
         </Modal>
     )
 }

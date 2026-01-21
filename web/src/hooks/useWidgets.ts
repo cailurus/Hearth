@@ -114,11 +114,6 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
                         return
                     }
 
-                    // De-duplicate with default
-                    if (city === defaultCity) {
-                        return
-                    }
-
                     try {
                         const qs = new URLSearchParams({ city, lang })
                         const wx = await apiGet<Weather>(`/api/widgets/weather?${qs.toString()}`)
@@ -140,7 +135,7 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         return () => {
             cancelled = true
         }
-    }, [apps, lang, defaultCity])
+    }, [apps, lang])
 
     // Fetch markets data
     useEffect(() => {

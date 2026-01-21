@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { Modal } from '../ui'
 import { apiPost } from '../../api'
 import type { WidgetKind, IconResolve } from '../../types'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Image as ImageIcon } from 'lucide-react'
+import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
 
 interface AddItemDialogProps {
     open: boolean
@@ -48,6 +49,8 @@ function isValidUrl(str: string): boolean {
     }
 }
 
+type IconMode = 'auto' | 'url' | 'lucide'
+
 export function AddItemDialog({
     open,
     onClose,
@@ -64,6 +67,10 @@ export function AddItemDialog({
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
 
+    // Icon mode state
+    const [iconMode, setIconMode] = useState<IconMode>('auto')
+    const [iconUrl, setIconUrl] = useState('')
+
     // Auto-fetch state
     const [fetchingMeta, setFetchingMeta] = useState(false)
     const [previewIcon, setPreviewIcon] = useState<string | null>(null)
@@ -71,6 +78,10 @@ export function AddItemDialog({
         iconPath: null,
         iconSource: null,
     })
+
+    // Lucide icon picker state
+    const [showIconPicker, setShowIconPicker] = useState(false)
+    const [selectedLucideIcon, setSelectedLucideIcon] = useState<string | null>(null)
 
     // Track if user has manually edited the name
     const userEditedNameRef = useRef(false)
@@ -86,14 +97,17 @@ export function AddItemDialog({
             setFetchingMeta(false)
             setPreviewIcon(null)
             setResolvedIcon({ iconPath: null, iconSource: null })
+            setSelectedLucideIcon(null)
+            setIconMode('auto')
+            setIconUrl('')
             userEditedNameRef.current = false
             fetchSeqRef.current = 0
         }
     }, [open])
 
-    // Debounced auto-fetch favicon and title when URL changes
+    // Debounced auto-fetch favicon and title when URL changes (only in auto mode)
     useEffect(() => {
-        if (!open || groupKind === 'system') return
+        if (!open || groupKind === 'system' || iconMode !== 'auto') return
 
         const trimmedUrl = url.trim()
         if (!trimmedUrl || !isValidUrl(trimmedUrl)) {
@@ -137,7 +151,7 @@ export function AddItemDialog({
         return () => {
             window.clearTimeout(timer)
         }
-    }, [open, groupKind, url, name])
+    }, [open, groupKind, url, name, iconMode])
 
     const handleNameChange = (value: string) => {
         setName(value)
@@ -179,7 +193,40 @@ export function AddItemDialog({
             setError(null)
             setLoading(true)
             try {
-                // Use pre-resolved icon if available, otherwise fetch again
+                // If user selected a Lucide icon, use that
+                if (iconMode === 'lucide' && selectedLucideIcon) {
+                    await onSubmit({
+                        groupId,
+                        name: trimmedName,
+                        description: desc || null,
+                        url: trimmedUrl,
+                        iconPath: `lucide:${selectedLucideIcon}`,
+                        iconSource: 'lucide',
+                    })
+                    onClose()
+                    return
+                }
+
+                // If using custom icon URL
+                if (iconMode === 'url' && iconUrl.trim()) {
+                    try {
+                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url: iconUrl.trim() })
+                        await onSubmit({
+                            groupId,
+                            name: trimmedName,
+                            description: desc || null,
+                            url: trimmedUrl,
+                            iconPath: res.iconPath || null,
+                            iconSource: res.iconSource || null,
+                        })
+                        onClose()
+                        return
+                    } catch {
+                        // If icon URL resolution fails, continue without icon
+                    }
+                }
+
+                // Auto mode: Use pre-resolved icon if available, otherwise fetch again
                 let iconPath = resolvedIcon.iconPath
                 let iconSource = resolvedIcon.iconSource
 
@@ -196,7 +243,7 @@ export function AddItemDialog({
                 await onSubmit({
                     groupId,
                     name: trimmedName,
-                    description: desc || null,  // Keep spaces if user wants blank display
+                    description: desc || null,
                     url: trimmedUrl,
                     iconPath,
                     iconSource,
@@ -208,13 +255,32 @@ export function AddItemDialog({
                 setLoading(false)
             }
         },
-        [name, desc, url, groupId, onSubmit, onClose, t, resolvedIcon]
+        [name, desc, url, groupId, onSubmit, onClose, t, resolvedIcon, selectedLucideIcon, iconMode, iconUrl]
     )
+
+    const handleSelectLucideIcon = useCallback((iconName: string) => {
+        setSelectedLucideIcon(iconName)
+        setIconMode('lucide')
+        setIconUrl('')
+    }, [])
 
     const handleClose = useCallback(() => {
         setError(null)
         onClose()
     }, [onClose])
+
+    // Get current preview icon based on mode
+    const getCurrentPreviewIcon = () => {
+        if (iconMode === 'lucide' && selectedLucideIcon) {
+            return { type: 'lucide' as const, name: selectedLucideIcon }
+        }
+        if (iconMode === 'auto' && previewIcon) {
+            return { type: 'url' as const, src: previewIcon }
+        }
+        return null
+    }
+
+    const currentPreview = getCurrentPreviewIcon()
 
     return (
         <Modal open={open} title={t('添加组件', 'Add Item')} onClose={handleClose} closeText={t('关闭', 'Close')}>
@@ -258,24 +324,121 @@ export function AddItemDialog({
                     </label>
                     <label className="block text-sm">
                         <div className="mb-1 text-white/70">{t('名称', 'Name')}</div>
-                        <div className="flex items-center gap-2">
-                            {previewIcon && (
-                                <img
-                                    src={previewIcon}
-                                    alt=""
-                                    className="h-8 w-8 rounded object-contain"
-                                    onError={(e) => {
-                                        e.currentTarget.style.display = 'none'
-                                    }}
-                                />
-                            )}
-                            <input
-                                value={name}
-                                onChange={(e) => handleNameChange(e.target.value)}
-                                className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                            />
-                        </div>
+                        <input
+                            value={name}
+                            onChange={(e) => handleNameChange(e.target.value)}
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                        />
                     </label>
+                    
+                    {/* Icon selection - Three parallel modes */}
+                    <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                        <div className="mb-3 text-sm font-semibold text-white/80">{t('图标', 'Icon')}</div>
+                        
+                        {/* Icon preview */}
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/5">
+                                {currentPreview?.type === 'lucide' ? (
+                                    <LucideIconDisplay name={currentPreview.name} className="h-7 w-7 text-white/80" />
+                                ) : currentPreview?.type === 'url' ? (
+                                    <img
+                                        src={currentPreview.src}
+                                        alt=""
+                                        className="h-7 w-7 object-contain"
+                                        onError={(e) => {
+                                            e.currentTarget.style.display = 'none'
+                                        }}
+                                    />
+                                ) : (
+                                    <ImageIcon className="h-6 w-6 text-white/30" />
+                                )}
+                            </div>
+                            <div className="text-xs text-white/50">
+                                {iconMode === 'lucide' && selectedLucideIcon 
+                                    ? `Lucide: ${selectedLucideIcon}`
+                                    : iconMode === 'url'
+                                    ? t('自定义图标 URL', 'Custom Icon URL')
+                                    : t('从链接自动获取', 'Auto from URL')}
+                            </div>
+                        </div>
+
+                        {/* Three parallel mode buttons */}
+                        <div className="flex flex-wrap gap-2 mb-3">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIconMode('auto')
+                                    setSelectedLucideIcon(null)
+                                    setIconUrl('')
+                                }}
+                                className={
+                                    iconMode === 'auto'
+                                        ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
+                                        : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
+                                }
+                            >
+                                {t('自动获取', 'Auto')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIconMode('url')
+                                    setSelectedLucideIcon(null)
+                                }}
+                                className={
+                                    iconMode === 'url'
+                                        ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
+                                        : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
+                                }
+                            >
+                                {t('图标直链', 'Icon URL')}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowIconPicker(true)}
+                                className={
+                                    iconMode === 'lucide'
+                                        ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
+                                        : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
+                                }
+                            >
+                                {t('图标库', 'Icon Library')}
+                            </button>
+                        </div>
+
+                        {/* Mode-specific content */}
+                        {iconMode === 'auto' && (
+                            <div className="text-xs text-white/50">
+                                {t('保存时将自动从链接地址获取网站图标', 'Will auto-fetch favicon from URL on save')}
+                            </div>
+                        )}
+
+                        {iconMode === 'url' && (
+                            <div>
+                                <div className="mb-1 text-xs text-white/70">{t('输入图标的网络地址（svg/png/ico 等）', 'Enter icon URL (svg/png/ico, etc.)')}</div>
+                                <input
+                                    value={iconUrl}
+                                    onChange={(e) => setIconUrl(e.target.value)}
+                                    placeholder="https://example.com/icon.png"
+                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                />
+                            </div>
+                        )}
+
+                        {iconMode === 'lucide' && selectedLucideIcon && (
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-white/50">{t('已选择:', 'Selected:')} {selectedLucideIcon}</span>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowIconPicker(true)}
+                                    className="text-xs text-white/70 hover:text-white underline"
+                                >
+                                    {t('更换', 'Change')}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
                     <label className="block text-sm">
                         <div className="mb-1 text-white/70">{t('描述', 'Description')}</div>
                         <input
@@ -294,6 +457,14 @@ export function AddItemDialog({
                     </button>
                 </form>
             )}
+
+            {/* Icon Picker Modal */}
+            <IconPicker
+                open={showIconPicker}
+                onClose={() => setShowIconPicker(false)}
+                onSelect={handleSelectLucideIcon}
+                lang={lang}
+            />
         </Modal>
     )
 }

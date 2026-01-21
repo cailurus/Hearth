@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -42,14 +42,9 @@ export function ComboBox<T>({
     onPick,
 }: ComboBoxProps<T>) {
     const [open, setOpen] = useState(false)
-    const [query, setQuery] = useState(value)
     const inputId = useId()
     const inputRef = useRef<HTMLInputElement>(null)
     const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
-
-    useEffect(() => {
-        setQuery(value)
-    }, [value])
 
     // Calculate dropdown position when opening
     useLayoutEffect(() => {
@@ -106,7 +101,7 @@ export function ComboBox<T>({
                                 setOpen(false)
                             }}
                         >
-                            {highlightMatch(label, query)}
+                            {highlightMatch(label, value)}
                         </button>
                     ))}
                 </div>

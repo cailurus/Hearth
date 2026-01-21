@@ -159,6 +159,10 @@ func (s *Server) buildRouter() chi.Router {
 	// Icon resolving requires admin (it performs server-side fetching and caching).
 	r.With(s.requireAdmin).Post("/api/icon/resolve", s.handleResolveIcon)
 
+	// Lucide icon search (public, cached on server).
+	r.Get("/api/icons/lucide/search", s.handleSearchLucideIcons)
+	r.Get("/api/icons/lucide/all", s.handleListAllLucideIcons)
+
 	// Background is public.
 	r.Get("/api/background", s.handleGetBackground)
 	r.Get("/api/background/image", s.handleGetBackgroundImage)
