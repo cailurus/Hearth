@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/web/public/hearth.svg" alt="Hearth" width="80" height="80">
+  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/web/public/campfire.png" alt="Hearth" width="80" height="80">
 </p>
 
 <h1 align="center">Hearth</h1>
