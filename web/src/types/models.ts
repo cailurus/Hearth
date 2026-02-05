@@ -19,6 +19,7 @@ export interface BackgroundSettings {
     provider: BackgroundProvider
     unsplashQuery: string
     interval: string
+    blur?: number
 }
 
 export interface TimeSettings {

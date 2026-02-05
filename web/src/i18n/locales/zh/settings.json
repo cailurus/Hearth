@@ -37,5 +37,10 @@
     "bgDefaultVideo": "系统默认（动态）",
     "bgVideoDownloading": "正在下载背景视频...",
     "bgVideoDownloadFailed": "视频下载失败",
-    "bgVideoReady": "视频已就绪"
+    "bgVideoReady": "视频已就绪",
+    "bgBlur": "模糊程度",
+    "bgBlurNone": "无",
+    "bgBlurLight": "轻微",
+    "bgBlurMedium": "中等",
+    "bgBlurHeavy": "强烈"
 }

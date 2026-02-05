@@ -300,6 +300,43 @@ export function SettingsDialog({
                                         </select>
                                     </label>
                                 )}
+
+                                <label className="block text-sm">
+                                    <div className="mb-1 text-white/70">{t('settings:bgBlur')}</div>
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={siteDraft?.background?.blur ?? (siteDraft?.background?.provider === 'default_video' ? 0 : 3)}
+                                            onChange={(e) =>
+                                                setSiteDraft((prev) => {
+                                                    if (!prev) return prev
+                                                    const next = { ...prev, background: { ...prev.background, blur: parseInt(e.target.value, 10) } }
+                                                    schedulePersistSiteDraft(next, 'debounce')
+                                                    return next
+                                                })
+                                            }
+                                            className="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-white"
+                                        />
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            max="100"
+                                            value={siteDraft?.background?.blur ?? (siteDraft?.background?.provider === 'default_video' ? 0 : 3)}
+                                            onChange={(e) =>
+                                                setSiteDraft((prev) => {
+                                                    if (!prev) return prev
+                                                    const val = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0))
+                                                    const next = { ...prev, background: { ...prev.background, blur: val } }
+                                                    schedulePersistSiteDraft(next, 'debounce')
+                                                    return next
+                                                })
+                                            }
+                                            className="w-16 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-white text-center outline-none"
+                                        />
+                                    </div>
+                                </label>
                             </div>
 
                             <div className="flex items-center gap-2">

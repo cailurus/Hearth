@@ -120,6 +120,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const isVideoBackground = settings?.background?.provider === 'default_video'
     const { videoUrl, isDownloading, downloadProgress, isReady: videoReady } = useVideoBackground(isVideoBackground)
 
+    // Background blur (video default: 0, image default: 3)
+    const bgBlur = settings?.background?.blur ?? (isVideoBackground ? 0 : 3)
+
     // Use the useWidgets hook for widget data fetching
     const {
         weather,
@@ -1064,6 +1067,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                 muted
                                 playsInline
                                 className="h-full w-full scale-105 object-cover"
+                                style={{ filter: bgBlur > 0 ? `blur(${bgBlur}px)` : undefined }}
                             />
                         ) : (
                             <div className="flex h-full w-full items-center justify-center bg-black">
@@ -1080,9 +1084,14 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         )}
                     </>
                 ) : (
-                    <img src={bgUrl} alt="background" className="h-full w-full scale-105 object-cover blur-sm" />
+                    <img
+                        src={bgUrl}
+                        alt="background"
+                        className="h-full w-full scale-105 object-cover"
+                        style={{ filter: bgBlur > 0 ? `blur(${bgBlur}px)` : undefined }}
+                    />
                 )}
-                <div className="absolute inset-0 bg-black/60" />
+                <div className="absolute inset-0 bg-black/30" />
             </div>
 
             <div className="fixed right-4 top-4 z-20 flex items-center gap-2">
