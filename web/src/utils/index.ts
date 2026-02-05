@@ -57,6 +57,24 @@ export {
 // 导出类型
 export type { WorldClockCity } from './helpers'
 
+// Widget 配置工具
+export {
+    serializeWidgetConfig,
+    parseWidgetConfig,
+    getDefaultWidgetConfigState,
+    normalizeClockEntry,
+} from './widgetConfig'
+
+export type {
+    WidgetKind,
+    WeatherConfig,
+    MetricsConfig,
+    MarketsConfig,
+    HolidaysConfig,
+    TimezonesConfig,
+    WidgetConfigState,
+} from './widgetConfig'
+
 // 天气相关
 export {
     weatherKind,

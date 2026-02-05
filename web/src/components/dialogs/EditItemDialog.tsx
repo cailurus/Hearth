@@ -3,6 +3,7 @@
  */
 
 import { type FormEvent, useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui/Modal'
 import { Spinner } from '../ui/Spinner'
 import { CityPicker } from '../pickers/CityPicker'
@@ -17,7 +18,6 @@ const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
 interface EditItemDialogProps {
     open: boolean
     onClose: () => void
-    lang: 'zh' | 'en'
     editErr: string | null
     editItem: AppItem | null
     // App edit fields
@@ -37,6 +37,9 @@ interface EditItemDialogProps {
     saveItem: (e: FormEvent) => void
     // Widget kind
     widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null
+    // Widget save callback (for weather, timezones, markets)
+    onSaveWidget?: () => Promise<void>
+    widgetSaving?: boolean
     // Weather
     wCity: string
     setWCity: (v: string) => void
@@ -73,7 +76,6 @@ interface EditItemDialogProps {
 export function EditItemDialog({
     open,
     onClose,
-    lang,
     editErr,
     editItem,
     editName,
@@ -91,6 +93,8 @@ export function EditItemDialog({
     iconResolving,
     saveItem,
     widgetKind,
+    onSaveWidget,
+    widgetSaving,
     wCity,
     setWCity,
     setCityQuery,
@@ -118,7 +122,7 @@ export function EditItemDialog({
     setTzClocks,
     resolveCityToTimezoneEn,
 }: EditItemDialogProps) {
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+    const { t } = useTranslation(['home', 'common', 'widgets'])
 
     // Lucide icon picker state
     const [showIconPicker, setShowIconPicker] = useState(false)
@@ -139,9 +143,9 @@ export function EditItemDialog({
     return (
         <Modal
             open={open}
-            title={t('组件设置', 'Item Settings')}
+            title={t('home:itemSettings')}
             onClose={onClose}
-            closeText={t('关闭', 'Close')}
+            closeText={t('common:close')}
             maxWidthClass="max-w-lg"
             containerClassName="items-start pt-[18vh] sm:pt-[22vh]"
         >
@@ -159,7 +163,7 @@ export function EditItemDialog({
                 >
                     {editItem.url.startsWith('widget:') ? null : (
                         <label className="block text-sm">
-                            <div className="mb-1 text-white/70">{t('标题', 'Title')}</div>
+                            <div className="mb-1 text-white/70">{t('common:title')}</div>
                             <input
                                 value={editName}
                                 onChange={(e) => setEditName(e.target.value)}
@@ -172,10 +176,10 @@ export function EditItemDialog({
                         widgetKind === 'weather' ? (
                             <div className="space-y-4">
                                 <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('位置', 'Location')}</div>
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:weatherLocation')}</div>
                                     <div className="grid grid-cols-1 gap-3">
                                         <label className="block text-sm">
-                                            <div className="mb-1 text-white/70">{t('城市', 'City')}</div>
+                                            <div className="mb-1 text-white/70">{t('widgets:weatherCity')}</div>
                                             <CityPicker
                                                 value={wCity}
                                                 onChange={(v) => {
@@ -187,80 +191,98 @@ export function EditItemDialog({
                                                     setWCity(picked)
                                                 }}
                                                 options={cityOptions}
-                                                placeholder={t('例如：北京 / Tokyo / Paris', 'e.g. Shanghai / Tokyo / Paris')}
+                                                placeholder={t('widgets:weatherCityPlaceholder')}
                                             />
                                         </label>
                                     </div>
                                 </div>
+                                <button
+                                    type="button"
+                                    disabled={widgetSaving}
+                                    onClick={() => onSaveWidget?.()}
+                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                >
+                                    {widgetSaving && <Spinner size="sm" />}
+                                    {t('common:save')}
+                                </button>
                             </div>
                         ) : widgetKind === 'metrics' ? (
                             <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('系统状态', 'System Status')}</div>
+                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:systemStatus')}</div>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                     <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('更新频率', 'Refresh interval')}</div>
+                                        <div className="mb-1 text-white/70">{t('widgets:refreshInterval')}</div>
                                         <select
                                             value={mRefreshSec}
                                             onChange={(e) => setMRefreshSec((Number(e.target.value) === 5 ? 5 : Number(e.target.value) === 10 ? 10 : 1) as 1 | 5 | 10)}
                                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                         >
-                                            <option value={1}>{t('1 秒', '1s')}</option>
-                                            <option value={5}>{t('5 秒', '5s')}</option>
-                                            <option value={10}>{t('10 秒', '10s')}</option>
+                                            <option value={1}>{t('widgets:refreshSec1')}</option>
+                                            <option value={5}>{t('widgets:refreshSec5')}</option>
+                                            <option value={10}>{t('widgets:refreshSec10')}</option>
                                         </select>
                                     </label>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowCpu} onChange={(e) => setMShowCpu(e.target.checked)} />CPU</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowMem} onChange={(e) => setMShowMem(e.target.checked)} />{t('内存', 'Memory')}</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowDisk} onChange={(e) => setMShowDisk(e.target.checked)} />{t('磁盘', 'Disk')}</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowNet} onChange={(e) => setMShowNet(e.target.checked)} />{t('网络', 'Network')}</label>
+                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowCpu} onChange={(e) => setMShowCpu(e.target.checked)} />{t('widgets:cpu')}</label>
+                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowMem} onChange={(e) => setMShowMem(e.target.checked)} />{t('widgets:memory')}</label>
+                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowDisk} onChange={(e) => setMShowDisk(e.target.checked)} />{t('widgets:disk')}</label>
+                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowNet} onChange={(e) => setMShowNet(e.target.checked)} />{t('widgets:network')}</label>
                                 </div>
                             </div>
                         ) : widgetKind === 'markets' ? (
-                            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('行情', 'Markets')}</div>
-                                <div className="grid grid-cols-1 gap-3">
-                                    {Array.from({ length: 4 }).map((_, idx) => (
-                                        <label key={idx} className="block text-sm">
-                                            <div className="mb-1 text-white/70">{t('搜索选择', 'Search & select')} {idx + 1}</div>
-                                            <MarketSymbolPicker
-                                                value={String(mkSymbols[idx] ?? '')}
-                                                query={String(mkQueries[idx] ?? '')}
-                                                onQueryChange={(q) =>
-                                                    setMkQueries((prev) => {
-                                                        const next = Array.isArray(prev) ? prev.slice() : []
-                                                        while (next.length < 4) next.push('')
-                                                        next[idx] = q
-                                                        return next
-                                                    })
-                                                }
-                                                onSelect={(picked) => {
-                                                    setMkSymbols((prev) => {
-                                                        const next = Array.isArray(prev) ? prev.slice() : []
-                                                        while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
-                                                        next[idx] = picked
-                                                        return ensureFourMarketSymbols(next)
-                                                    })
-                                                    setMkQueries((prev) => {
-                                                        const next = Array.isArray(prev) ? prev.slice() : []
-                                                        while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
-                                                        next[idx] = picked
-                                                        return next.slice(0, 4)
-                                                    })
-                                                }}
-                                                placeholder={DEFAULT_MARKET_SYMBOLS[idx] || ''}
-                                                lang={lang}
-                                            />
-                                        </label>
-                                    ))}
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:markets')}</div>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {Array.from({ length: 4 }).map((_, idx) => (
+                                            <label key={idx} className="block text-sm">
+                                                <div className="mb-1 text-white/70">{t('widgets:marketsSearchSelect')} {idx + 1}</div>
+                                                <MarketSymbolPicker
+                                                    value={String(mkSymbols[idx] ?? '')}
+                                                    query={String(mkQueries[idx] ?? '')}
+                                                    onQueryChange={(q) =>
+                                                        setMkQueries((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push('')
+                                                            next[idx] = q
+                                                            return next
+                                                        })
+                                                    }
+                                                    onSelect={(picked) => {
+                                                        setMkSymbols((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
+                                                            next[idx] = picked
+                                                            return ensureFourMarketSymbols(next)
+                                                        })
+                                                        setMkQueries((prev) => {
+                                                            const next = Array.isArray(prev) ? prev.slice() : []
+                                                            while (next.length < 4) next.push(DEFAULT_MARKET_SYMBOLS[next.length] || 'BTC')
+                                                            next[idx] = picked
+                                                            return next.slice(0, 4)
+                                                        })
+                                                    }}
+                                                    placeholder={DEFAULT_MARKET_SYMBOLS[idx] || ''}
+                                                />
+                                            </label>
+                                        ))}
+                                    </div>
                                 </div>
+                                <button
+                                    type="button"
+                                    disabled={widgetSaving}
+                                    onClick={() => onSaveWidget?.()}
+                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                >
+                                    {widgetSaving && <Spinner size="sm" />}
+                                    {t('common:save')}
+                                </button>
                             </div>
                         ) : widgetKind === 'holidays' ? (
                             <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('未来假日', 'Upcoming Holidays')}</div>
+                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:upcomingHolidays')}</div>
                                 <HolidayCountryTags
-                                    lang={lang}
                                     selected={hCountryCodes}
                                     query={hCountryQuery}
                                     onQueryChange={setHCountryQuery}
@@ -268,51 +290,62 @@ export function EditItemDialog({
                                 />
                             </div>
                         ) : (
-                            <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="text-sm font-semibold text-white/80">{t('世界时钟', 'World Clock')}</div>
-                                <div className="space-y-2">
-                                    {tzClocks.slice(0, 4).map((c, idx) => (
-                                        <div key={idx} className="grid grid-cols-1 gap-2">
-                                            <label className="block text-sm">
-                                                <div className="mb-1 text-white/70">{t('城市', 'City')} {idx + 1}</div>
-                                                <CityPicker
-                                                    value={c.city}
-                                                    onChange={(v) => {
-                                                        setCityQuery(v)
-                                                        setTzClocks((prev) => prev.map((x, i) => (i === idx ? { ...x, city: v } : x)))
-                                                    }}
-                                                    onPick={(picked) => {
-                                                        void (async () => {
-                                                            try {
-                                                                const r = await resolveCityToTimezoneEn(picked)
-                                                                setTzClocks((prev) =>
-                                                                    prev.map((x, i) =>
-                                                                        i === idx
-                                                                            ? {
-                                                                                ...x,
-                                                                                city: r.city,
-                                                                                timezone: r.timezone || x.timezone,
-                                                                            }
-                                                                            : x,
-                                                                    ),
-                                                                )
-                                                            } catch {
-                                                                // keep user input
-                                                            }
-                                                        })()
-                                                    }}
-                                                    options={cityOptions}
-                                                />
-                                            </label>
-                                        </div>
-                                    ))}
+                            <div className="space-y-4">
+                                <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="text-sm font-semibold text-white/80">{t('widgets:worldClock')}</div>
+                                    <div className="space-y-2">
+                                        {tzClocks.slice(0, 4).map((c, idx) => (
+                                            <div key={idx} className="grid grid-cols-1 gap-2">
+                                                <label className="block text-sm">
+                                                    <div className="mb-1 text-white/70">{t('widgets:weatherCity')} {idx + 1}</div>
+                                                    <CityPicker
+                                                        value={c.city}
+                                                        onChange={(v) => {
+                                                            setCityQuery(v)
+                                                            setTzClocks((prev) => prev.map((x, i) => (i === idx ? { ...x, city: v } : x)))
+                                                        }}
+                                                        onPick={(picked) => {
+                                                            void (async () => {
+                                                                try {
+                                                                    const r = await resolveCityToTimezoneEn(picked)
+                                                                    setTzClocks((prev) =>
+                                                                        prev.map((x, i) =>
+                                                                            i === idx
+                                                                                ? {
+                                                                                    ...x,
+                                                                                    city: r.city,
+                                                                                    timezone: r.timezone || x.timezone,
+                                                                                }
+                                                                                : x,
+                                                                        ),
+                                                                    )
+                                                                } catch {
+                                                                    // keep user input
+                                                                }
+                                                            })()
+                                                        }}
+                                                        options={cityOptions}
+                                                    />
+                                                </label>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
+                                <button
+                                    type="button"
+                                    disabled={widgetSaving}
+                                    onClick={() => onSaveWidget?.()}
+                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                >
+                                    {widgetSaving && <Spinner size="sm" />}
+                                    {t('common:save')}
+                                </button>
                             </div>
                         )
                     ) : (
                         <>
                             <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('描述', 'Description')}</div>
+                                <div className="mb-1 text-white/70">{t('common:description')}</div>
                                 <input
                                     value={editDesc}
                                     onChange={(e) => setEditDesc(e.target.value)}
@@ -321,7 +354,7 @@ export function EditItemDialog({
                             </label>
 
                             <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('链接地址', 'URL')}</div>
+                                <div className="mb-1 text-white/70">{t('common:url')}</div>
                                 <input
                                     value={editUrl}
                                     onChange={(e) => setEditUrl(e.target.value)}
@@ -330,8 +363,8 @@ export function EditItemDialog({
                             </label>
 
                             <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-                                <div className="mb-3 text-sm font-semibold text-white/80">{t('图标', 'Icon')}</div>
-                                
+                                <div className="mb-3 text-sm font-semibold text-white/80">{t('common:icon')}</div>
+
                                 {/* Icon preview */}
                                 <div className="flex items-center gap-3 mb-3">
                                     <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/5">
@@ -351,11 +384,11 @@ export function EditItemDialog({
                                         )}
                                     </div>
                                     <div className="text-xs text-white/50">
-                                        {editIconMode === 'lucide' && editLucideIcon 
+                                        {editIconMode === 'lucide' && editLucideIcon
                                             ? `Lucide: ${editLucideIcon}`
                                             : editIconMode === 'url' && editIconUrl.trim()
-                                            ? t('自定义图标 URL', 'Custom Icon URL')
-                                            : t('从链接自动获取', 'Auto from URL')}
+                                                ? t('common:iconCustomUrl')
+                                                : t('common:iconAutoFromUrl')}
                                     </div>
                                 </div>
 
@@ -374,7 +407,7 @@ export function EditItemDialog({
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                         }
                                     >
-                                        {t('自动获取', 'Auto')}
+                                        {t('common:iconAuto')}
                                     </button>
                                     <button
                                         type="button"
@@ -388,7 +421,7 @@ export function EditItemDialog({
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                         }
                                     >
-                                        {t('图标直链', 'Icon URL')}
+                                        {t('common:iconUrl')}
                                     </button>
                                     <button
                                         type="button"
@@ -399,20 +432,20 @@ export function EditItemDialog({
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                         }
                                     >
-                                        {t('图标库', 'Icon Library')}
+                                        {t('common:iconLibrary')}
                                     </button>
                                 </div>
 
                                 {/* Mode-specific content */}
                                 {editIconMode === 'auto' && (
                                     <div className="text-xs text-white/50">
-                                        {t('保存时将自动从链接地址获取网站图标', 'Will auto-fetch favicon from URL on save')}
+                                        {t('common:iconAutoHint')}
                                     </div>
                                 )}
 
                                 {editIconMode === 'url' && (
                                     <div>
-                                        <div className="mb-1 text-xs text-white/70">{t('输入图标的网络地址（svg/png/ico 等）', 'Enter icon URL (svg/png/ico, etc.)')}</div>
+                                        <div className="mb-1 text-xs text-white/70">{t('common:iconUrlHint')}</div>
                                         <input
                                             value={editIconUrl}
                                             onChange={(e) => setEditIconUrl(e.target.value)}
@@ -424,13 +457,13 @@ export function EditItemDialog({
 
                                 {editIconMode === 'lucide' && editLucideIcon && (
                                     <div className="flex items-center gap-2">
-                                        <span className="text-xs text-white/50">{t('已选择:', 'Selected:')} {editLucideIcon}</span>
+                                        <span className="text-xs text-white/50">{t('common:iconSelected')} {editLucideIcon}</span>
                                         <button
                                             type="button"
                                             onClick={() => setShowIconPicker(true)}
                                             className="text-xs text-white/70 hover:text-white underline"
                                         >
-                                            {t('更换', 'Change')}
+                                            {t('common:iconChange')}
                                         </button>
                                     </div>
                                 )}
@@ -438,7 +471,7 @@ export function EditItemDialog({
                                 {iconResolving && (
                                     <div className="mt-3 flex items-center gap-2 text-sm text-white/70">
                                         <Spinner />
-                                        {t('正在获取图标…', 'Resolving icon…')}
+                                        {t('common:iconResolving')}
                                     </div>
                                 )}
                             </div>
@@ -447,7 +480,7 @@ export function EditItemDialog({
 
                     {editItem.url.startsWith('widget:') ? null : (
                         <button type="submit" disabled={iconResolving} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60">
-                            {t('保存', 'Save')}
+                            {t('common:save')}
                         </button>
                     )}
                 </form>
@@ -458,7 +491,6 @@ export function EditItemDialog({
                 open={showIconPicker}
                 onClose={() => setShowIconPicker(false)}
                 onSelect={handleSelectLucideIcon}
-                lang={lang}
             />
         </Modal>
     )

@@ -2,7 +2,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { apiDelete, apiGet, apiPost, apiPut } from '../api'
 import { Cog } from 'lucide-react'
 import type { AppItem, BackgroundInfo, Group, Settings, Me, IconResolve } from '../types'
-import { useNow, useWidgets } from '../hooks'
+import { useNow, useWidgets, useVideoBackground } from '../hooks'
 import { UserIcon } from '../components/ui/UserIcon'
 import { TimeDisplay } from '../components/layout/TimeDisplay'
 import { GroupBlock } from '../components/layout/GroupBlock'
@@ -55,6 +55,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [editIconUrl, setEditIconUrl] = useState('')
     const [editLucideIcon, setEditLucideIcon] = useState<string | null>(null)
     const [iconResolving, setIconResolving] = useState(false)
+    const [widgetSaving, setWidgetSaving] = useState(false)
 
     const [widgetKind, setWidgetKind] = useState<'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null>(null)
     const [wCity, setWCity] = useState('')
@@ -114,6 +115,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const lang: 'zh' | 'en' = settings?.language === 'en' ? 'en' : 'zh'
     const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+
+    // Video background
+    const isVideoBackground = settings?.background?.provider === 'default_video'
+    const { videoUrl, isDownloading, downloadProgress, isReady: videoReady } = useVideoBackground(isVideoBackground)
 
     // Use the useWidgets hook for widget data fetching
     const {
@@ -242,7 +247,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         setEditName(item.name)
         setEditDesc(item.description ?? '')
         setEditUrl(item.url)
-        
+
         // Initialize icon mode based on existing icon
         if (item.iconPath?.startsWith('lucide:')) {
             setEditLucideIcon(item.iconPath.slice('lucide:'.length))
@@ -372,6 +377,74 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }, [])
 
+    // Manual save handler for weather, timezones, and markets widgets
+    const handleSaveWidget = useCallback(async () => {
+        if (!editItem || !widgetKind) return
+        if (widgetKind !== 'weather' && widgetKind !== 'timezones' && widgetKind !== 'markets') return
+
+        setWidgetSaving(true)
+        const itemId = editItem.id
+
+        try {
+            let description: string | null = null
+
+            if (widgetKind === 'weather') {
+                description = JSON.stringify({ city: wCity.trim() })
+            } else if (widgetKind === 'markets') {
+                const symbols = ensureFourMarketSymbols(mkSymbols)
+                description = JSON.stringify({ symbols })
+            } else if (widgetKind === 'timezones') {
+                // Resolve city names to timezones
+                const next = (Array.isArray(tzClocks) ? tzClocks : []).slice(0, 4)
+                while (next.length < 4) next.push({ city: DEFAULT_CLOCKS[next.length]?.city || `City ${next.length + 1}`, timezone: '' })
+
+                const resolved = await Promise.all(
+                    next.map(async (c, idx) => {
+                        const fallbackCity = DEFAULT_CLOCKS[idx]?.city || `City ${idx + 1}`
+                        const fallbackTz = DEFAULT_CLOCKS[idx]?.timezone || 'UTC'
+                        const city = String(c.city ?? '').trim() || fallbackCity
+                        try {
+                            const res = await apiGet<{ timezone: string; city?: string }>(
+                                `/api/widgets/timezone?${new URLSearchParams({ city, lang: 'en' }).toString()}`,
+                            )
+                            return {
+                                city: String(res.city || city).trim() || city,
+                                timezone: String(res.timezone || '').trim() || fallbackTz,
+                            }
+                        } catch {
+                            return {
+                                city,
+                                timezone: String(c.timezone ?? '').trim() || fallbackTz,
+                            }
+                        }
+                    }),
+                )
+
+                description = JSON.stringify({ clocks: resolved })
+            }
+
+            if (description == null) return
+
+            await apiPut(`/api/apps/${itemId}`, {
+                groupId: editItem.groupId,
+                name: editItem.name,
+                description,
+                url: editItem.url,
+                iconPath: editItem.iconPath,
+                iconSource: editItem.iconSource,
+            })
+
+            // Update local state
+            widgetLastSavedDescRef.current = description
+            setApps((prev) => prev.map((a) => (a.id === itemId ? { ...a, description } : a)))
+            setEditItem((prev) => (prev && prev.id === itemId ? { ...prev, description } : prev))
+        } catch (e2) {
+            setEditErr(e2 instanceof Error ? e2.message : 'failed')
+        } finally {
+            setWidgetSaving(false)
+        }
+    }, [editItem, widgetKind, wCity, mkSymbols, tzClocks, ensureFourMarketSymbols])
+
     // When opening Weather settings, normalize existing city to full display name
     // without fighting user edits while typing.
     useEffect(() => {
@@ -455,6 +528,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         if (!me?.admin) return
         if (!editOpen || !editItem || !editItem.url.startsWith('widget:') || !widgetKind) return
 
+        // Skip auto-save for weather, timezones, and markets - they use manual save button
+        if (widgetKind === 'weather' || widgetKind === 'timezones' || widgetKind === 'markets') return
+
         if (widgetAutoSaveTimerRef.current) window.clearTimeout(widgetAutoSaveTimerRef.current)
 
         widgetAutoSaveTimerRef.current = window.setTimeout(() => {
@@ -464,9 +540,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             const run = async () => {
                 let description: string | null = null
                 try {
-                    if (widgetKind === 'weather') {
-                        description = JSON.stringify({ city: wCity.trim() })
-                    } else if (widgetKind === 'metrics') {
+                    if (widgetKind === 'metrics') {
                         description = JSON.stringify({
                             showCpu: !!mShowCpu,
                             showMem: !!mShowMem,
@@ -474,26 +548,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                             showNet: !!mShowNet,
                             refreshSec: mRefreshSec,
                         })
-                    } else if (widgetKind === 'markets') {
-                        const symbols = ensureFourMarketSymbols(mkSymbols)
-                        description = JSON.stringify({ symbols })
                     } else if (widgetKind === 'holidays') {
                         const countries = normalizeCountryCodes(hCountryCodes)
                         description = JSON.stringify({ countries })
-                    } else if (widgetKind === 'timezones') {
-                        // IMPORTANT: do NOT auto-resolve/overwrite city strings while typing.
-                        // We only resolve (city->timezone & full city label) when the user picks a suggestion.
-                        const next = (Array.isArray(tzClocks) ? tzClocks : []).slice(0, 4)
-                        while (next.length < 4) next.push({ city: DEFAULT_CLOCKS[next.length]?.city || `City ${next.length + 1}`, timezone: '' })
-                        const clocks = next.map((c, idx) => {
-                            const fallbackCity = DEFAULT_CLOCKS[idx]?.city || `City ${idx + 1}`
-                            const fallbackTz = DEFAULT_CLOCKS[idx]?.timezone || 'UTC'
-                            return {
-                                city: String(c.city ?? '').trim() || fallbackCity,
-                                timezone: String(c.timezone ?? '').trim() || fallbackTz,
-                            }
-                        })
-                        description = JSON.stringify({ clocks })
                     }
 
                     if (description == null) return
@@ -531,15 +588,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         editOpen,
         editItem,
         widgetKind,
-        wCity,
-        tzClocks,
         mShowCpu,
         mShowMem,
         mShowDisk,
         mShowNet,
         mRefreshSec,
-        mkSymbols,
-        ensureFourMarketSymbols,
         hCountryCodes,
         hCountryQuery,
     ])
@@ -603,21 +656,21 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
         if (!isWidget) {
             // Handle Lucide icon selection
-                if (editIconMode === 'lucide' && editLucideIcon) {
-                    iconPath = `lucide:${editLucideIcon}`
-                    iconSource = 'lucide'
-                } else {
-                    setIconResolving(true)
-                    try {
-                        if (editIconMode === 'auto') {
-                            const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
-                            iconPath = res.iconPath || null
-                            iconSource = res.iconSource || null
-                        } else if (editIconMode === 'url' && editIconUrl.trim()) {
-                            iconPath = editIconUrl.trim()
-                            iconSource = 'url'
-                        }
-                    } catch {
+            if (editIconMode === 'lucide' && editLucideIcon) {
+                iconPath = `lucide:${editLucideIcon}`
+                iconSource = 'lucide'
+            } else {
+                setIconResolving(true)
+                try {
+                    if (editIconMode === 'auto') {
+                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url })
+                        iconPath = res.iconPath || null
+                        iconSource = res.iconSource || null
+                    } else if (editIconMode === 'url' && editIconUrl.trim()) {
+                        iconPath = editIconUrl.trim()
+                        iconSource = 'url'
+                    }
+                } catch {
                     // keep existing icon if resolve fails
                 } finally {
                     setIconResolving(false)
@@ -860,9 +913,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             setCityOptions([])
             return
         }
-        
+
         const seq = ++citySearchSeqRef.current
-        
+
         const id = window.setTimeout(async () => {
             try {
                 const reqLang = widgetKind === 'timezones' ? 'en' : lang
@@ -1001,7 +1054,34 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             }}
         >
             <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-                <img src={bgUrl} alt="background" className="h-full w-full scale-105 object-cover blur-sm" />
+                {isVideoBackground ? (
+                    <>
+                        {videoReady && videoUrl ? (
+                            <video
+                                src={videoUrl}
+                                autoPlay
+                                loop
+                                muted
+                                playsInline
+                                className="h-full w-full scale-105 object-cover"
+                            />
+                        ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-black">
+                                {isDownloading ? (
+                                    <div className="text-center text-white/70">
+                                        <div className="mb-2 h-8 w-8 mx-auto animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                                        <div className="text-sm">{t('下载背景视频中...', 'Downloading video...')}</div>
+                                        <div className="text-xs text-white/50">{downloadProgress}%</div>
+                                    </div>
+                                ) : (
+                                    <div className="text-white/50 text-sm">{t('准备中...', 'Loading...')}</div>
+                                )}
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <img src={bgUrl} alt="background" className="h-full w-full scale-105 object-cover blur-sm" />
+                )}
                 <div className="absolute inset-0 bg-black/60" />
             </div>
 
@@ -1153,7 +1233,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         metrics={metrics}
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
-                                        lang={lang}
                                     />
                                 )
                             }
@@ -1219,7 +1298,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         metrics={metrics}
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
-                                        lang={lang}
                                     />
                                 </div>
                             )
@@ -1273,13 +1351,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                     setMe(m)
                     await reloadDashboard()
                 }}
-                lang={lang}
             />
 
             <SettingsDialog
                 open={settingsOpen}
                 onClose={() => setSettingsOpen(false)}
-                lang={lang}
                 siteDraft={siteDraft}
                 setSiteDraft={setSiteDraft}
                 schedulePersistSiteDraft={schedulePersistSiteDraft}
@@ -1299,7 +1375,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                     await reloadDashboard()
                 }}
                 hasSystemGroup={hasSystemGroup}
-                lang={lang}
             />
 
             <AddItemDialog
@@ -1311,13 +1386,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                     await apiPost('/api/apps', data)
                     await reloadDashboard()
                 }}
-                lang={lang}
             />
 
             <EditItemDialog
                 open={editOpen}
                 onClose={() => setEditOpen(false)}
-                lang={lang}
                 editErr={editErr}
                 editItem={editItem}
                 editName={editName}
@@ -1335,6 +1408,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 iconResolving={iconResolving}
                 saveItem={saveItem}
                 widgetKind={widgetKind}
+                onSaveWidget={handleSaveWidget}
+                widgetSaving={widgetSaving}
                 wCity={wCity}
                 setWCity={setWCity}
                 setCityQuery={setCityQuery}

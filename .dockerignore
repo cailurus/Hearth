@@ -10,3 +10,6 @@ web/dist
 **/*.out
 
 .DS_Store
+
+# Video assets (downloaded at runtime from GitHub)
+web/public/assets/videos/

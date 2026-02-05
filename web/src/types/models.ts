@@ -147,6 +147,6 @@ export type Language = 'zh' | 'en' | string
 
 export type GroupKind = 'system' | 'app' | string
 
-export type BackgroundProvider = 'bing' | 'bing_daily' | 'bing_random' | 'picsum' | 'default' | string
+export type BackgroundProvider = 'bing' | 'bing_daily' | 'bing_random' | 'picsum' | 'default' | 'default_video' | string
 
 export type MarketKind = 'stock' | 'crypto' | string

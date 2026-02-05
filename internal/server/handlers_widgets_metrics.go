@@ -340,7 +340,7 @@ func (s *Server) handleGetHolidays(w http.ResponseWriter, r *http.Request) {
 	}
 
 	countries := splitCSVish(raw)
-	res, err := widgets.UpcomingPublicHolidays(r.Context(), countries, time.Now(), 4)
+	res, err := widgets.UpcomingPublicHolidays(r.Context(), countries, time.Now(), 5)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

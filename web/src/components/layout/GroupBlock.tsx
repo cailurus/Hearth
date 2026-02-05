@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
 import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
@@ -10,6 +11,7 @@ import { WeatherWidget } from '../widgets/WeatherWidget'
 import { MarketsWidget } from '../widgets/MarketsWidget'
 import { HolidaysWidget } from '../widgets/HolidaysWidget'
 import { TimezonesWidget } from '../widgets/TimezonesWidget'
+import { Spinner } from '../ui/Spinner'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg } from '../../utils'
 
@@ -35,7 +37,6 @@ interface GroupBlockProps {
     metrics: HostMetrics | null
     netRate?: { upBps: number; downBps: number } | null
     localTimezone: string
-    lang: 'zh' | 'en'
 }
 
 export function GroupBlock({
@@ -60,13 +61,11 @@ export function GroupBlock({
     metrics,
     netRate,
     localTimezone,
-    lang,
 }: GroupBlockProps) {
+    const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
     const draggingIdRef = useRef<string | null>(null)
-
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
 
     const isSystemGroup = groupKind === 'system' || name === '系统组件' || name === 'System Tools' || name === 'System Widgets'
     const isWidgetItem = (it: AppItem) => !!it.url?.startsWith('widget:')
@@ -97,20 +96,20 @@ export function GroupBlock({
                             onClick={() => onAdd(groupId)}
                             className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-white/20 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
                             aria-label="add"
-                            title={t('添加', 'Add')}
+                            title={t('widgets:add')}
                         >
                             +
                         </button>
                         {groupId && onDeleteGroup ? (
                             <button
                                 onClick={() => {
-                                    if (window.confirm(t('确定要删除这个组及其所有内容吗？', 'Delete this group and all its contents?'))) {
+                                    if (window.confirm(t('widgets:deleteGroupConfirm'))) {
                                         onDeleteGroup(groupId)
                                     }
                                 }}
                                 className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-red-500/50 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
                                 aria-label="delete group"
-                                title={t('删除组', 'Delete Group')}
+                                title={t('widgets:deleteGroup')}
                             >
                                 −
                             </button>
@@ -126,7 +125,7 @@ export function GroupBlock({
                 }
             >
                 {items.length === 0 ? (
-                    <div className="col-span-full rounded-2xl border border-white/10 bg-black/40 p-3 text-sm text-white/60">{t('暂无内容', 'No items')}</div>
+                    <div className="col-span-full rounded-2xl border border-white/10 bg-black/40 p-3 text-sm text-white/60">{t('widgets:noItems')}</div>
                 ) : (
                     items.map((a) => {
                         const widget = a.url?.startsWith('widget:') ? a.url.slice('widget:'.length) : null
@@ -142,8 +141,9 @@ export function GroupBlock({
                                             ? 'col-span-2 sm:col-span-1'
                                             : ''
 
-                            // Use auto height for all widgets - let content determine size
-                            const widgetHeightClass = 'h-auto'
+                            // Fixed height for all widgets to prevent layout shift during loading
+                            // All standard widgets use the same height for visual consistency
+                            const widgetHeightClass = 'h-[190px] sm:h-[210px]'
 
                             const widgetPadClass = 'p-4'
 
@@ -206,7 +206,7 @@ export function GroupBlock({
                                             <button
                                                 className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
                                                 aria-label="edit"
-                                                title={t('设置', 'Edit')}
+                                                title={t('widgets:edit')}
                                                 onClick={(e) => {
                                                     e.stopPropagation()
                                                     onEdit(a)
@@ -217,7 +217,7 @@ export function GroupBlock({
                                             <button
                                                 className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
                                                 aria-label="delete"
-                                                title={t('删除', 'Delete')}
+                                                title={t('common:delete')}
                                                 onClick={(e) => {
                                                     e.stopPropagation()
                                                     onDelete(a.id)
@@ -229,21 +229,20 @@ export function GroupBlock({
                                     ) : null}
                                     <div className="mb-3 truncate whitespace-nowrap text-sm font-semibold leading-tight text-white/90">
                                         {widget === 'weather'
-                                            ? t('天气', 'Weather')
+                                            ? t('widgets:weather')
                                             : widget === 'metrics'
-                                                ? t('系统状态', 'System Status')
+                                                ? t('widgets:systemStatus')
                                                 : widget === 'markets'
-                                                    ? t('行情', 'Markets')
+                                                    ? t('widgets:markets')
                                                     : widget === 'holidays'
-                                                        ? t('未来假日', 'Upcoming Holidays')
-                                                        : t('世界时钟', 'World Clock')}
+                                                        ? t('widgets:upcomingHolidays')
+                                                        : t('widgets:worldClock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
                                             <WeatherWidget
-                                                data={(weatherById?.[a.id] ?? weather) || null}
-                                                error={(weatherErrById?.[a.id] ?? weatherErr) || null}
-                                                lang={lang}
+                                                data={(weatherById && a.id in weatherById) ? (weatherById[a.id] ?? weather) : null}
+                                                error={(weatherErrById && a.id in weatherErrById) ? (weatherErrById[a.id] ?? weatherErr) : null}
                                             />
                                         ) : widget === 'metrics' ? (
                                             metrics ? (
@@ -259,7 +258,7 @@ export function GroupBlock({
                                                     ) : null}
                                                     {cfg?.showMem !== false ? (
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><MemoryStick className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('内存', 'Mem')}</span>
+                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><MemoryStick className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:memory')}</span>
                                                             <span className="tabular-nums text-right min-w-0 truncate">
                                                                 {formatGiB(metrics.memUsed)}/{formatGiB(metrics.memTotal)} · {metrics.memPercent.toFixed(0)}%
                                                             </span>
@@ -267,7 +266,7 @@ export function GroupBlock({
                                                     ) : null}
                                                     {cfg?.showDisk !== false ? (
                                                         <div className="flex items-center justify-between gap-2">
-                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><HardDrive className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('磁盘', 'Disk')}</span>
+                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><HardDrive className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:disk')}</span>
                                                             <span className="tabular-nums text-right min-w-0 truncate">
                                                                 {formatGiB(metrics.diskUsed)}/{formatGiB(metrics.diskTotal)} · {metrics.diskPercent.toFixed(0)}%
                                                             </span>
@@ -277,23 +276,23 @@ export function GroupBlock({
                                                     {cfg?.showNet !== false ? (
                                                         <>
                                                             <div className="flex items-center justify-between gap-2">
-                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('上传', 'Up')}</span>
+                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:upload')}</span>
                                                                 <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.upBps) : '—'}</span>
                                                             </div>
                                                             <div className="flex items-center justify-between gap-2">
-                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('下载', 'Down')}</span>
+                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:download')}</span>
                                                                 <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.downBps) : '—'}</span>
                                                             </div>
                                                         </>
                                                     ) : null}
                                                 </div>
                                             ) : (
-                                                <div className="flex h-full items-center justify-center text-sm text-white/60">{t('暂不可用', 'Unavailable')}</div>
+                                                <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
                                             )
                                         ) : widget === 'markets' ? (
-                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} lang={lang} />
+                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} />
                                         ) : widget === 'holidays' ? (
-                                            <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} lang={lang} />
+                                            <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}
@@ -361,7 +360,7 @@ export function GroupBlock({
                                         <button
                                             className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
                                             aria-label="edit"
-                                            title={t('设置', 'Edit')}
+                                            title={t('widgets:edit')}
                                             onClick={(e) => {
                                                 e.preventDefault()
                                                 e.stopPropagation()
@@ -373,7 +372,7 @@ export function GroupBlock({
                                         <button
                                             className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
                                             aria-label="delete"
-                                            title={t('删除', 'Delete')}
+                                            title={t('common:delete')}
                                             onClick={(e) => {
                                                 e.preventDefault()
                                                 e.stopPropagation()

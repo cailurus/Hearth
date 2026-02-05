@@ -1,20 +1,24 @@
+import { useTranslation } from 'react-i18next'
 import type { Weather } from '../../types'
 import { cityShort } from '../../utils/helpers'
+import { Spinner } from '../ui/Spinner'
 
 interface WeatherWidgetProps {
     data: Weather | null
     error?: string | null
-    lang: 'zh' | 'en'
 }
 
 /**
  * 天气组件 - 显示当前天气和5日预报
  */
-export function WeatherWidget({ data, error, lang }: WeatherWidgetProps) {
+export function WeatherWidget({ data, error }: WeatherWidgetProps) {
+    const { t, i18n } = useTranslation('widgets')
+    const lang = i18n.language === 'en' ? 'en' : 'zh'
+
     if (!data) {
         const msg = String(error || '').trim()
         if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
-        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+        return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
     const cond = weatherCodeLabel(data.weatherCode, lang)
 
@@ -28,11 +32,11 @@ export function WeatherWidget({ data, error, lang }: WeatherWidgetProps) {
                     <WeatherGlyph code={data.weatherCode} windKph={data.windSpeedKph} className="w-10 h-10 sm:w-11 sm:h-11" />
                 </div>
                 <div className="col-span-4 min-w-0 flex flex-col justify-center">
-                    <div className="truncate text-sm font-semibold text-white">{cityShort(data.city) || (lang === 'en' ? 'Configured location' : '已配置位置')}</div>
+                    <div className="truncate text-sm font-semibold text-white">{cityShort(data.city) || t('configuredLocation')}</div>
                     <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-white/80">
                         <span className="text-lg sm:text-xl font-semibold text-white">{data.temperatureC.toFixed(1)}°C</span>
                         <span className="text-xs sm:text-sm text-white/70">{cond}</span>
-                        <span className="text-xs sm:text-sm text-white/70 whitespace-nowrap">{lang === 'en' ? 'Wind' : '风'} {data.windSpeedKph.toFixed(1)} km/h</span>
+                        <span className="text-xs sm:text-sm text-white/70 whitespace-nowrap">{t('wind')} {data.windSpeedKph.toFixed(1)} km/h</span>
                     </div>
                 </div>
             </div>

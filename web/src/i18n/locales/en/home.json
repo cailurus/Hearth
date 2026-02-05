@@ -1,0 +1,11 @@
+{
+    "addItem": "Add Item",
+    "addFailed": "Failed to add",
+    "groupType": "Group type",
+    "groupName": "Group name",
+    "appGroup": "App group",
+    "systemGroup": "System group",
+    "systemGroupHint": "Only one system group; system groups only allow widgets, app groups only allow app links.",
+    "createFailed": "Failed to create",
+    "itemSettings": "Item Settings"
+}

@@ -3,6 +3,7 @@
  */
 
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui/Modal'
 import { Spinner } from '../ui/Spinner'
 import { TimezonePicker } from '../pickers/TimezonePicker'
@@ -17,7 +18,6 @@ type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'
 interface SettingsDialogProps {
     open: boolean
     onClose: () => void
-    lang: 'zh' | 'en'
     siteDraft: SiteDraft | null
     setSiteDraft: React.Dispatch<React.SetStateAction<SiteDraft | null>>
     schedulePersistSiteDraft: (draft: SiteDraft, timing: 'now' | 'debounce') => void
@@ -34,7 +34,6 @@ interface SettingsDialogProps {
 export function SettingsDialog({
     open,
     onClose,
-    lang,
     siteDraft,
     setSiteDraft,
     schedulePersistSiteDraft,
@@ -45,8 +44,8 @@ export function SettingsDialog({
     refreshBackground,
     onLogout,
 }: SettingsDialogProps) {
+    const { t } = useTranslation(['settings', 'common'])
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
 
     // Password change state (managed internally)
     const [oldPassword, setOldPassword] = useState('')
@@ -62,15 +61,15 @@ export function SettingsDialog({
         setPasswordSuccess(false)
 
         if (!oldPassword || !newPassword || !confirmPassword) {
-            setPasswordErr(lang === 'en' ? 'All fields are required' : '请填写所有字段')
+            setPasswordErr(t('settings:passwordRequired'))
             return
         }
         if (newPassword.length < 4) {
-            setPasswordErr(lang === 'en' ? 'Password must be at least 4 characters' : '密码至少需要4个字符')
+            setPasswordErr(t('settings:passwordTooShort'))
             return
         }
         if (newPassword !== confirmPassword) {
-            setPasswordErr(lang === 'en' ? 'Passwords do not match' : '两次输入的密码不一致')
+            setPasswordErr(t('settings:passwordMismatch'))
             return
         }
 
@@ -82,7 +81,7 @@ export function SettingsDialog({
             setNewPassword('')
             setConfirmPassword('')
         } catch (err) {
-            setPasswordErr(err instanceof Error ? err.message : (lang === 'en' ? 'Failed to change password' : '修改密码失败'))
+            setPasswordErr(err instanceof Error ? err.message : t('settings:passwordChangeFailed'))
         } finally {
             setChangingPassword(false)
         }
@@ -91,9 +90,9 @@ export function SettingsDialog({
     return (
         <Modal
             open={open}
-            title={t('系统设置', 'Settings')}
+            title={t('settings:title')}
             onClose={onClose}
-            closeText={t('关闭', 'Close')}
+            closeText={t('common:close')}
             maxWidthClass="max-w-2xl"
             containerClassName="items-start pt-[12vh] sm:pt-[16vh]"
         >
@@ -104,25 +103,25 @@ export function SettingsDialog({
                         onClick={() => setSettingsTab('general')}
                         className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'general' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
                     >
-                        {t('通用', 'General')}
+                        {t('settings:general')}
                     </button>
                     <button
                         onClick={() => setSettingsTab('time')}
                         className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'time' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
                     >
-                        {t('时间', 'Time')}
+                        {t('settings:time')}
                     </button>
                     <button
                         onClick={() => setSettingsTab('background')}
                         className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'background' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
                     >
-                        {t('背景', 'Background')}
+                        {t('settings:background')}
                     </button>
                     <button
                         onClick={() => setSettingsTab('account')}
                         className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'account' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
                     >
-                        {t('账户', 'Account')}
+                        {t('settings:account')}
                     </button>
                 </div>
 
@@ -134,7 +133,7 @@ export function SettingsDialog({
                     {settingsTab === 'general' && (
                         <div className="space-y-4">
                             <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('标题', 'Title')}</div>
+                                <div className="mb-1 text-white/70">{t('settings:siteTitle')}</div>
                                 <input
                                     value={siteDraft?.siteTitle ?? ''}
                                     onChange={(e) =>
@@ -150,7 +149,7 @@ export function SettingsDialog({
                             </label>
 
                             <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('语言', 'Language')}</div>
+                                <div className="mb-1 text-white/70">{t('settings:language')}</div>
                                 <select
                                     value={siteDraft?.language || 'zh'}
                                     onChange={(e) =>
@@ -163,8 +162,8 @@ export function SettingsDialog({
                                     }
                                     className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                 >
-                                    <option value="zh">{t('中文', 'Chinese')}</option>
-                                    <option value="en">{t('英文', 'English')}</option>
+                                    <option value="zh">{t('settings:languageChinese')}</option>
+                                    <option value="en">{t('settings:languageEnglish')}</option>
                                 </select>
                             </label>
                         </div>
@@ -195,7 +194,7 @@ export function SettingsDialog({
                                             })
                                         }
                                     />
-                                    {t('显示日期与时间', 'Show date & time')}
+                                    {t('settings:showDateTime')}
                                 </label>
 
                                 <label className={`flex items-center gap-2 text-sm ${siteDraft?.time?.enabled ? 'text-white/80' : 'text-white/40'}`}>
@@ -220,12 +219,12 @@ export function SettingsDialog({
                                             })
                                         }
                                     />
-                                    {t('显示秒', 'Show seconds')}
+                                    {t('settings:showSeconds')}
                                 </label>
                             </div>
 
                             <label className="block text-sm">
-                                <div className="mb-1 text-white/70">{t('当前时区', 'Current timezone')}</div>
+                                <div className="mb-1 text-white/70">{t('settings:currentTimezone')}</div>
                                 <TimezonePicker
                                     value={systemTimezone}
                                     onChange={() => {
@@ -234,7 +233,7 @@ export function SettingsDialog({
                                     options={[systemTimezone]}
                                     placeholder={systemTimezone}
                                 />
-                                <div className="mt-1 text-xs text-white/50">{t('自动从系统读取', 'Auto from system')}</div>
+                                <div className="mt-1 text-xs text-white/50">{t('settings:timezoneAutoHint')}</div>
                             </label>
                         </div>
                     )}
@@ -244,7 +243,7 @@ export function SettingsDialog({
                         <div className="space-y-4">
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                 <label className="block text-sm">
-                                    <div className="mb-1 text-white/70">{t('背景来源', 'Provider')}</div>
+                                    <div className="mb-1 text-white/70">{t('settings:bgProvider')}</div>
                                     <select
                                         value={siteDraft?.background.provider ?? 'default'}
                                         onChange={(e) =>
@@ -258,7 +257,7 @@ export function SettingsDialog({
                                                         interval:
                                                             e.target.value === 'bing_daily'
                                                                 ? '24h'
-                                                                : e.target.value === 'default'
+                                                                : e.target.value === 'default' || e.target.value === 'default_video'
                                                                     ? '0'
                                                                     : prev.background.interval,
                                                     },
@@ -269,16 +268,17 @@ export function SettingsDialog({
                                         }
                                         className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                     >
-                                        <option value="default">{t('系统默认', 'Default')}</option>
+                                        <option value="default">{t('settings:bgDefault')}</option>
+                                        <option value="default_video">{t('settings:bgDefaultVideo')}</option>
                                         <option value="bing_random">Bing Random</option>
                                         <option value="bing_daily">Bing Daily</option>
                                         <option value="picsum">Picsum</option>
                                     </select>
                                 </label>
 
-                                {siteDraft?.background.provider === 'bing_daily' || siteDraft?.background.provider === 'default' ? null : (
+                                {siteDraft?.background.provider === 'bing_daily' || siteDraft?.background.provider === 'default' || siteDraft?.background.provider === 'default_video' ? null : (
                                     <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('更新间隔', 'Refresh interval')}</div>
+                                        <div className="mb-1 text-white/70">{t('settings:bgRefreshInterval')}</div>
                                         <select
                                             value={siteDraft?.background.interval ?? '0'}
                                             onChange={(e) =>
@@ -291,12 +291,12 @@ export function SettingsDialog({
                                             }
                                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                                         >
-                                            <option value="0">{t('手动', 'Manual')}</option>
-                                            <option value="1h">{t('1小时', '1 hour')}</option>
-                                            <option value="3h">{t('3小时', '3 hours')}</option>
-                                            <option value="6h">{t('6小时', '6 hours')}</option>
-                                            <option value="12h">{t('12小时', '12 hours')}</option>
-                                            <option value="24h">{t('每日', 'Daily')}</option>
+                                            <option value="0">{t('settings:bgManual')}</option>
+                                            <option value="1h">{t('settings:bgHour1')}</option>
+                                            <option value="3h">{t('settings:bgHours3')}</option>
+                                            <option value="6h">{t('settings:bgHours6')}</option>
+                                            <option value="12h">{t('settings:bgHours12')}</option>
+                                            <option value="24h">{t('settings:bgDaily')}</option>
                                         </select>
                                     </label>
                                 )}
@@ -309,7 +309,7 @@ export function SettingsDialog({
                                     disabled={bgRefreshing}
                                     className="inline-flex items-center rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20 disabled:opacity-60"
                                 >
-                                    {t('更新', 'Refresh')}
+                                    {t('settings:bgRefresh')}
                                 </button>
                                 {bgRefreshing ? <Spinner /> : null}
                                 {bgRefreshErr ? (
@@ -329,29 +329,29 @@ export function SettingsDialog({
                         <div className="space-y-6">
                             {/* Logout section */}
                             <div className="flex items-center justify-between rounded-lg border border-white/10 bg-white/5 p-3">
-                                <div className="text-sm text-white/70">{t('当前登录', 'Logged in as')} <span className="text-white">admin</span></div>
+                                <div className="text-sm text-white/70">{t('settings:loggedInAs')} <span className="text-white">admin</span></div>
                                 <button
                                     onClick={onLogout}
                                     className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
                                 >
-                                    {t('登出', 'Logout')}
+                                    {t('common:logout')}
                                 </button>
                             </div>
 
                             {/* Password Change Section */}
                             <div>
-                                <div className="mb-3 text-sm font-semibold text-white/80">{t('修改密码', 'Change Password')}</div>
+                                <div className="mb-3 text-sm font-semibold text-white/80">{t('settings:changePassword')}</div>
                                 {passwordErr ? (
                                     <div className="mb-3 rounded-lg border border-red-400/30 bg-red-900/20 p-2 text-sm text-red-300">{passwordErr}</div>
                                 ) : null}
                                 {passwordSuccess ? (
                                     <div className="mb-3 rounded-lg border border-green-400/30 bg-green-900/20 p-2 text-sm text-green-300">
-                                        {t('密码已更新', 'Password updated successfully')}
+                                        {t('settings:passwordUpdated')}
                                     </div>
                                 ) : null}
                                 <form onSubmit={onChangePassword} className="space-y-3">
                                     <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('当前密码', 'Current password')}</div>
+                                        <div className="mb-1 text-white/70">{t('settings:currentPassword')}</div>
                                         <input
                                             type="password"
                                             value={oldPassword}
@@ -360,7 +360,7 @@ export function SettingsDialog({
                                         />
                                     </label>
                                     <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('新密码', 'New password')}</div>
+                                        <div className="mb-1 text-white/70">{t('settings:newPassword')}</div>
                                         <input
                                             type="password"
                                             value={newPassword}
@@ -369,7 +369,7 @@ export function SettingsDialog({
                                         />
                                     </label>
                                     <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('确认新密码', 'Confirm new password')}</div>
+                                        <div className="mb-1 text-white/70">{t('settings:confirmNewPassword')}</div>
                                         <input
                                             type="password"
                                             value={confirmPassword}
@@ -382,7 +382,7 @@ export function SettingsDialog({
                                         disabled={changingPassword}
                                         className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-50"
                                     >
-                                        {changingPassword ? (t('更新中...', 'Updating...')) : (t('更新密码', 'Update password'))}
+                                        {changingPassword ? t('settings:updatingPassword') : t('settings:updatePassword')}
                                     </button>
                                 </form>
                             </div>

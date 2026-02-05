@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Cpu, HardDrive, MemoryStick, Upload, Download } from 'lucide-react'
 import type { HostMetrics } from '../../types'
 import { formatBytes, formatPercent } from '../../utils'
+import { Spinner } from '../ui/Spinner'
 
 /**
  * 智能缩减 CPU 型号名称
@@ -153,8 +154,8 @@ export function MetricsWidget({ data, netRate, config, lang }: MetricsWidgetProp
 
     if (!data) {
         return (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                {t('加载中...', 'Loading...')}
+            <div className="flex items-center justify-center h-full">
+                <Spinner size="sm" className="border-white/40" />
             </div>
         )
     }
@@ -169,9 +170,9 @@ export function MetricsWidget({ data, netRate, config, lang }: MetricsWidgetProp
     }, [data?.cpuModel])
 
     return (
-        <div className="flex flex-col gap-3 p-4 h-full">
+        <div className="flex flex-col gap-2 h-full">
             <div
-                className="text-xs text-gray-500 dark:text-gray-400 truncate"
+                className="text-[11px] sm:text-xs text-white/60 truncate"
                 title={data.cpuModel || ''}
             >
                 {cpuModelDisplay ? (
@@ -184,22 +185,22 @@ export function MetricsWidget({ data, netRate, config, lang }: MetricsWidgetProp
                 )}
             </div>
 
-            <div className="flex-1 flex flex-col justify-center gap-2">
+            <div className="flex-1 flex flex-col justify-center gap-1.5">
                 {items.map((item) => (
                     <div key={item.key} className="flex items-center gap-2">
-                        <span className="text-gray-500 dark:text-gray-400">{item.icon}</span>
-                        <span className="text-xs text-gray-500 dark:text-gray-400 w-12 shrink-0">
+                        <span className="text-white/60">{item.icon}</span>
+                        <span className="text-[10px] sm:text-[11px] text-white/60 w-10 sm:w-12 shrink-0">
                             {item.label}
                         </span>
                         {item.percent !== undefined ? (
-                            <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
                                 <div
                                     className={`h-full rounded-full transition-all ${getPercentColor(item.percent)}`}
                                     style={{ width: `${Math.min(100, item.percent)}%` }}
                                 />
                             </div>
                         ) : null}
-                        <span className="text-xs text-gray-700 dark:text-gray-300 min-w-[80px] text-right">
+                        <span className="text-[10px] sm:text-[11px] text-white/80 min-w-[70px] sm:min-w-[80px] text-right tabular-nums">
                             {item.value}
                         </span>
                     </div>

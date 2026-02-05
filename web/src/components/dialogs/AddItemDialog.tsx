@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui'
 import { apiPost } from '../../api'
 import type { WidgetKind, IconResolve } from '../../types'
@@ -11,7 +12,6 @@ interface AddItemDialogProps {
     groupId: string | null
     groupKind: 'system' | 'app'
     onSubmit: (data: AddItemData) => Promise<void>
-    lang: 'zh' | 'en'
 }
 
 interface AddItemData {
@@ -23,12 +23,12 @@ interface AddItemData {
     iconSource: string | null
 }
 
-const WIDGET_TYPES: { kind: WidgetKind; labelZh: string; labelEn: string }[] = [
-    { kind: 'weather', labelZh: '天气', labelEn: 'Weather' },
-    { kind: 'timezones', labelZh: '世界时钟', labelEn: 'World Clock' },
-    { kind: 'metrics', labelZh: '系统状态', labelEn: 'System Status' },
-    { kind: 'markets', labelZh: '行情', labelEn: 'Markets' },
-    { kind: 'holidays', labelZh: '未来假日', labelEn: 'Upcoming Holidays' },
+const WIDGET_TYPES: { kind: WidgetKind; labelKey: string }[] = [
+    { kind: 'weather', labelKey: 'widgets:weather' },
+    { kind: 'timezones', labelKey: 'widgets:worldClock' },
+    { kind: 'metrics', labelKey: 'widgets:systemStatus' },
+    { kind: 'markets', labelKey: 'widgets:markets' },
+    { kind: 'holidays', labelKey: 'widgets:upcomingHolidays' },
 ]
 
 const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
@@ -57,9 +57,8 @@ export function AddItemDialog({
     groupId,
     groupKind,
     onSubmit,
-    lang,
 }: AddItemDialogProps) {
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+    const { t } = useTranslation(['home', 'common', 'widgets'])
 
     const [name, setName] = useState('')
     const [desc, setDesc] = useState('')
@@ -163,11 +162,20 @@ export function AddItemDialog({
             setError(null)
             setLoading(true)
             try {
-                const widgetName = WIDGET_TYPES.find((w) => w.kind === kind)?.[lang === 'en' ? 'labelEn' : 'labelZh'] || kind
+                const widgetType = WIDGET_TYPES.find((w) => w.kind === kind)
+                // Use the translation key directly based on the kind
+                const widgetName = widgetType
+                    ? kind === 'weather' ? t('widgets:weather')
+                        : kind === 'timezones' ? t('widgets:worldClock')
+                            : kind === 'metrics' ? t('widgets:systemStatus')
+                                : kind === 'markets' ? t('widgets:markets')
+                                    : kind === 'holidays' ? t('widgets:upcomingHolidays')
+                                        : kind
+                    : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
-                    name: widgetName,
+                    name: String(widgetName),
                     description: config ? JSON.stringify(config) : null,
                     url: `widget:${kind}`,
                     iconPath: null,
@@ -175,12 +183,12 @@ export function AddItemDialog({
                 })
                 onClose()
             } catch (err) {
-                setError(err instanceof Error ? err.message : t('添加失败', 'Failed to add'))
+                setError(err instanceof Error ? err.message : t('home:addFailed'))
             } finally {
                 setLoading(false)
             }
         },
-        [groupId, onSubmit, onClose, lang, t]
+        [groupId, onSubmit, onClose, t]
     )
 
     const handleAddAppLink = useCallback(
@@ -245,7 +253,7 @@ export function AddItemDialog({
                 })
                 onClose()
             } catch (err) {
-                setError(err instanceof Error ? err.message : t('添加失败', 'Failed to add'))
+                setError(err instanceof Error ? err.message : t('home:addFailed'))
             } finally {
                 setLoading(false)
             }
@@ -281,7 +289,7 @@ export function AddItemDialog({
     const currentPreview = getCurrentPreviewIcon()
 
     return (
-        <Modal open={open} title={t('添加组件', 'Add Item')} onClose={handleClose} closeText={t('关闭', 'Close')}>
+        <Modal open={open} title={t('home:addItem')} onClose={handleClose} closeText={t('common:close')}>
             {error && (
                 <div className="mb-3 rounded-lg border border-white/10 bg-black/40 p-3 text-sm">
                     {error}
@@ -297,7 +305,12 @@ export function AddItemDialog({
                             className="h-10 rounded-lg border border-white/10 bg-black/40 px-2 text-xs hover:bg-black/30 disabled:opacity-50"
                         >
                             <div className="flex h-full w-full items-center justify-center text-center leading-tight">
-                                {lang === 'en' ? widget.labelEn : widget.labelZh}
+                                {widget.kind === 'weather' ? t('widgets:weather')
+                                    : widget.kind === 'timezones' ? t('widgets:worldClock')
+                                        : widget.kind === 'metrics' ? t('widgets:systemStatus')
+                                            : widget.kind === 'markets' ? t('widgets:markets')
+                                                : widget.kind === 'holidays' ? t('widgets:upcomingHolidays')
+                                                    : widget.kind}
                             </div>
                         </button>
                     ))}
@@ -321,18 +334,18 @@ export function AddItemDialog({
                         </div>
                     </label>
                     <label className="block text-sm">
-                        <div className="mb-1 text-white/70">{t('名称', 'Name')}</div>
+                        <div className="mb-1 text-white/70">{t('common:name')}</div>
                         <input
                             value={name}
                             onChange={(e) => handleNameChange(e.target.value)}
                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                         />
                     </label>
-                    
+
                     {/* Icon selection - Three parallel modes */}
                     <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-                        <div className="mb-3 text-sm font-semibold text-white/80">{t('图标', 'Icon')}</div>
-                        
+                        <div className="mb-3 text-sm font-semibold text-white/80">{t('common:icon')}</div>
+
                         {/* Icon preview */}
                         <div className="flex items-center gap-3 mb-3">
                             <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/5">
@@ -352,11 +365,11 @@ export function AddItemDialog({
                                 )}
                             </div>
                             <div className="text-xs text-white/50">
-                                {iconMode === 'lucide' && selectedLucideIcon 
+                                {iconMode === 'lucide' && selectedLucideIcon
                                     ? `Lucide: ${selectedLucideIcon}`
                                     : iconMode === 'url'
-                                    ? t('自定义图标 URL', 'Custom Icon URL')
-                                    : t('从链接自动获取', 'Auto from URL')}
+                                        ? t('common:iconCustomUrl')
+                                        : t('common:iconAutoFromUrl')}
                             </div>
                         </div>
 
@@ -375,7 +388,7 @@ export function AddItemDialog({
                                         : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                 }
                             >
-                                {t('自动获取', 'Auto')}
+                                {t('common:iconAuto')}
                             </button>
                             <button
                                 type="button"
@@ -389,7 +402,7 @@ export function AddItemDialog({
                                         : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                 }
                             >
-                                {t('图标直链', 'Icon URL')}
+                                {t('common:iconUrl')}
                             </button>
                             <button
                                 type="button"
@@ -400,20 +413,20 @@ export function AddItemDialog({
                                         : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
                                 }
                             >
-                                {t('图标库', 'Icon Library')}
+                                {t('common:iconLibrary')}
                             </button>
                         </div>
 
                         {/* Mode-specific content */}
                         {iconMode === 'auto' && (
                             <div className="text-xs text-white/50">
-                                {t('保存时将自动从链接地址获取网站图标', 'Will auto-fetch favicon from URL on save')}
+                                {t('common:iconAutoHint')}
                             </div>
                         )}
 
                         {iconMode === 'url' && (
                             <div>
-                                <div className="mb-1 text-xs text-white/70">{t('输入图标的网络地址（svg/png/ico 等）', 'Enter icon URL (svg/png/ico, etc.)')}</div>
+                                <div className="mb-1 text-xs text-white/70">{t('common:iconUrlHint')}</div>
                                 <input
                                     value={iconUrl}
                                     onChange={(e) => setIconUrl(e.target.value)}
@@ -425,24 +438,24 @@ export function AddItemDialog({
 
                         {iconMode === 'lucide' && selectedLucideIcon && (
                             <div className="flex items-center gap-2">
-                                <span className="text-xs text-white/50">{t('已选择:', 'Selected:')} {selectedLucideIcon}</span>
+                                <span className="text-xs text-white/50">{t('common:iconSelected')} {selectedLucideIcon}</span>
                                 <button
                                     type="button"
                                     onClick={() => setShowIconPicker(true)}
                                     className="text-xs text-white/70 hover:text-white underline"
                                 >
-                                    {t('更换', 'Change')}
+                                    {t('common:iconChange')}
                                 </button>
                             </div>
                         )}
                     </div>
 
                     <label className="block text-sm">
-                        <div className="mb-1 text-white/70">{t('描述', 'Description')}</div>
+                        <div className="mb-1 text-white/70">{t('common:description')}</div>
                         <input
                             value={desc}
                             onChange={(e) => setDesc(e.target.value)}
-                            placeholder={t('可选', 'Optional')}
+                            placeholder={t('common:optional')}
                             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
                         />
                     </label>
@@ -451,7 +464,7 @@ export function AddItemDialog({
                         disabled={loading || !name.trim() || !url.trim()}
                         className="rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-50"
                     >
-                        {loading ? t('添加中...', 'Adding...') : t('添加', 'Add')}
+                        {loading ? t('common:adding') : t('common:add')}
                     </button>
                 </form>
             )}
@@ -461,7 +474,6 @@ export function AddItemDialog({
                 open={showIconPicker}
                 onClose={() => setShowIconPicker(false)}
                 onSelect={handleSelectLucideIcon}
-                lang={lang}
             />
         </Modal>
     )

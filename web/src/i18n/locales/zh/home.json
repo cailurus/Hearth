@@ -1,0 +1,11 @@
+{
+    "addItem": "添加组件",
+    "addFailed": "添加失败",
+    "groupType": "分组类型",
+    "groupName": "分组名称",
+    "appGroup": "App 组件",
+    "systemGroup": "系统组件",
+    "systemGroupHint": "系统组件只能有一个；系统组只能添加内置组件，App 组只能添加 App 链接。",
+    "createFailed": "创建失败",
+    "itemSettings": "组件设置"
+}

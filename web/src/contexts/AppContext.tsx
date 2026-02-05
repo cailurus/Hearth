@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { AppItem, BackgroundInfo, Group, Settings, Me, Language, CreateAppRequest, UpdateAppRequest } from '../types'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api'
 
@@ -39,6 +40,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
+    const { i18n } = useTranslation()
     const [me, setMe] = useState<Me | null>(null)
     const [settings, setSettings] = useState<Settings | null>(null)
     const [bg, setBg] = useState<BackgroundInfo | null>(null)
@@ -49,6 +51,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const lang: Language = settings?.language === 'en' ? 'en' : 'zh'
     const isAdmin = !!me?.admin
+
+    // Sync i18n language with settings
+    useEffect(() => {
+        if (i18n.language !== lang) {
+            i18n.changeLanguage(lang)
+        }
+    }, [lang, i18n])
 
     const t = useCallback(
         (zh: string, en: string) => (lang === 'en' ? en : zh),

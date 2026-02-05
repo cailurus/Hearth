@@ -1,28 +1,32 @@
+import { useTranslation } from 'react-i18next'
 import type { HolidaysResponse } from '../../types'
+import { Spinner } from '../ui/Spinner'
 
 interface HolidaysWidgetProps {
     data: HolidaysResponse | null
     error?: string | null
-    lang: 'zh' | 'en'
 }
 
 /**
  * 假日组件 - 显示即将到来的假日
  */
-export function HolidaysWidget({ data, error, lang }: HolidaysWidgetProps) {
+export function HolidaysWidget({ data, error }: HolidaysWidgetProps) {
+    const { t, i18n } = useTranslation('widgets')
+    const lang = i18n.language === 'en' ? 'en' : 'zh'
+
     if (!data) {
         const msg = String(error || '').trim()
         if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
-        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+        return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
 
-    const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
+    const items = Array.isArray(data.items) ? data.items.slice(0, 5) : []
     if (items.length === 0) {
         return <div className="flex h-full items-center justify-center text-sm text-white/60">—</div>
     }
 
     return (
-        <div className="flex h-full flex-col gap-1 py-1">
+        <div className="flex h-full flex-col gap-0.5 py-0.5">
             {items.map((it, idx) => {
                 const days = typeof it.daysUntil === 'number' && Number.isFinite(it.daysUntil) ? it.daysUntil : null
                 const label = (lang === 'zh' ? String(it.localName || '').trim() : '') || String(it.name || '').trim() || '—'
@@ -32,24 +36,20 @@ export function HolidaysWidget({ data, error, lang }: HolidaysWidgetProps) {
                     days == null
                         ? '—'
                         : days <= 0
-                            ? lang === 'en'
-                                ? 'Today'
-                                : '今天'
-                            : lang === 'en'
-                                ? `In ${days} days`
-                                : `还有 ${days} 天`
+                            ? t('today')
+                            : t('inDays', { days })
 
                 return (
-                    <div key={`${country}-${date}-${idx}`} className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                            <div className="truncate text-[15px] font-semibold leading-tight text-white/95">
+                    <div key={`${country}-${date}-${idx}`} className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                            <div className="truncate text-[11px] sm:text-[12px] font-medium leading-tight text-white/90">
                                 {label}
-                                {country ? <span className="font-normal text-white/60"> · {country}</span> : null}
+                                {country ? <span className="font-normal text-white/50"> · {country}</span> : null}
                             </div>
                         </div>
                         <div className="shrink-0 text-right tabular-nums">
-                            <div className="text-[11px] leading-tight text-white/70">{daysLabel}</div>
-                            <div className="text-[11px] leading-tight text-white/55">{date || '—'}</div>
+                            <div className="text-[10px] sm:text-[11px] leading-tight text-white/70">{daysLabel}</div>
+                            <div className="text-[9px] sm:text-[10px] leading-tight text-white/50">{date || '—'}</div>
                         </div>
                     </div>
                 )

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiGet } from '../../api'
 
 export type MarketSymbolResult = {
@@ -13,7 +14,6 @@ export interface MarketSymbolPickerProps {
     onQueryChange: (v: string) => void
     onSelect: (symbol: string) => void
     placeholder?: string
-    lang: 'zh' | 'en'
 }
 
 /**
@@ -25,8 +25,8 @@ export function MarketSymbolPicker({
     onQueryChange,
     onSelect,
     placeholder,
-    lang,
 }: MarketSymbolPickerProps) {
+    const { t } = useTranslation('widgets')
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [results, setResults] = useState<MarketSymbolResult[]>([])
@@ -84,7 +84,7 @@ export function MarketSymbolPicker({
                 <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/90">
                     <div className="max-h-56 overflow-auto">
                         {loading ? (
-                            <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'Loading...' : '加载中...'}</div>
+                            <div className="px-3 py-2 text-sm text-white/60">{t('marketsLoading', 'Loading...')}</div>
                         ) : results.length ? (
                             results.map((r) => {
                                 const sym = String(r.symbol || '').trim().toUpperCase()
@@ -112,7 +112,7 @@ export function MarketSymbolPicker({
                                 )
                             })
                         ) : (
-                            <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'No results' : '无结果'}</div>
+                            <div className="px-3 py-2 text-sm text-white/60">{t('marketsNoResults', 'No results')}</div>
                         )}
                     </div>
                 </div>

@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Search, X, Loader2 } from 'lucide-react'
 
 // Lucide CDN URL for SVG icons
@@ -18,12 +19,11 @@ interface IconPickerProps {
     open: boolean
     onClose: () => void
     onSelect: (iconName: string) => void
-    lang: 'zh' | 'en'
 }
 
-export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
-    
+export function IconPicker({ open, onClose, onSelect }: IconPickerProps) {
+    const { t } = useTranslation('common')
+
     const [search, setSearch] = useState('')
     const [icons, setIcons] = useState<LucideIcon[]>([])
     const [loading, setLoading] = useState(false)
@@ -60,7 +60,7 @@ export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
         const query = search.trim()
         setHasSearched(true)
         setLoading(true)
-        
+
         try {
             const res = await fetch(`/api/icons/lucide/search?q=${encodeURIComponent(query)}&limit=100`)
             if (res.ok) {
@@ -122,14 +122,14 @@ export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div 
+            <div
                 ref={containerRef}
                 className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-white/10 bg-zinc-900 shadow-2xl"
             >
                 {/* Header */}
                 <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
                     <h3 className="text-base font-semibold text-white">
-                        {t('选择图标', 'Choose Icon')}
+                        {t('selectIcon')}
                     </h3>
                     <button
                         onClick={onClose}
@@ -150,7 +150,7 @@ export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
                                 onKeyDown={handleKeyDown}
-                                placeholder={t('输入关键词搜索...', 'Enter keywords to search...')}
+                                placeholder={t('searchIcon')}
                                 className="w-full rounded-lg border border-white/10 bg-white/5 py-2 pl-10 pr-4 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/20"
                             />
                         </div>
@@ -162,14 +162,14 @@ export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
                             {loading ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                                t('搜索', 'Search')
+                                t('iconSearch', 'Search')
                             )}
                         </button>
                     </div>
                     <div className="mt-2 text-xs text-white/40">
-                        {hasSearched 
-                            ? t(`找到 ${icons.length} 个图标`, `Found ${icons.length} icons`)
-                            : t('热门图标', 'Popular icons')
+                        {hasSearched
+                            ? t('iconFoundCount', { count: icons.length })
+                            : t('iconPopular', 'Popular icons')
                         }
                     </div>
                 </div>
@@ -195,7 +195,7 @@ export function IconPicker({ open, onClose, onSelect, lang }: IconPickerProps) {
                         </div>
                     ) : hasSearched ? (
                         <div className="py-8 text-center text-sm text-white/40">
-                            {t('没有找到匹配的图标', 'No icons found')}
+                            {t('iconNotFound', 'No icons found')}
                         </div>
                     ) : null}
                 </div>

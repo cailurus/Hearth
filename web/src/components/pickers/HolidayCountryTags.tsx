@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { apiGet } from '../../api'
 import type { HolidayCountry } from '../../types'
 
@@ -20,7 +21,6 @@ function normalizeCountryCodes(codes: string[]): string[] {
 }
 
 export interface HolidayCountryTagsProps {
-    lang: 'zh' | 'en'
     selected: string[]
     query: string
     onQueryChange: (v: string) => void
@@ -31,12 +31,12 @@ export interface HolidayCountryTagsProps {
  * Holiday country tags picker with search and tag management
  */
 export function HolidayCountryTags({
-    lang,
     selected,
     query,
     onQueryChange,
     onChange,
 }: HolidayCountryTagsProps) {
+    const { t } = useTranslation('widgets')
     const [open, setOpen] = useState(false)
     const [loading, setLoading] = useState(false)
     const [results, setResults] = useState<HolidayCountry[]>([])
@@ -89,7 +89,7 @@ export function HolidayCountryTags({
 
     return (
         <div className="space-y-2">
-            <div className="text-sm text-white/70">{lang === 'en' ? 'Countries/regions' : '国家/地区'}</div>
+            <div className="text-sm text-white/70">{t('holidayCountries', 'Countries/regions')}</div>
 
             <div className="flex flex-wrap gap-2">
                 {normSelected.map((c) => (
@@ -98,7 +98,7 @@ export function HolidayCountryTags({
                         type="button"
                         onClick={() => remove(c)}
                         className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-white/80 hover:bg-white/10"
-                        title={lang === 'en' ? 'Remove' : '移除'}
+                        title={t('holidayRemove', 'Remove')}
                     >
                         {c} x
                     </button>
@@ -116,7 +116,7 @@ export function HolidayCountryTags({
                     onBlur={() => {
                         window.setTimeout(() => setOpen(false), 120)
                     }}
-                    placeholder={lang === 'en' ? 'Search countries (e.g. CN, United States)...' : '搜索国家/地区（例如 CN / United States）...'}
+                    placeholder={t('holidaySearchPlaceholder', 'Search countries (e.g. CN, United States)...')}
                     className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                 />
 
@@ -124,7 +124,7 @@ export function HolidayCountryTags({
                     <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-white/10 bg-black/90">
                         <div className="max-h-56 overflow-auto">
                             {loading ? (
-                                <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'Loading...' : '加载中...'}</div>
+                                <div className="px-3 py-2 text-sm text-white/60">{t('holidayLoading', 'Loading...')}</div>
                             ) : results.length ? (
                                 results.map((r) => {
                                     const code = String(r.code || '').trim().toUpperCase()
@@ -149,19 +149,19 @@ export function HolidayCountryTags({
                                                 <div className="truncate font-semibold text-white/90">{code}</div>
                                                 <div className="truncate text-xs text-white/60">{name || '—'}</div>
                                             </div>
-                                            <div className="shrink-0 text-xs text-white/50">{disabled ? (lang === 'en' ? 'Added' : '已添加') : ''}</div>
+                                            <div className="shrink-0 text-xs text-white/50">{disabled ? t('holidayAdded', 'Added') : ''}</div>
                                         </button>
                                     )
                                 })
                             ) : (
-                                <div className="px-3 py-2 text-sm text-white/60">{lang === 'en' ? 'No results' : '无结果'}</div>
+                                <div className="px-3 py-2 text-sm text-white/60">{t('holidayNoResults', 'No results')}</div>
                             )}
                         </div>
                     </div>
                 ) : null}
             </div>
 
-            <div className="text-xs text-white/50">{lang === 'en' ? 'Click a tag to remove.' : '点击标签可移除。'}</div>
+            <div className="text-xs text-white/50">{t('holidayClickToRemove', 'Click a tag to remove.')}</div>
         </div>
     )
 }

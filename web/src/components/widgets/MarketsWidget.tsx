@@ -1,21 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FaApple, FaMicrosoft, FaBitcoin, FaEthereum } from 'react-icons/fa'
 import type { MarketsResponse } from '../../types'
+import { Spinner } from '../ui/Spinner'
 
 interface MarketsWidgetProps {
     data: MarketsResponse | null
     error?: string | null
-    lang: 'zh' | 'en'
 }
 
 /**
  * 行情组件 - 显示股票/加密货币行情
  */
-export function MarketsWidget({ data, error, lang }: MarketsWidgetProps) {
+export function MarketsWidget({ data, error }: MarketsWidgetProps) {
     if (!data) {
         const msg = String(error || '').trim()
         if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
-        return <div className="flex h-full items-center justify-center text-sm text-white/60">{lang === 'en' ? 'Loading…' : '加载中…'}</div>
+        return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
 
     const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
