@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/screenshot.png" alt="Screenshot" width="800">
+  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/screenshot.jpeg" alt="Screenshot" width="800">
 </p>
 
 ## ✨ Features
