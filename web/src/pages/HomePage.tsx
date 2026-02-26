@@ -1,8 +1,8 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { apiDelete, apiGet, apiPost, apiPut } from '../api'
+import { apiGet, apiPost, apiPut } from '../api'
 import { Cog } from 'lucide-react'
-import type { AppItem, BackgroundInfo, Group, Settings, Me, IconResolve } from '../types'
-import { useNow, useWidgets, useVideoBackground } from '../hooks'
+import type { AppItem, Group, IconResolve } from '../types'
+import { useNow, useWidgets, useVideoBackground, useDialogState, useBackgroundRefresh, useCitySearch, useSettingsDraft, useDashboard } from '../hooks'
 import { UserIcon } from '../components/ui/UserIcon'
 import { TimeDisplay } from '../components/layout/TimeDisplay'
 import { GroupBlock } from '../components/layout/GroupBlock'
@@ -11,7 +11,6 @@ import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 import { SnowEffect } from '../components/effects/SnowEffect'
 import {
     normalizeIanaTimeZone,
-    fetchWithTimeout,
     normalizeCountryCodes,
     widgetKindFromUrl,
     widgetQueryFromUrl,
@@ -22,32 +21,13 @@ import {
 const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
 
 export default function HomePage({ initialDialog }: { initialDialog?: 'login' } = {}) {
-    const [me, setMe] = useState<Me | null>(null)
-    const [settings, setSettings] = useState<Settings | null>(null)
-    const [bg, setBg] = useState<BackgroundInfo | null>(null)
-    const [groups, setGroups] = useState<Group[]>([])
-    const [apps, setApps] = useState<AppItem[]>([])
-    const [error, setError] = useState<string | null>(null)
+    const [dashboard, actions] = useDashboard()
+    const { me, settings, bg, groups, apps, error } = dashboard
 
-    const [bgNonce, setBgNonce] = useState(0)
-    const [bgRefreshing, setBgRefreshing] = useState(false)
-    const [bgRefreshErr, setBgRefreshErr] = useState<string | null>(null)
-
-    const [cityOptions, setCityOptions] = useState<string[]>([])
     const [cityQuery, setCityQuery] = useState('')
 
-    const [loginOpen, setLoginOpen] = useState(false)
-    const [settingsOpen, setSettingsOpen] = useState(false)
+    const { dialogs, openDialog, closeDialog, openContextMenu, contextMenuPos, openAddItem, addItemGroupId, addItemGroupKind } = useDialogState(initialDialog === 'login')
 
-    const [ctxOpen, setCtxOpen] = useState(false)
-    const [ctxPos, setCtxPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-    const [createGroupOpen, setCreateGroupOpen] = useState(false)
-
-    const [addItemOpen, setAddItemOpen] = useState(false)
-    const [addItemGroupId, setAddItemGroupId] = useState<string | null>(null)
-    const [addItemGroupKind, setAddItemGroupKind] = useState<'system' | 'app'>('app')
-
-    const [editOpen, setEditOpen] = useState(false)
     const [editErr, setEditErr] = useState<string | null>(null)
     const [editItem, setEditItem] = useState<AppItem | null>(null)
     const [editName, setEditName] = useState('')
@@ -98,23 +78,47 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [mShowNet, setMShowNet] = useState(true)
     const [mRefreshSec, setMRefreshSec] = useState<1 | 5 | 10>(1)
 
-    const [siteDraft, setSiteDraft] = useState<Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'> | null>(null)
-    const [siteSaveErr, setSiteSaveErr] = useState<string | null>(null)
+    const systemTimezone = useMemo(() => {
+        try {
+            const tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim()
+            return normalizeIanaTimeZone(tz, 'Asia/Shanghai')
+        } catch {
+            return 'Asia/Shanghai'
+        }
+    }, [])
+
+    const settingsDraft = useSettingsDraft({
+        settings,
+        isAdmin: !!me?.admin,
+        systemTimezone,
+        onSave: async (s) => { await apiPut('/api/settings', s) },
+    })
+    const { draft: siteDraft, setDraft: setSiteDraft, saveError: siteSaveErr, saveDraft: schedulePersistSiteDraft } = settingsDraft
+
+    const bgRefresh = useBackgroundRefresh({
+        isAdmin: !!me?.admin,
+        currentProvider: settings?.background?.provider || 'default',
+        draftProvider: siteDraft?.background?.provider,
+    })
 
     // Group drag-and-drop states
     const [draggingGroupId, setDraggingGroupId] = useState<string | null>(null)
     const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(null)
     const draggingGroupIdRef = useRef<string | null>(null)
 
-    const siteSaveSeqRef = useRef(0)
-    const siteSaveTimerRef = useRef<number | null>(null)
-    const citySearchSeqRef = useRef(0)
 
     const now = useNow(1000)
     // Timezone is now auto-detected from the user's system.
 
     const lang: 'zh' | 'en' = settings?.language === 'en' ? 'en' : 'zh'
     const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+
+    const citySearchLang = widgetKind === 'timezones' ? 'en' as const : lang
+    const citySearch = useCitySearch({
+        enabled: dialogs.edit && (widgetKind === 'weather' || widgetKind === 'timezones'),
+        query: cityQuery,
+        lang: citySearchLang,
+    })
 
     // Video background
     const isVideoBackground = settings?.background?.provider === 'default_video'
@@ -141,43 +145,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         defaultCity: settings?.weather?.city,
     })
 
-    const reloadDashboard = async () => {
-        const [m, st, bgInfo, gs, as] = await Promise.all([
-            apiGet<Me>('/api/auth/me'),
-            apiGet<Settings>('/api/settings'),
-            apiGet<BackgroundInfo>('/api/background'),
-            apiGet<Group[]>('/api/groups'),
-            apiGet<AppItem[]>('/api/apps'),
-        ])
-        setMe(m)
-        setSettings(st)
-        setBg(bgInfo)
-        setGroups(Array.isArray(gs) ? gs : [])
-        setApps(Array.isArray(as) ? as : [])
-    }
-
-    useEffect(() => {
-        let cancelled = false
-            ; (async () => {
-                try {
-                    await reloadDashboard()
-                    if (cancelled) return
-                    setError(null)
-                } catch (e) {
-                    if (cancelled) return
-                    setError(e instanceof Error ? e.message : 'failed')
-                }
-            })()
-        return () => {
-            cancelled = true
-        }
-    }, [])
-
-    // If opened via /admin, show login dialog.
-    useEffect(() => {
-        if (initialDialog === 'login') setLoginOpen(true)
-    }, [initialDialog])
-
     // Background refresh favicons for custom apps in auto mode on page load
     useEffect(() => {
         if (apps.length === 0) return
@@ -196,6 +163,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         let cancelled = false
 
         // Refresh icons in the background (don't block UI)
+        let anyChanged = false
         const refreshIcons = async () => {
             for (const app of customApps) {
                 if (cancelled) break
@@ -205,19 +173,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         refresh: true,
                     })
                     if (cancelled) break
-                    // Update app icon if changed
                     if (res.iconPath && res.iconPath !== app.iconPath) {
-                        setApps((prev) =>
-                            prev.map((a) =>
-                                a.id === app.id
-                                    ? { ...a, iconPath: res.iconPath, iconSource: res.iconSource }
-                                    : a
-                            )
-                        )
+                        anyChanged = true
                     }
                 } catch {
                     // Silently ignore errors - this is background refresh
                 }
+            }
+            if (!cancelled && anyChanged) {
+                await actions.reload()
             }
         }
 
@@ -236,11 +200,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const openAddForGroup = (groupId: string | null) => {
         if (!isAdmin) return
-        setAddItemGroupId(groupId)
         const g = groupId ? groups.find((x) => x.id === groupId) : null
         const kind = g && (g.kind === 'system' || g.name === '系统组件' || g.name === 'System Tools' || g.name === 'System Widgets') ? 'system' : 'app'
-        setAddItemGroupKind(kind)
-        setAddItemOpen(true)
+        openAddItem(groupId, kind)
     }
 
     const openEditItem = (item: AppItem) => {
@@ -337,7 +299,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         } else {
             setWidgetKind(null)
         }
-        setEditOpen(true)
+        openDialog('edit')
     }
 
     const widgetLastSavedDescRef = useRef<string>('')
@@ -353,12 +315,12 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     // Initialize widgetLastSavedDescRef only when the modal opens or when switching to a different item.
     // Do NOT re-run when editItemDesc changes (that would reset the ref after each save).
     useEffect(() => {
-        if (!editOpen || !editItemUrl || !editItemUrl.startsWith('widget:')) return
+        if (!dialogs.edit || !editItemUrl || !editItemUrl.startsWith('widget:')) return
         // Read the current description from editItem at the time this effect runs
         const desc = editItem?.description
         widgetLastSavedDescRef.current = String(desc ?? '')
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [editOpen, editItemId])
+    }, [dialogs.edit, editItemId])
 
     const resolveCityToTimezone = useCallback(async (city: string) => {
         const res = await apiGet<{ timezone: string; city?: string }>(
@@ -392,7 +354,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         const citySnapshot = wCity
         const symbolsSnapshot = [...mkSymbols]
         const clocksSnapshot = tzClocks.map((c) => ({ ...c }))
-        setEditOpen(false)
+        closeDialog('edit')
 
         const itemId = snapshot.id
 
@@ -445,18 +407,18 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             })
 
             widgetLastSavedDescRef.current = description
-            setApps((prev) => prev.map((a) => (a.id === itemId ? { ...a, description } : a)))
+            await actions.reload()
         } catch {
             // Save failed silently; the dialog is already closed.
             // The old data remains visible so the user can retry by reopening settings.
         }
-    }, [editItem, widgetKind, wCity, mkSymbols, tzClocks, ensureFourMarketSymbols])
+    }, [editItem, widgetKind, wCity, mkSymbols, tzClocks, ensureFourMarketSymbols, actions])
 
     // When opening Weather settings, normalize existing city to full display name
     // without fighting user edits while typing.
     useEffect(() => {
         if (!me?.admin) return
-        if (!editOpen || widgetKind !== 'weather') return
+        if (!dialogs.edit || widgetKind !== 'weather') return
 
         const snapshot = String(wCity || '').trim()
         if (!snapshot) return
@@ -467,7 +429,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             try {
                 const r = await resolveCityToTimezone(snapshot)
                 if (wNormalizeSeqRef.current !== seq) return
-                if (!editOpen || widgetKind !== 'weather') return
+                if (!dialogs.edit || widgetKind !== 'weather') return
                 if (String(wCity || '').trim() !== snapshot) return
                 if (r.city && r.city !== snapshot) setWCity(r.city)
             } catch {
@@ -478,13 +440,13 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         void run()
         // Only run when modal opens or the item changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [me?.admin, editOpen, editItem?.id, widgetKind])
+    }, [me?.admin, dialogs.edit, editItem?.id, widgetKind])
 
     // When opening World Clock settings, normalize existing cities to full display names
     // (e.g., "Tokyo, Tokyo, Japan") without fighting user edits while typing.
     useEffect(() => {
         if (!me?.admin) return
-        if (!editOpen || widgetKind !== 'timezones') return
+        if (!dialogs.edit || widgetKind !== 'timezones') return
 
         const seq = ++tzNormalizeSeqRef.current
         const snapshot = tzClocks.slice(0, 4).map((c) => String(c.city || '').trim())
@@ -513,7 +475,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
             // Only apply if still same session AND user hasn't edited the cities since snapshot.
             if (tzNormalizeSeqRef.current !== seq) return
-            if (!editOpen || widgetKind !== 'timezones') return
+            if (!dialogs.edit || widgetKind !== 'timezones') return
             const stillSame = tzClocks.slice(0, 4).every((c, i) => String(c.city || '').trim() === snapshot[i])
             if (!stillSame) return
 
@@ -529,11 +491,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         void run()
         // Only run when modal opens or the item changes.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [me?.admin, editOpen, editItem?.id, widgetKind])
+    }, [me?.admin, dialogs.edit, editItem?.id, widgetKind])
 
     useEffect(() => {
         if (!me?.admin) return
-        if (!editOpen || !editItem || !editItem.url.startsWith('widget:') || !widgetKind) return
+        if (!dialogs.edit || !editItem || !editItem.url.startsWith('widget:') || !widgetKind) return
 
         // Skip auto-save for weather, timezones, and markets - they use manual save button
         if (widgetKind === 'weather' || widgetKind === 'timezones' || widgetKind === 'markets') return
@@ -574,7 +536,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                     })
 
                     if (widgetSaveSeqRef.current === seq) {
-                        setApps((prev) => prev.map((a) => (a.id === itemId ? { ...a, description } : a)))
+                        await actions.reload()
                         setEditItem((prev) => (prev && prev.id === itemId ? { ...prev, description } : prev))
                     }
                 } catch (e2) {
@@ -592,7 +554,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }, [
         me?.admin,
-        editOpen,
+        dialogs.edit,
         editItem,
         widgetKind,
         mShowCpu,
@@ -686,7 +648,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
 
         try {
-            await apiPut(`/api/apps/${editItem.id}`, {
+            await actions.updateApp(editItem.id, {
                 groupId: editItem.groupId,
                 name,
                 description,
@@ -694,9 +656,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 iconPath,
                 iconSource,
             })
-            setEditOpen(false)
+            closeDialog('edit')
             setEditItem(null)
-            await reloadDashboard()
         } catch (e2) {
             setEditErr(e2 instanceof Error ? e2.message : 'failed')
         }
@@ -705,8 +666,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const deleteItem = async (id: string) => {
         if (!isAdmin) return
         try {
-            await apiDelete(`/api/apps/${id}`)
-            await reloadDashboard()
+            await actions.deleteApp(id)
         } catch {
             // ignore
         }
@@ -715,8 +675,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const deleteGroup = async (groupId: string) => {
         if (!isAdmin) return
         try {
-            await apiDelete(`/api/groups/${groupId}`)
-            await reloadDashboard()
+            await actions.deleteGroup(groupId)
         } catch {
             // ignore
         }
@@ -740,9 +699,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 await apiPut('/api/settings', newSettings)
             }
 
-            await reloadDashboard()
-        } catch (e2) {
-            setError(e2 instanceof Error ? e2.message : 'failed')
+            await actions.reload()
+        } catch {
+            // Reorder error silently ignored; reload will restore correct state
         }
     }
 
@@ -751,53 +710,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         if (!Array.isArray(ids) || ids.length === 0) return
         try {
             await apiPost('/api/apps/reorder', { groupId, ids })
-            await reloadDashboard()
-        } catch (e2) {
-            setError(e2 instanceof Error ? e2.message : 'failed')
+            await actions.reload()
+        } catch {
+            // Reorder error silently ignored; reload will restore correct state
         }
-    }
-
-    const persistSiteDraft = async (draft: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>) => {
-        if (!isAdmin || !settings) return
-        const token = ++siteSaveSeqRef.current
-        setSiteSaveErr(null)
-        try {
-            const normalizedTime = draft.time
-                ? {
-                    ...draft.time,
-                    mode: 'digital',
-                    timezone: systemTimezone,
-                }
-                : draft.time
-            const next: Settings = {
-                ...settings,
-                siteTitle: draft.siteTitle,
-                language: draft.language,
-                background: draft.background,
-                time: normalizedTime,
-            }
-            await apiPut('/api/settings', next)
-            if (token !== siteSaveSeqRef.current) return
-            setSettings(next)
-        } catch (e2) {
-            if (token !== siteSaveSeqRef.current) return
-            setSiteSaveErr(e2 instanceof Error ? e2.message : 'failed')
-        }
-    }
-
-    const schedulePersistSiteDraft = (draft: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>, mode: 'now' | 'debounce') => {
-        if (siteSaveTimerRef.current) {
-            window.clearTimeout(siteSaveTimerRef.current)
-            siteSaveTimerRef.current = null
-        }
-        if (mode === 'now') {
-            void persistSiteDraft(draft)
-            return
-        }
-        siteSaveTimerRef.current = window.setTimeout(() => {
-            siteSaveTimerRef.current = null
-            void persistSiteDraft(draft)
-        }, 300)
     }
 
     const sortedGroups = useMemo(() => {
@@ -874,17 +790,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const title = settings?.siteTitle || 'Hearth'
     const baseBgUrl = bg?.imageUrl || '/api/background/image'
-    const bgUrl = baseBgUrl + (baseBgUrl.includes('?') ? '&' : '?') + `v=${bgNonce}`
+    const bgUrl = baseBgUrl + (baseBgUrl.includes('?') ? '&' : '?') + `v=${bgRefresh.bgNonce}`
     const isAdmin = !!me?.admin
-
-    const systemTimezone = useMemo(() => {
-        try {
-            const tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim()
-            return normalizeIanaTimeZone(tz, 'Asia/Shanghai')
-        } catch {
-            return 'Asia/Shanghai'
-        }
-    }, [])
 
     const displayGroupName = (raw: string): string => {
         const s = String(raw ?? '').trim()
@@ -907,143 +814,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         document.title = lang === 'en' ? `Hearth: ${siteTitle}` : `Hearth：${siteTitle}`
     }, [lang, settings?.siteTitle])
 
-    useEffect(() => {
-        if (!editOpen) {
-            // Reset when dialog closes
-            setCityOptions([])
-            citySearchSeqRef.current = 0
-            return
-        }
-        if (widgetKind !== 'weather' && widgetKind !== 'timezones') return
-        const q = (cityQuery || '').trim()
-        if (!q) {
-            setCityOptions([])
-            return
-        }
 
-        const seq = ++citySearchSeqRef.current
-
-        const id = window.setTimeout(async () => {
-            try {
-                const reqLang = widgetKind === 'timezones' ? 'en' : lang
-                const res = await apiGet<{ results: Array<{ displayName: string }> }>(
-                    `/api/widgets/geocode?${new URLSearchParams({ query: q, lang: reqLang }).toString()}`,
-                )
-                // Only update if this is still the latest search
-                if (seq !== citySearchSeqRef.current) return
-                const next = (res?.results || []).map((x) => x.displayName).filter(Boolean)
-                setCityOptions(Array.from(new Set(next)).slice(0, 12))
-            } catch {
-                if (seq !== citySearchSeqRef.current) return
-                setCityOptions([])
-            }
-        }, 250)
-        return () => window.clearTimeout(id)
-    }, [editOpen, widgetKind, cityQuery, lang])
-
-    const refreshBackground = async () => {
-        if (!isAdmin) return
-        if (bgRefreshing) return
-        setBgRefreshing(true)
-        setBgRefreshErr(null)
-        try {
-            // Refresh should reflect the currently selected provider in the settings UI,
-            // even if the user hasn't clicked Save yet.
-            const draftProvider = String(siteDraft?.background?.provider ?? '').trim()
-            const savedProvider = String(settings?.background?.provider ?? '').trim()
-            const provider = (draftProvider || savedProvider || 'default').trim()
-
-            // Avoid spinning forever if the network/proxy hangs.
-            const refreshRes = await fetchWithTimeout(
-                `/api/background/refresh?${new URLSearchParams({ provider }).toString()}`,
-                { method: 'POST', credentials: 'include' },
-                15000,
-            )
-            if (!refreshRes.ok) {
-                const text = await refreshRes.text().catch(() => '')
-                const msg = (() => {
-                    try {
-                        const data = text ? (JSON.parse(text) as unknown) : null
-                        if (data && typeof data === 'object' && 'error' in data) {
-                            const e = (data as { error?: unknown }).error
-                            if (typeof e === 'string' && e.trim()) return e.trim()
-                        }
-                    } catch {
-                        // ignore
-                    }
-                    return text?.trim() || refreshRes.statusText || 'failed'
-                })()
-                throw new Error(msg)
-            }
-
-            // Preload the next background first, then swap.
-            const nextNonce = Date.now()
-            const base = bg?.imageUrl || '/api/background/image'
-            const nextUrl = base + (base.includes('?') ? '&' : '?') + `v=${nextNonce}`
-
-            // Use fetch once to capture error text (Image.onerror is opaque).
-            const res = await fetchWithTimeout(nextUrl, { credentials: 'include' }, 20000)
-            if (!res.ok) {
-                const text = await res.text().catch(() => '')
-                const msg = (() => {
-                    try {
-                        const data = text ? (JSON.parse(text) as unknown) : null
-                        if (data && typeof data === 'object' && 'error' in data) {
-                            const e = (data as { error?: unknown }).error
-                            if (typeof e === 'string' && e.trim()) return e.trim()
-                        }
-                    } catch {
-                        // ignore
-                    }
-                    return text?.trim() || res.statusText || 'failed'
-                })()
-                throw new Error(msg)
-            }
-            // Fully consume response so the browser can cache it.
-            await res.blob()
-
-            await Promise.race([
-                new Promise<void>((resolve, reject) => {
-                    const img = new Image()
-                    img.onload = () => resolve()
-                    img.onerror = () => reject(new Error('failed'))
-                    img.src = nextUrl
-                }),
-                new Promise<void>((_, reject) => {
-                    window.setTimeout(() => reject(new Error('timeout')), 12000)
-                }),
-            ])
-
-            setBgNonce(nextNonce)
-        } catch (e2) {
-            setBgRefreshErr(e2 instanceof Error ? e2.message : 'failed')
-        } finally {
-            setBgRefreshing(false)
-        }
-    }
     const onLogout = async () => {
         try {
-            await apiPost('/api/auth/logout')
+            await actions.logout()
         } finally {
-            setSettingsOpen(false)
-            await reloadDashboard()
+            closeDialog('settings')
+            await actions.reload()
         }
     }
-
-    useEffect(() => {
-        if (!settings || siteDraft) return
-        const allowedIntervals = new Set(['0', '1h', '3h', '6h', '12h', '24h'])
-        const providerRaw = String(settings.background?.provider ?? '').trim() || 'default'
-        const provider = providerRaw === 'bing' ? 'bing_daily' : providerRaw
-        const intervalRaw = String(settings.background?.interval ?? '').trim()
-        const interval = provider === 'bing_daily' ? '24h' : provider === 'default' ? '0' : allowedIntervals.has(intervalRaw) ? intervalRaw : '0'
-        setSiteDraft({
-            siteTitle: settings.siteTitle,
-            language: settings.language || 'zh',
-            background: { ...settings.background, provider, interval },
-            time: settings.time ? { ...settings.time, timezone: systemTimezone } : settings.time,
-        })
-    }, [settings, siteDraft])
 
     const hasUngrouped = (appsByGroup.get(null) ?? []).length > 0
     const groupItems = (groupId: string | null) => appsByGroup.get(groupId) ?? []
@@ -1054,10 +833,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             onContextMenu={(e) => {
                 if (!isAdmin) return
                 // Don't open the context menu when a modal is open.
-                if (loginOpen || settingsOpen || createGroupOpen || addItemOpen) return
+                if (dialogs.login || dialogs.settings || dialogs.createGroup || dialogs.addItem) return
                 e.preventDefault()
-                setCtxPos({ x: e.clientX, y: e.clientY })
-                setCtxOpen(true)
+                openContextMenu(e.clientX, e.clientY)
             }}
         >
             <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
@@ -1102,8 +880,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 {isAdmin ? (
                     <button
                         onClick={() => {
-                            setSiteSaveErr(null)
-                            setSettingsOpen(true)
+                            openDialog('settings')
                         }}
                         className="p-1.5 text-white/90 transition-colors hover:text-white"
                         aria-label="settings"
@@ -1113,7 +890,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                     </button>
                 ) : (
                     <button
-                        onClick={() => setLoginOpen(true)}
+                        onClick={() => openDialog('login')}
                         className="p-1.5 text-white/90 transition-colors hover:text-white"
                         aria-label="user"
                         title={t('登录', 'Login')}
@@ -1335,18 +1112,18 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
             {showSnowEffect ? <SnowEffect /> : null}
 
-            {ctxOpen ? (
-                <div className="fixed inset-0 z-30" onClick={() => setCtxOpen(false)}>
+            {dialogs.contextMenu ? (
+                <div className="fixed inset-0 z-30" onClick={() => closeDialog('contextMenu')}>
                     <div
                         className="fixed w-40 overflow-hidden rounded-lg border border-white/10 bg-black/70 text-white backdrop-blur"
-                        style={{ left: ctxPos.x, top: ctxPos.y }}
+                        style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
                         onClick={(e) => e.stopPropagation()}
                     >
                         <button
                             className="block w-full px-3 py-2 text-left text-sm hover:bg-white/10"
                             onClick={() => {
-                                setCtxOpen(false)
-                                setCreateGroupOpen(true)
+                                closeDialog('contextMenu')
+                                openDialog('createGroup')
                             }}
                         >
                             {t('新建分组', 'New Group')}
@@ -1356,54 +1133,49 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             ) : null}
 
             <LoginDialog
-                open={loginOpen}
-                onClose={() => setLoginOpen(false)}
+                open={dialogs.login}
+                onClose={() => closeDialog('login')}
                 onLogin={async (u, p) => {
-                    await apiPost('/api/auth/login', { username: u, password: p })
-                    const m = await apiGet<Me>('/api/auth/me')
-                    setMe(m)
-                    await reloadDashboard()
+                    await actions.login(u, p)
                 }}
             />
 
             <SettingsDialog
-                open={settingsOpen}
-                onClose={() => setSettingsOpen(false)}
+                open={dialogs.settings}
+                onClose={() => closeDialog('settings')}
                 siteDraft={siteDraft}
                 setSiteDraft={setSiteDraft}
                 schedulePersistSiteDraft={schedulePersistSiteDraft}
                 siteSaveErr={siteSaveErr}
                 systemTimezone={systemTimezone}
-                bgRefreshing={bgRefreshing}
-                bgRefreshErr={bgRefreshErr}
-                refreshBackground={refreshBackground}
+                bgRefreshing={bgRefresh.refreshing}
+                bgRefreshErr={bgRefresh.error}
+                refreshBackground={bgRefresh.refresh}
                 onLogout={onLogout}
             />
 
             <CreateGroupDialog
-                open={createGroupOpen}
-                onClose={() => setCreateGroupOpen(false)}
+                open={dialogs.createGroup}
+                onClose={() => closeDialog('createGroup')}
                 onSubmit={async (name, kind) => {
-                    await apiPost('/api/groups', { name, kind })
-                    await reloadDashboard()
+                    await actions.createGroup(name, kind)
                 }}
                 hasSystemGroup={hasSystemGroup}
             />
 
             <AddItemDialog
-                open={addItemOpen}
-                onClose={() => setAddItemOpen(false)}
+                open={dialogs.addItem}
+                onClose={() => closeDialog('addItem')}
                 groupId={addItemGroupId}
                 groupKind={addItemGroupKind}
                 onSubmit={async (data) => {
-                    await apiPost('/api/apps', data)
-                    await reloadDashboard()
+                    await actions.createApp(data)
                 }}
             />
 
             <EditItemDialog
-                open={editOpen}
-                onClose={() => setEditOpen(false)}
+                open={dialogs.edit}
+                onClose={() => closeDialog('edit')}
                 editErr={editErr}
                 editItem={editItem}
                 editName={editName}
@@ -1426,7 +1198,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 wCity={wCity}
                 setWCity={setWCity}
                 setCityQuery={setCityQuery}
-                cityOptions={cityOptions}
+                cityOptions={citySearch.options}
                 mRefreshSec={mRefreshSec}
                 setMRefreshSec={setMRefreshSec}
                 mShowCpu={mShowCpu}

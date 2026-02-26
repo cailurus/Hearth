@@ -31,7 +31,8 @@ export interface ComboBoxProps<T> {
 }
 
 /**
- * Generic ComboBox component with dropdown and search functionality
+ * Generic ComboBox component with dropdown and search functionality.
+ * Both dropdown and backdrop render via portal to avoid interfering with parent scroll containers.
  */
 export function ComboBox<T>({
     value,
@@ -44,23 +45,24 @@ export function ComboBox<T>({
     const [open, setOpen] = useState(false)
     const inputId = useId()
     const inputRef = useRef<HTMLInputElement>(null)
+    const scrollRef = useRef<HTMLDivElement>(null)
     const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
 
     const recalcPosition = useCallback(() => {
         if (!inputRef.current) return
         const rect = inputRef.current.getBoundingClientRect()
-        const viewportHeight = window.innerHeight
-        const spaceBelow = viewportHeight - rect.bottom
+        const spaceBelow = window.innerHeight - rect.bottom
         const spaceAbove = rect.top
         const dropdownHeight = 224
-
         const openUp = spaceBelow < dropdownHeight && spaceAbove > spaceBelow
-
-        setDropdownPos({
-            top: openUp ? rect.top : rect.bottom + 4,
-            left: rect.left,
-            width: rect.width,
-            openUp,
+        const top = openUp ? rect.top : rect.bottom + 4
+        const left = rect.left
+        const width = rect.width
+        setDropdownPos((prev) => {
+            if (prev && prev.top === top && prev.left === left && prev.width === width && prev.openUp === openUp) {
+                return prev
+            }
+            return { top, left, width, openUp }
         })
     }, [])
 
@@ -73,57 +75,76 @@ export function ComboBox<T>({
         recalcPosition()
     }, [open, recalcPosition])
 
-    // Reposition on scroll/resize while open
+    // Only reposition on window resize
     useEffect(() => {
         if (!open) return
         const handler = () => recalcPosition()
-        window.addEventListener('scroll', handler, true)
         window.addEventListener('resize', handler)
-        return () => {
-            window.removeEventListener('scroll', handler, true)
-            window.removeEventListener('resize', handler)
-        }
+        return () => window.removeEventListener('resize', handler)
     }, [open, recalcPosition])
 
+    // Prevent wheel-scroll from leaking past the dropdown boundaries
+    useEffect(() => {
+        const el = scrollRef.current
+        if (!el || !open) return
+        const handler = (e: WheelEvent) => {
+            const { scrollTop, scrollHeight, clientHeight } = el
+            const atTop = scrollTop <= 0 && e.deltaY < 0
+            const atBottom = scrollTop + clientHeight >= scrollHeight - 1 && e.deltaY > 0
+            if (atTop || atBottom) {
+                e.preventDefault()
+            }
+            e.stopPropagation()
+        }
+        el.addEventListener('wheel', handler, { passive: false })
+        return () => el.removeEventListener('wheel', handler)
+    }, [open])
+
     const filtered = useMemo(() => {
-        // Don't filter the options - the API already returns search results
-        // Just take the first 12 options as-is
         return options.map((o) => ({ o, label: getOptionLabel(o) })).slice(0, 12)
     }, [options, getOptionLabel])
 
-    const dropdown = open && filtered.length > 0 && dropdownPos ? (
-        createPortal(
+    const overlay = open ? createPortal(
+        <>
             <div
-                className="fixed z-[9999] overflow-hidden rounded-lg border border-white/10 bg-black/90 text-white shadow-lg shadow-black/40 backdrop-blur"
-                style={{
-                    top: dropdownPos.openUp ? 'auto' : dropdownPos.top,
-                    bottom: dropdownPos.openUp ? `${window.innerHeight - dropdownPos.top + 4}px` : 'auto',
-                    left: dropdownPos.left,
-                    width: dropdownPos.width,
-                }}
-            >
+                className="fixed inset-0 z-[9998]"
+                onMouseDown={() => setOpen(false)}
+                aria-hidden="true"
+            />
+            {filtered.length > 0 && dropdownPos ? (
                 <div
-                    className="max-h-56 overflow-auto overscroll-contain py-1"
-                    onWheel={(e) => e.stopPropagation()}
+                    className="fixed z-[9999] overflow-hidden rounded-lg border border-white/10 bg-neutral-950 text-white"
+                    style={{
+                        top: dropdownPos.openUp ? 'auto' : dropdownPos.top,
+                        bottom: dropdownPos.openUp ? `${window.innerHeight - dropdownPos.top + 4}px` : 'auto',
+                        left: dropdownPos.left,
+                        width: dropdownPos.width,
+                        contain: 'content',
+                    }}
                 >
-                    {filtered.map(({ o, label }) => (
-                        <button
-                            key={label}
-                            type="button"
-                            className="flex w-full items-center px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
-                            onMouseDown={(e) => {
-                                e.preventDefault()
-                                onPick(o)
-                                setOpen(false)
-                            }}
-                        >
-                            {highlightMatch(label, value)}
-                        </button>
-                    ))}
+                    <div
+                        ref={scrollRef}
+                        className="max-h-56 overflow-auto overscroll-contain py-1"
+                    >
+                        {filtered.map(({ o, label }) => (
+                            <button
+                                key={label}
+                                type="button"
+                                className="flex w-full items-center px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                                onMouseDown={(e) => {
+                                    e.preventDefault()
+                                    onPick(o)
+                                    setOpen(false)
+                                }}
+                            >
+                                {highlightMatch(label, value)}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-            </div>,
-            document.body
-        )
+            ) : null}
+        </>,
+        document.body,
     ) : null
 
     return (
@@ -144,14 +165,7 @@ export function ComboBox<T>({
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
                 autoComplete="off"
             />
-            {dropdown}
-            {open ? (
-                <div
-                    className="fixed inset-0 z-[9998]"
-                    onMouseDown={() => setOpen(false)}
-                    aria-hidden="true"
-                />
-            ) : null}
+            {overlay}
         </div>
     )
 }
