@@ -1,4 +1,4 @@
-import { type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
@@ -46,19 +46,14 @@ export function ComboBox<T>({
     const inputRef = useRef<HTMLInputElement>(null)
     const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null)
 
-    // Calculate dropdown position when opening
-    useLayoutEffect(() => {
-        if (!open || !inputRef.current) {
-            setDropdownPos(null)
-            return
-        }
+    const recalcPosition = useCallback(() => {
+        if (!inputRef.current) return
         const rect = inputRef.current.getBoundingClientRect()
         const viewportHeight = window.innerHeight
         const spaceBelow = viewportHeight - rect.bottom
         const spaceAbove = rect.top
-        const dropdownHeight = 224 // max-h-56 = 14rem = 224px
+        const dropdownHeight = 224
 
-        // Open upward if not enough space below and more space above
         const openUp = spaceBelow < dropdownHeight && spaceAbove > spaceBelow
 
         setDropdownPos({
@@ -67,7 +62,28 @@ export function ComboBox<T>({
             width: rect.width,
             openUp,
         })
-    }, [open])
+    }, [])
+
+    // Calculate dropdown position when opening
+    useLayoutEffect(() => {
+        if (!open || !inputRef.current) {
+            setDropdownPos(null)
+            return
+        }
+        recalcPosition()
+    }, [open, recalcPosition])
+
+    // Reposition on scroll/resize while open
+    useEffect(() => {
+        if (!open) return
+        const handler = () => recalcPosition()
+        window.addEventListener('scroll', handler, true)
+        window.addEventListener('resize', handler)
+        return () => {
+            window.removeEventListener('scroll', handler, true)
+            window.removeEventListener('resize', handler)
+        }
+    }, [open, recalcPosition])
 
     const filtered = useMemo(() => {
         // Don't filter the options - the API already returns search results

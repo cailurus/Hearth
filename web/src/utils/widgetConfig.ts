@@ -3,37 +3,18 @@
  */
 
 import { DEFAULT_CLOCKS, normalizeCountryCodes, safeParseJSON } from './helpers'
+import type {
+    WidgetKind,
+    ClockConfig,
+    WeatherConfig,
+    MetricsConfig,
+    MarketsConfig,
+    HolidaysConfig,
+    TimezonesConfig,
+} from '../types/ui'
 
-export type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays'
-
-export interface WorldClockCity {
-    city: string
-    timezone: string
-}
-
-export interface WeatherConfig {
-    city: string
-}
-
-export interface MetricsConfig {
-    showCpu: boolean
-    showMem: boolean
-    showDisk: boolean
-    showNet: boolean
-    refreshSec: 1 | 5 | 10
-}
-
-export interface MarketsConfig {
-    symbols: string[]
-}
-
-export interface HolidaysConfig {
-    countries: string[]
-}
-
-export interface TimezonesConfig {
-    clocks: WorldClockCity[]
-}
+export type WorldClockCity = ClockConfig
+export type { WidgetKind, WeatherConfig, MetricsConfig, MarketsConfig, HolidaysConfig, TimezonesConfig }
 
 export interface WidgetConfigState {
     weatherCity: string

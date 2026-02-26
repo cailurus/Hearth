@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
 import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics } from '../types'
-import { safeParseJSON, widgetKindFromUrl } from '../utils'
+import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
 
 export interface UseWidgetsResult {
     /** Weather data for default widget */
@@ -26,23 +26,6 @@ interface UseWidgetsOptions {
     apps: AppItem[]
     lang: 'zh' | 'en'
     defaultCity?: string
-}
-
-/**
- * Normalize country codes - dedupe and uppercase
- */
-function normalizeCountryCodes(codes: string[]): string[] {
-    const out: string[] = []
-    const seen = new Set<string>()
-    for (const raw of codes) {
-        const c = String(raw || '').trim().toUpperCase()
-        if (c.length !== 2) continue
-        if (c < 'AA' || c > 'ZZ') continue
-        if (seen.has(c)) continue
-        seen.add(c)
-        out.push(c)
-    }
-    return out
 }
 
 /**

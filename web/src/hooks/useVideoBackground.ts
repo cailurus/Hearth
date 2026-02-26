@@ -2,7 +2,7 @@
  * Hook for managing video background download and state
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 // Video is stored in public/assets/videos/rain.mp4
 // In Docker, this file doesn't exist - need to download from GitHub
@@ -80,6 +80,23 @@ export function useVideoBackground(enabled: boolean): VideoBackgroundState {
     const [downloadProgress, setDownloadProgress] = useState(0)
     const [error, setError] = useState<string | null>(null)
     const [isReady, setIsReady] = useState(false)
+    const objectUrlsRef = useRef<string[]>([])
+
+    // Helper to track and set object URLs
+    const setObjectUrl = useCallback((url: string | null) => {
+        setVideoUrl(url)
+        if (url && url.startsWith('blob:')) {
+            objectUrlsRef.current.push(url)
+        }
+    }, [])
+
+    // Revoke all tracked object URLs
+    const revokeAllUrls = useCallback(() => {
+        for (const u of objectUrlsRef.current) {
+            URL.revokeObjectURL(u)
+        }
+        objectUrlsRef.current = []
+    }, [])
 
     const downloadVideo = useCallback(async () => {
         setIsDownloading(true)
@@ -117,7 +134,7 @@ export function useVideoBackground(enabled: boolean): VideoBackgroundState {
             await saveVideoToDB(blob)
 
             const url = URL.createObjectURL(blob)
-            setVideoUrl(url)
+            setObjectUrl(url)
             setIsReady(true)
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Download failed')
@@ -128,16 +145,15 @@ export function useVideoBackground(enabled: boolean): VideoBackgroundState {
 
     useEffect(() => {
         if (!enabled) {
+            revokeAllUrls()
             setVideoUrl(null)
             setIsReady(false)
             return
         }
 
         let cancelled = false
-        let objectUrl: string | null = null
 
         const init = async () => {
-            // First check if local file exists (development or manually placed)
             const localExists = await checkLocalVideo()
             if (cancelled) return
 
@@ -147,18 +163,15 @@ export function useVideoBackground(enabled: boolean): VideoBackgroundState {
                 return
             }
 
-            // Check IndexedDB cache
             const cachedBlob = await getVideoFromDB()
             if (cancelled) return
 
             if (cachedBlob) {
-                objectUrl = URL.createObjectURL(cachedBlob)
-                setVideoUrl(objectUrl)
+                setObjectUrl(URL.createObjectURL(cachedBlob))
                 setIsReady(true)
                 return
             }
 
-            // Need to download from GitHub
             await downloadVideo()
         }
 
@@ -166,11 +179,9 @@ export function useVideoBackground(enabled: boolean): VideoBackgroundState {
 
         return () => {
             cancelled = true
-            if (objectUrl) {
-                URL.revokeObjectURL(objectUrl)
-            }
+            revokeAllUrls()
         }
-    }, [enabled, downloadVideo])
+    }, [enabled, downloadVideo, setObjectUrl, revokeAllUrls])
 
     return { videoUrl, isDownloading, downloadProgress, error, isReady }
 }

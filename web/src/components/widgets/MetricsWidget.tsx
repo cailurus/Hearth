@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Cpu, HardDrive, MemoryStick, Upload, Download } from 'lucide-react'
 import type { HostMetrics } from '../../types'
+import type { MetricsConfig } from '../../types/ui'
 import { formatBytes, formatPercent } from '../../utils'
 import { Spinner } from '../ui/Spinner'
 
@@ -73,13 +74,6 @@ function formatCpuModel(model: string | undefined, compact: boolean = false): st
     return cleaned || raw.slice(0, 30)
 }
 
-interface MetricsConfig {
-    showCpu: boolean
-    showMem: boolean
-    showDisk: boolean
-    showNet: boolean
-}
-
 interface MetricsWidgetProps {
     data: HostMetrics | null
     netRate: { upBps: number; downBps: number } | null
@@ -150,7 +144,7 @@ export function MetricsWidget({ data, netRate, config, lang }: MetricsWidgetProp
         }
 
         return result
-    }, [data, netRate, config, t])
+    }, [data, netRate, config, lang])
 
     if (!data) {
         return (

@@ -42,6 +42,7 @@ export function useDragSort<T>({
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
     const draggingIdRef = useRef<string | null>(null)
+    const dropTargetIdRef = useRef<string | null>(null)
 
     const getDragHandlers = useCallback(
         (item: T): DragHandlers => {
@@ -53,13 +54,13 @@ export function useDragSort<T>({
                     draggingIdRef.current = id
                     e.dataTransfer.effectAllowed = 'move'
                     e.dataTransfer.setData('text/plain', id)
-                    // Delay state update so browser can capture drag image first
                     setTimeout(() => {
                         setDraggingId(id)
                     }, 0)
                 },
                 onDragEnd: () => {
                     draggingIdRef.current = null
+                    dropTargetIdRef.current = null
                     setDraggingId(null)
                     setDropTargetId(null)
                 },
@@ -68,6 +69,7 @@ export function useDragSort<T>({
                     const fromId = draggingIdRef.current
                     if (!fromId || fromId === id) return
                     e.preventDefault()
+                    dropTargetIdRef.current = id
                     setDropTargetId(id)
                 },
                 onDragOver: (e: React.DragEvent) => {
@@ -76,7 +78,8 @@ export function useDragSort<T>({
                     if (!fromId || fromId === id) return
                     e.preventDefault()
                     e.dataTransfer.dropEffect = 'move'
-                    if (dropTargetId !== id) {
+                    if (dropTargetIdRef.current !== id) {
+                        dropTargetIdRef.current = id
                         setDropTargetId(id)
                     }
                 },
@@ -85,6 +88,7 @@ export function useDragSort<T>({
                     e.preventDefault()
                     const fromId = draggingIdRef.current || e.dataTransfer.getData('text/plain')
                     draggingIdRef.current = null
+                    dropTargetIdRef.current = null
                     setDraggingId(null)
                     setDropTargetId(null)
                     if (!fromId || fromId === id) return
@@ -92,7 +96,7 @@ export function useDragSort<T>({
                 },
             }
         },
-        [enabled, getId, onReorder, dropTargetId]
+        [enabled, getId, onReorder]
     )
 
     const isDragging = useCallback((id: string) => draggingId === id, [draggingId])

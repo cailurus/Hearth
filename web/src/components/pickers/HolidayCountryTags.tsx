@@ -2,23 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiGet } from '../../api'
 import type { HolidayCountry } from '../../types'
-
-/**
- * Normalize country codes - dedupe and uppercase
- */
-function normalizeCountryCodes(codes: string[]): string[] {
-    const out: string[] = []
-    const seen = new Set<string>()
-    for (const raw of codes) {
-        const c = String(raw || '').trim().toUpperCase()
-        if (c.length !== 2) continue
-        if (c < 'AA' || c > 'ZZ') continue
-        if (seen.has(c)) continue
-        seen.add(c)
-        out.push(c)
-    }
-    return out
-}
+import { normalizeCountryCodes } from '../../utils/helpers'
 
 export interface HolidayCountryTagsProps {
     selected: string[]

@@ -87,17 +87,15 @@ export function useBackgroundRefresh({
 
             await res.blob()
 
-            await Promise.race([
-                new Promise<void>((resolve, reject) => {
-                    const img = new Image()
-                    img.onload = () => resolve()
-                    img.onerror = () => reject(new Error('failed'))
-                    img.src = nextUrl
-                }),
-                new Promise<void>((_, reject) => {
-                    window.setTimeout(() => reject(new Error('timeout')), 12000)
-                }),
-            ])
+            await new Promise<void>((resolve, reject) => {
+                const timer = window.setTimeout(() => {
+                    reject(new Error('timeout'))
+                }, 12000)
+                const img = new Image()
+                img.onload = () => { clearTimeout(timer); resolve() }
+                img.onerror = () => { clearTimeout(timer); reject(new Error('failed')) }
+                img.src = nextUrl
+            })
 
             setBgNonce(nextNonce)
         } catch (e) {

@@ -7,8 +7,8 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Search, X, Loader2 } from 'lucide-react'
 
-// Lucide CDN URL for SVG icons
-const LUCIDE_CDN_BASE = 'https://unpkg.com/lucide-static@latest/icons'
+// Lucide CDN URL for SVG icons - pinned version for security
+const LUCIDE_CDN_BASE = 'https://unpkg.com/lucide-static@0.460.0/icons'
 
 interface LucideIcon {
     name: string
@@ -212,8 +212,27 @@ interface LucideIconPreviewProps {
     className?: string
 }
 
-// Cache for loaded SVGs
+// Cache for loaded SVGs (with size limit)
 const svgCache = new Map<string, string>()
+const SVG_CACHE_MAX = 200
+
+function sanitizeSvg(raw: string): string {
+    return raw
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+        .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+        .replace(/<use[^>]*href\s*=\s*["'][^#][^"']*["'][^>]*\/?>/gi, '')
+}
+
+function cacheSvg(key: string, value: string) {
+    if (svgCache.size >= SVG_CACHE_MAX) {
+        const keys = Array.from(svgCache.keys())
+        for (let i = 0; i < keys.length / 2; i++) {
+            svgCache.delete(keys[i])
+        }
+    }
+    svgCache.set(key, value)
+}
 
 export function LucideIconPreview({ name, className = 'h-6 w-6' }: LucideIconPreviewProps) {
     const [svg, setSvg] = useState<string | null>(() => svgCache.get(name) || null)
@@ -225,21 +244,24 @@ export function LucideIconPreview({ name, className = 'h-6 w-6' }: LucideIconPre
             return
         }
 
+        let mounted = true
         const loadSvg = async () => {
             try {
                 const res = await fetch(`${LUCIDE_CDN_BASE}/${name}.svg`)
-                if (res.ok) {
-                    const text = await res.text()
-                    svgCache.set(name, text)
+                if (res.ok && mounted) {
+                    const text = sanitizeSvg(await res.text())
+                    cacheSvg(name, text)
                     setSvg(text)
-                } else {
+                } else if (mounted) {
                     setError(true)
                 }
             } catch {
-                setError(true)
+                if (mounted) setError(true)
             }
         }
         loadSvg()
+
+        return () => { mounted = false }
     }, [name])
 
     if (error || !svg) {

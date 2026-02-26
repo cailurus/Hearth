@@ -1,10 +1,31 @@
 import { useEffect, useState } from 'react'
 
-// Lucide CDN URL for SVG icons
-const LUCIDE_CDN_BASE = 'https://unpkg.com/lucide-static@latest/icons'
+// Lucide CDN URL for SVG icons - pinned version for security
+const LUCIDE_CDN_BASE = 'https://unpkg.com/lucide-static@0.460.0/icons'
 
-// Cache for loaded SVGs
+// Cache for loaded SVGs (with size limit)
 const svgCache = new Map<string, string>()
+const SVG_CACHE_MAX = 200
+
+/** Strip potentially dangerous elements and attributes from SVG markup */
+function sanitizeSvg(raw: string): string {
+    return raw
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+        .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+        .replace(/<use[^>]*href\s*=\s*["'][^#][^"']*["'][^>]*\/?>/gi, '')
+}
+
+function cacheSvg(key: string, value: string) {
+    if (svgCache.size >= SVG_CACHE_MAX) {
+        // Evict oldest half
+        const keys = Array.from(svgCache.keys())
+        for (let i = 0; i < keys.length / 2; i++) {
+            svgCache.delete(keys[i])
+        }
+    }
+    svgCache.set(key, value)
+}
 
 export interface AppIconProps {
     iconPath: string | null
@@ -27,30 +48,33 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         setHasError(false)
     }, [iconPath])
 
-    const sizeClass = size === 'sm' ? 'h-7 w-7' : size === 'lg' ? 'h-11 w-11' : 'h-9 w-9'
-    const iconSizeClass = size === 'sm' ? 'h-4 w-4' : size === 'lg' ? 'h-6 w-6' : 'h-5 w-5'
+    const px = size === 'sm' ? 28 : size === 'lg' ? 44 : 36
+    const lucidePx = size === 'sm' ? 18 : size === 'lg' ? 28 : 22
     const textClass = size === 'sm' ? 'text-xs' : size === 'lg' ? 'text-base' : 'text-sm'
+    const boxStyle: React.CSSProperties = { width: px, height: px, minWidth: px, minHeight: px }
+    const boxClass = 'flex items-center justify-center rounded-lg bg-white/10 border border-white/[0.06]'
 
-    // Check if it's a Lucide icon
+    // Lucide icon
     if (iconPath?.startsWith('lucide:')) {
         const iconName = iconPath.slice('lucide:'.length)
-        
+
         return (
-            <div className={`flex ${sizeClass} items-center justify-center rounded-lg bg-white/10`}>
-                <LucideIcon name={iconName} className={`${iconSizeClass} text-white/80`} />
+            <div className={boxClass} style={boxStyle}>
+                <LucideIcon name={iconName} size={lucidePx} />
             </div>
         )
     }
 
-    // Regular image icon or fallback
+    // Fallback: first letter
     if (!iconPath || hasError) {
         return (
-            <div className={`flex ${sizeClass} items-center justify-center rounded-lg bg-white/10 ${textClass} font-semibold`}>
+            <div className={`${boxClass} ${textClass} font-semibold`} style={boxStyle}>
                 {name.slice(0, 1).toUpperCase()}
             </div>
         )
     }
 
+    // Regular image icon
     const src = iconPath.startsWith('http') || iconPath.startsWith('data:')
         ? iconPath
         : `/assets/icons/${iconPath}`
@@ -59,7 +83,8 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         <img
             src={src}
             alt=""
-            className={`${sizeClass} rounded-lg bg-white/10 object-contain`}
+            className={`rounded-lg bg-white/10 border border-white/[0.06] object-contain`}
+            style={boxStyle}
             loading="lazy"
             onError={() => setHasError(true)}
         />
@@ -67,18 +92,13 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
 }
 
 /**
- * Lucide icon component that loads SVG from CDN
+ * Lucide icon component that loads SVG from CDN.
+ * Uses a single numeric `size` (px) to avoid Tailwind/inline-style conflicts.
  */
-interface LucideIconProps {
-    name: string
-    className?: string
-}
-
-function LucideIcon({ name, className = 'h-5 w-5' }: LucideIconProps) {
+function LucideIcon({ name, size = 20 }: { name: string; size?: number }) {
     const [svg, setSvg] = useState<string | null>(() => svgCache.get(name.toLowerCase()) || null)
     const [error, setError] = useState(false)
 
-    // Convert PascalCase to kebab-case for CDN URL
     const kebabName = name
         .replace(/([a-z])([A-Z])/g, '$1-$2')
         .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
@@ -95,8 +115,8 @@ function LucideIcon({ name, className = 'h-5 w-5' }: LucideIconProps) {
             try {
                 const res = await fetch(`${LUCIDE_CDN_BASE}/${kebabName}.svg`)
                 if (res.ok && mounted) {
-                    const text = await res.text()
-                    svgCache.set(kebabName, text)
+                    const text = sanitizeSvg(await res.text())
+                    cacheSvg(kebabName, text)
                     setSvg(text)
                 } else if (mounted) {
                     setError(true)
@@ -110,28 +130,25 @@ function LucideIcon({ name, className = 'h-5 w-5' }: LucideIconProps) {
         return () => { mounted = false }
     }, [kebabName])
 
-    // Parse size from className
-    const sizeMatch = className.match(/h-(\d+)/)
-    const size = sizeMatch ? parseInt(sizeMatch[1]) * 4 : 20
-
     if (error) {
-        return <span className={className}>?</span>
+        return <span style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>?</span>
     }
 
     if (!svg) {
-        // Loading placeholder - invisible
-        return <span className={className} />
+        return <span style={{ width: size, height: size, display: 'inline-block' }} />
     }
+
+    // Replace any existing width/height and set our own to guarantee a square.
+    const processed = svg
+        .replace(/width="[^"]*"/, `width="${size}"`)
+        .replace(/height="[^"]*"/, `height="${size}"`)
+        .replace(/stroke="[^"]*"/g, 'stroke="currentColor"')
 
     return (
         <span
-            className={className}
+            className="text-white/80"
             style={{ display: 'inline-flex', width: size, height: size }}
-            dangerouslySetInnerHTML={{
-                __html: svg
-                    .replace('<svg', `<svg width="${size}" height="${size}"`)
-                    .replace(/stroke="[^"]*"/g, 'stroke="currentColor"')
-            }}
+            dangerouslySetInnerHTML={{ __html: processed }}
         />
     )
 }
