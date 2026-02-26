@@ -19,6 +19,8 @@ import {
     DEFAULT_CLOCKS,
 } from '../utils'
 
+const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
+
 export default function HomePage({ initialDialog }: { initialDialog?: 'login' } = {}) {
     const [me, setMe] = useState<Me | null>(null)
     const [settings, setSettings] = useState<Settings | null>(null)
@@ -55,12 +57,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const [editIconUrl, setEditIconUrl] = useState('')
     const [editLucideIcon, setEditLucideIcon] = useState<string | null>(null)
     const [iconResolving, setIconResolving] = useState(false)
-    const [widgetSaving, setWidgetSaving] = useState(false)
+    const [widgetSaving] = useState(false)
 
     const [widgetKind, setWidgetKind] = useState<'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null>(null)
     const [wCity, setWCity] = useState('')
-
-    const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
 
     const ensureFourMarketSymbols = useCallback(
         (raw: unknown): string[] => {
@@ -75,7 +75,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             while (unique.length < 4) unique.push(DEFAULT_MARKET_SYMBOLS[unique.length] || 'BTC')
             return unique.slice(0, 4)
         },
-        [DEFAULT_MARKET_SYMBOLS],
+        [],
     )
 
     const [mkSymbols, setMkSymbols] = useState<string[]>(DEFAULT_MARKET_SYMBOLS)
@@ -380,25 +380,32 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         }
     }, [])
 
-    // Manual save handler for weather, timezones, and markets widgets
+    // Manual save handler for weather, timezones, and markets widgets.
+    // Close dialog immediately; persist in background.
     const handleSaveWidget = useCallback(async () => {
         if (!editItem || !widgetKind) return
         if (widgetKind !== 'weather' && widgetKind !== 'timezones' && widgetKind !== 'markets') return
 
-        setWidgetSaving(true)
-        const itemId = editItem.id
+        // Capture values before closing, then close the dialog instantly.
+        const snapshot = { ...editItem }
+        const kind = widgetKind
+        const citySnapshot = wCity
+        const symbolsSnapshot = [...mkSymbols]
+        const clocksSnapshot = tzClocks.map((c) => ({ ...c }))
+        setEditOpen(false)
+
+        const itemId = snapshot.id
 
         try {
             let description: string | null = null
 
-            if (widgetKind === 'weather') {
-                description = JSON.stringify({ city: wCity.trim() })
-            } else if (widgetKind === 'markets') {
-                const symbols = ensureFourMarketSymbols(mkSymbols)
+            if (kind === 'weather') {
+                description = JSON.stringify({ city: citySnapshot.trim() })
+            } else if (kind === 'markets') {
+                const symbols = ensureFourMarketSymbols(symbolsSnapshot)
                 description = JSON.stringify({ symbols })
-            } else if (widgetKind === 'timezones') {
-                // Resolve city names to timezones
-                const next = (Array.isArray(tzClocks) ? tzClocks : []).slice(0, 4)
+            } else if (kind === 'timezones') {
+                const next = clocksSnapshot.slice(0, 4)
                 while (next.length < 4) next.push({ city: DEFAULT_CLOCKS[next.length]?.city || `City ${next.length + 1}`, timezone: '' })
 
                 const resolved = await Promise.all(
@@ -429,22 +436,19 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             if (description == null) return
 
             await apiPut(`/api/apps/${itemId}`, {
-                groupId: editItem.groupId,
-                name: editItem.name,
+                groupId: snapshot.groupId,
+                name: snapshot.name,
                 description,
-                url: editItem.url,
-                iconPath: editItem.iconPath,
-                iconSource: editItem.iconSource,
+                url: snapshot.url,
+                iconPath: snapshot.iconPath,
+                iconSource: snapshot.iconSource,
             })
 
-            // Update local state
             widgetLastSavedDescRef.current = description
             setApps((prev) => prev.map((a) => (a.id === itemId ? { ...a, description } : a)))
-            setEditItem((prev) => (prev && prev.id === itemId ? { ...prev, description } : prev))
-        } catch (e2) {
-            setEditErr(e2 instanceof Error ? e2.message : 'failed')
-        } finally {
-            setWidgetSaving(false)
+        } catch {
+            // Save failed silently; the dialog is already closed.
+            // The old data remains visible so the user can retry by reopening settings.
         }
     }, [editItem, widgetKind, wCity, mkSymbols, tzClocks, ensureFourMarketSymbols])
 

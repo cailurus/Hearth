@@ -39,17 +39,16 @@ const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
     timezones: null,
 }
 
-// Simple URL validation
 function isValidUrl(str: string): boolean {
     try {
-        const url = new URL(str)
-        return url.protocol === 'http:' || url.protocol === 'https:'
+        const u = new URL(str)
+        return u.protocol === 'http:' || u.protocol === 'https:'
     } catch {
         return false
     }
 }
 
-type IconMode = 'auto' | 'url' | 'lucide'
+type IconMode = 'none' | 'url' | 'lucide'
 
 export function AddItemDialog({
     open,
@@ -66,11 +65,11 @@ export function AddItemDialog({
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
 
-    // Icon mode state
-    const [iconMode, setIconMode] = useState<IconMode>('auto')
+    // Icon mode: 'none' = default (use fetched icon or nothing), 'url' = custom URL, 'lucide' = icon library
+    const [iconMode, setIconMode] = useState<IconMode>('none')
     const [iconUrl, setIconUrl] = useState('')
 
-    // Auto-fetch state
+    // Fetch state
     const [fetchingMeta, setFetchingMeta] = useState(false)
     const [previewIcon, setPreviewIcon] = useState<string | null>(null)
     const [resolvedIcon, setResolvedIcon] = useState<{ iconPath: string | null; iconSource: string | null }>({
@@ -82,11 +81,10 @@ export function AddItemDialog({
     const [showIconPicker, setShowIconPicker] = useState(false)
     const [selectedLucideIcon, setSelectedLucideIcon] = useState<string | null>(null)
 
-    // Track if user has manually edited the name
     const userEditedNameRef = useRef(false)
     const fetchSeqRef = useRef(0)
 
-    // Reset state when dialog opens/closes
+    // Reset state when dialog opens
     useEffect(() => {
         if (open) {
             setName('')
@@ -97,60 +95,49 @@ export function AddItemDialog({
             setPreviewIcon(null)
             setResolvedIcon({ iconPath: null, iconSource: null })
             setSelectedLucideIcon(null)
-            setIconMode('auto')
+            setIconMode('none')
             setIconUrl('')
             userEditedNameRef.current = false
             fetchSeqRef.current = 0
         }
     }, [open])
 
-    // Debounced auto-fetch favicon and title when URL changes (only in auto mode)
-    useEffect(() => {
-        if (!open || groupKind === 'system' || iconMode !== 'auto') return
-
+    // Manual icon fetch
+    const handleFetchIcon = useCallback(async () => {
         const trimmedUrl = url.trim()
-        if (!trimmedUrl || !isValidUrl(trimmedUrl)) {
-            setPreviewIcon(null)
-            setResolvedIcon({ iconPath: null, iconSource: null })
-            return
-        }
+        if (!trimmedUrl || !isValidUrl(trimmedUrl)) return
+
+        // Switch back to default mode (show fetched result)
+        setIconMode('none')
+        setSelectedLucideIcon(null)
+        setIconUrl('')
 
         const seq = ++fetchSeqRef.current
         setFetchingMeta(true)
+        setPreviewIcon(null)
+        setResolvedIcon({ iconPath: null, iconSource: null })
 
-        const timer = window.setTimeout(async () => {
-            try {
-                const res = await apiPost<IconResolve>('/api/icon/resolve', { url: trimmedUrl })
-                if (fetchSeqRef.current !== seq) return
+        try {
+            const res = await apiPost<IconResolve>('/api/icon/resolve', { url: trimmedUrl })
+            if (fetchSeqRef.current !== seq) return
 
-                // Set preview icon
-                if (res.iconPath) {
-                    setPreviewIcon(`/api/icon/${res.iconPath}`)
-                    setResolvedIcon({ iconPath: res.iconPath, iconSource: res.iconSource })
-                } else {
-                    setPreviewIcon(null)
-                    setResolvedIcon({ iconPath: null, iconSource: null })
-                }
-
-                // Auto-fill name if user hasn't manually edited it
-                if (res.title && !userEditedNameRef.current && !name.trim()) {
-                    setName(res.title)
-                }
-            } catch {
-                if (fetchSeqRef.current !== seq) return
-                setPreviewIcon(null)
-                setResolvedIcon({ iconPath: null, iconSource: null })
-            } finally {
-                if (fetchSeqRef.current === seq) {
-                    setFetchingMeta(false)
-                }
+            if (res.iconPath) {
+                setPreviewIcon(`/assets/icons/${res.iconPath}`)
+                setResolvedIcon({ iconPath: res.iconPath, iconSource: res.iconSource })
             }
-        }, 500)
 
-        return () => {
-            window.clearTimeout(timer)
+            // Auto-fill name if user hasn't manually edited it
+            if (res.title && !userEditedNameRef.current && !name.trim()) {
+                setName(res.title)
+            }
+        } catch {
+            if (fetchSeqRef.current !== seq) return
+        } finally {
+            if (fetchSeqRef.current === seq) {
+                setFetchingMeta(false)
+            }
         }
-    }, [open, groupKind, url, name, iconMode])
+    }, [url, name])
 
     const handleNameChange = (value: string) => {
         setName(value)
@@ -162,16 +149,13 @@ export function AddItemDialog({
             setError(null)
             setLoading(true)
             try {
-                const widgetType = WIDGET_TYPES.find((w) => w.kind === kind)
-                // Use the translation key directly based on the kind
-                const widgetName = widgetType
-                    ? kind === 'weather' ? t('widgets:weather')
+                const widgetName =
+                    kind === 'weather' ? t('widgets:weather')
                         : kind === 'timezones' ? t('widgets:worldClock')
                             : kind === 'metrics' ? t('widgets:systemStatus')
                                 : kind === 'markets' ? t('widgets:markets')
                                     : kind === 'holidays' ? t('widgets:upcomingHolidays')
                                         : kind
-                    : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
@@ -201,7 +185,6 @@ export function AddItemDialog({
             setError(null)
             setLoading(true)
             try {
-                // If user selected a Lucide icon, use that
                 if (iconMode === 'lucide' && selectedLucideIcon) {
                     await onSubmit({
                         groupId,
@@ -215,7 +198,6 @@ export function AddItemDialog({
                     return
                 }
 
-                // If using custom icon URL
                 if (iconMode === 'url' && iconUrl.trim()) {
                     await onSubmit({
                         groupId,
@@ -229,27 +211,14 @@ export function AddItemDialog({
                     return
                 }
 
-                // Auto mode: Use pre-resolved icon if available, otherwise fetch again
-                let iconPath = resolvedIcon.iconPath
-                let iconSource = resolvedIcon.iconSource
-
-                if (!iconPath) {
-                    try {
-                        const res = await apiPost<IconResolve>('/api/icon/resolve', { url: trimmedUrl })
-                        iconPath = res.iconPath || null
-                        iconSource = res.iconSource || null
-                    } catch {
-                        // If icon resolution fails, still create the link
-                    }
-                }
-
+                // Default: use fetched icon if available
                 await onSubmit({
                     groupId,
                     name: trimmedName,
                     description: desc || null,
                     url: trimmedUrl,
-                    iconPath,
-                    iconSource,
+                    iconPath: resolvedIcon.iconPath,
+                    iconSource: resolvedIcon.iconSource,
                 })
                 onClose()
             } catch (err) {
@@ -265,6 +234,8 @@ export function AddItemDialog({
         setSelectedLucideIcon(iconName)
         setIconMode('lucide')
         setIconUrl('')
+        setPreviewIcon(null)
+        setResolvedIcon({ iconPath: null, iconSource: null })
     }, [])
 
     const handleClose = useCallback(() => {
@@ -272,21 +243,21 @@ export function AddItemDialog({
         onClose()
     }, [onClose])
 
-    // Get current preview icon based on mode
-    const getCurrentPreviewIcon = () => {
+    // Current preview icon based on state
+    const currentPreview = (() => {
         if (iconMode === 'lucide' && selectedLucideIcon) {
             return { type: 'lucide' as const, name: selectedLucideIcon }
         }
         if (iconMode === 'url' && iconUrl.trim()) {
             return { type: 'url' as const, src: iconUrl.trim() }
         }
-        if (iconMode === 'auto' && previewIcon) {
+        if (previewIcon) {
             return { type: 'url' as const, src: previewIcon }
         }
         return null
-    }
+    })()
 
-    const currentPreview = getCurrentPreviewIcon()
+    const canFetch = !fetchingMeta && !!url.trim() && isValidUrl(url.trim())
 
     return (
         <Modal open={open} title={t('home:addItem')} onClose={handleClose} closeText={t('common:close')}>
@@ -319,19 +290,17 @@ export function AddItemDialog({
                 <form onSubmit={handleAddAppLink} className="space-y-3">
                     <label className="block text-sm">
                         <div className="mb-1 text-white/70">URL</div>
-                        <div className="relative">
-                            <input
-                                value={url}
-                                onChange={(e) => setUrl(e.target.value)}
-                                placeholder="https://example.com"
-                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 pr-10 text-sm text-white outline-none placeholder:text-white/30"
-                            />
-                            {fetchingMeta && (
-                                <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                                    <Loader2 className="h-4 w-4 animate-spin text-white/50" />
-                                </div>
-                            )}
-                        </div>
+                        <input
+                            value={url}
+                            onChange={(e) => {
+                                setUrl(e.target.value)
+                                // Clear stale fetched icon when URL changes
+                                setPreviewIcon(null)
+                                setResolvedIcon({ iconPath: null, iconSource: null })
+                            }}
+                            placeholder="https://example.com"
+                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                        />
                     </label>
                     <label className="block text-sm">
                         <div className="mb-1 text-white/70">{t('common:name')}</div>
@@ -342,7 +311,7 @@ export function AddItemDialog({
                         />
                     </label>
 
-                    {/* Icon selection - Three parallel modes */}
+                    {/* Icon selection */}
                     <div className="rounded-lg border border-white/10 bg-white/5 p-3">
                         <div className="mb-3 text-sm font-semibold text-white/80">{t('common:icon')}</div>
 
@@ -369,25 +338,23 @@ export function AddItemDialog({
                                     ? `Lucide: ${selectedLucideIcon}`
                                     : iconMode === 'url'
                                         ? t('common:iconCustomUrl')
-                                        : t('common:iconAutoFromUrl')}
+                                        : resolvedIcon.iconPath
+                                            ? t('common:iconAutoFromUrl')
+                                            : t('common:iconAutoHint')}
                             </div>
                         </div>
 
-                        {/* Three parallel mode buttons */}
+                        {/* Action buttons */}
                         <div className="flex flex-wrap gap-2 mb-3">
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setIconMode('auto')
-                                    setSelectedLucideIcon(null)
-                                    setIconUrl('')
-                                }}
-                                className={
-                                    iconMode === 'auto'
-                                        ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
-                                        : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
-                                }
+                                disabled={!canFetch}
+                                onClick={handleFetchIcon}
+                                className="flex items-center gap-1.5 rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20 disabled:opacity-40"
                             >
+                                {fetchingMeta ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : null}
                                 {t('common:iconAuto')}
                             </button>
                             <button
@@ -418,12 +385,6 @@ export function AddItemDialog({
                         </div>
 
                         {/* Mode-specific content */}
-                        {iconMode === 'auto' && (
-                            <div className="text-xs text-white/50">
-                                {t('common:iconAutoHint')}
-                            </div>
-                        )}
-
                         {iconMode === 'url' && (
                             <div>
                                 <div className="mb-1 text-xs text-white/70">{t('common:iconUrlHint')}</div>
@@ -469,7 +430,6 @@ export function AddItemDialog({
                 </form>
             )}
 
-            {/* Icon Picker Modal */}
             <IconPicker
                 open={showIconPicker}
                 onClose={() => setShowIconPicker(false)}

@@ -200,10 +200,9 @@ export function EditItemDialog({
                                     type="button"
                                     disabled={widgetSaving}
                                     onClick={() => onSaveWidget?.()}
-                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                    className="flex items-center justify-center rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 min-w-[64px]"
                                 >
-                                    {widgetSaving && <Spinner size="sm" />}
-                                    {t('common:save')}
+                                    {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
                                 </button>
                             </div>
                         ) : widgetKind === 'metrics' ? (
@@ -273,10 +272,9 @@ export function EditItemDialog({
                                     type="button"
                                     disabled={widgetSaving}
                                     onClick={() => onSaveWidget?.()}
-                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                    className="flex items-center justify-center rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 min-w-[64px]"
                                 >
-                                    {widgetSaving && <Spinner size="sm" />}
-                                    {t('common:save')}
+                                    {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
                                 </button>
                             </div>
                         ) : widgetKind === 'holidays' ? (
@@ -335,10 +333,9 @@ export function EditItemDialog({
                                     type="button"
                                     disabled={widgetSaving}
                                     onClick={() => onSaveWidget?.()}
-                                    className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60"
+                                    className="flex items-center justify-center rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 min-w-[64px]"
                                 >
-                                    {widgetSaving && <Spinner size="sm" />}
-                                    {t('common:save')}
+                                    {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
                                 </button>
                             </div>
                         )
