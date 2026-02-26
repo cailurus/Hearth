@@ -31,8 +31,10 @@ type Service struct {
 	sessionTTL time.Duration
 
 	// Rate limiting for login attempts (in-memory, resets on restart).
-	rateMu       sync.Mutex
-	loginAttemps map[string]*loginAttempt
+	rateMu        sync.Mutex
+	loginAttempts map[string]*loginAttempt
+
+	stopCh chan struct{} // signals background goroutines to stop
 }
 
 func New(cfg Config) (*Service, error) {
@@ -44,14 +46,69 @@ func New(cfg Config) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{
-		db:           cfg.DB,
-		sessionTTL:   ttl,
-		loginAttemps: make(map[string]*loginAttempt),
+		db:            cfg.DB,
+		sessionTTL:    ttl,
+		loginAttempts: make(map[string]*loginAttempt),
+		stopCh:        make(chan struct{}),
 	}
 	if err := s.ensureDefaultAdmin(); err != nil {
 		return nil, err
 	}
+	go s.sessionCleanupLoop()
 	return s, nil
+}
+
+// Stop signals background goroutines to exit.
+func (s *Service) Stop() {
+	select {
+	case <-s.stopCh:
+	default:
+		close(s.stopCh)
+	}
+}
+
+// sessionCleanupLoop periodically removes expired sessions from the database.
+func (s *Service) sessionCleanupLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.cleanupExpiredSessions()
+			s.cleanupExpiredLoginAttempts()
+		}
+	}
+}
+
+func (s *Service) cleanupExpiredSessions() {
+	now := time.Now().Unix()
+	result, err := s.db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, now)
+	if err != nil {
+		slog.Warn("failed to cleanup expired sessions", "error", err)
+		return
+	}
+	if n, _ := result.RowsAffected(); n > 0 {
+		slog.Info("cleaned up expired sessions", "count", n)
+	}
+}
+
+func (s *Service) cleanupExpiredLoginAttempts() {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	now := time.Now()
+	for username, attempt := range s.loginAttempts {
+		expired := false
+		if !attempt.blockedAt.IsZero() && now.After(attempt.blockedAt.Add(loginBlockDuration)) {
+			expired = true
+		} else if attempt.blockedAt.IsZero() && now.After(attempt.lastTry.Add(attemptWindow)) {
+			expired = true
+		}
+		if expired {
+			delete(s.loginAttempts, username)
+		}
+	}
 }
 
 // Default admin credentials:
@@ -96,7 +153,7 @@ func (s *Service) checkRateLimit(username string) error {
 	s.rateMu.Lock()
 	defer s.rateMu.Unlock()
 
-	attempt, exists := s.loginAttemps[username]
+	attempt, exists := s.loginAttempts[username]
 	if !exists {
 		return nil
 	}
@@ -110,13 +167,13 @@ func (s *Service) checkRateLimit(username string) error {
 
 	// If block expired, reset.
 	if !attempt.blockedAt.IsZero() && now.After(attempt.blockedAt.Add(loginBlockDuration)) {
-		delete(s.loginAttemps, username)
+		delete(s.loginAttempts, username)
 		return nil
 	}
 
 	// If last attempt was outside the window, reset.
 	if now.After(attempt.lastTry.Add(attemptWindow)) {
-		delete(s.loginAttemps, username)
+		delete(s.loginAttempts, username)
 		return nil
 	}
 
@@ -129,9 +186,9 @@ func (s *Service) recordFailedLogin(username string) {
 	defer s.rateMu.Unlock()
 
 	now := time.Now()
-	attempt, exists := s.loginAttemps[username]
+	attempt, exists := s.loginAttempts[username]
 	if !exists {
-		s.loginAttemps[username] = &loginAttempt{count: 1, lastTry: now}
+		s.loginAttempts[username] = &loginAttempt{count: 1, lastTry: now}
 		return
 	}
 
@@ -157,7 +214,7 @@ func (s *Service) recordFailedLogin(username string) {
 func (s *Service) clearLoginAttempts(username string) {
 	s.rateMu.Lock()
 	defer s.rateMu.Unlock()
-	delete(s.loginAttemps, username)
+	delete(s.loginAttempts, username)
 }
 
 func (s *Service) Login(username, password string) (string, error) {
@@ -218,6 +275,11 @@ func (s *Service) Validate(token string) (string, error) {
 		return "", errors.New("unauthorized")
 	}
 	return userID, nil
+}
+
+// SessionTTL returns the configured session TTL duration.
+func (s *Service) SessionTTL() time.Duration {
+	return s.sessionTTL
 }
 
 func newToken(n int) (string, error) {

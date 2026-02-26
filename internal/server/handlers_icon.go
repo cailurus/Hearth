@@ -55,7 +55,9 @@ func (s *Server) handleResolveIcon(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.iconResolver.ResolveAndCache(r.Context(), req.URL)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		// Icon not found is not a client error; return 200 with empty icon
+		// so the frontend can still use the title / show a fallback.
+		writeJSON(w, http.StatusOK, resolveIconResponse{})
 		return
 	}
 	if res.IconPath != "" {

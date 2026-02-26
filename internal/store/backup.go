@@ -1,7 +1,6 @@
 package store
 
 import (
-	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -20,15 +19,17 @@ func (s *Store) ExportAll() (Export, error) {
 	if err != nil {
 		return Export{}, err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var k, v string
 		if err := rows.Scan(&k, &v); err != nil {
-			_ = rows.Close()
 			return Export{}, err
 		}
 		settings[k] = v
 	}
-	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return Export{}, err
+	}
 
 	groups, err := s.ListGroups()
 	if err != nil {
@@ -103,5 +104,3 @@ func (s *Store) ImportJSON(b []byte) error {
 	}
 	return s.ImportAll(p)
 }
-
-var _ = sql.ErrNoRows

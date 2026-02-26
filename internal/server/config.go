@@ -10,6 +10,8 @@ type Config struct {
 	// Optional: when set, server can fetch and cache market icons on-demand.
 	// Example: https://raw.githubusercontent.com/<owner>/<repo>/main
 	MarketIconBaseURL string
+	CORSOrigins       string // comma-separated allowed origins; empty = allow all (dev mode)
+	CookieSecure      string // "auto" | "true" | "false"; default "auto"
 }
 
 const defaultMarketIconBaseURL = "https://raw.githubusercontent.com/nvstly/icons/main"
@@ -20,6 +22,8 @@ func LoadConfigFromEnv() Config {
 	dsn := getEnv("HEARTH_DB_DSN", dataDir+"/hearth.db")
 	sessionTTL := getEnv("HEARTH_SESSION_TTL", "168h")
 	marketIconBaseURL := getEnv("HEARTH_MARKET_ICON_BASE_URL", defaultMarketIconBaseURL)
+	corsOrigins := getEnv("HEARTH_CORS_ORIGINS", "")
+	cookieSecure := getEnv("HEARTH_COOKIE_SECURE", "auto")
 
 	return Config{
 		Addr:              addr,
@@ -27,6 +31,8 @@ func LoadConfigFromEnv() Config {
 		DatabaseDSN:       dsn,
 		SessionTTL:        sessionTTL,
 		MarketIconBaseURL: marketIconBaseURL,
+		CORSOrigins:       corsOrigins,
+		CookieSecure:      cookieSecure,
 	}
 }
 

@@ -56,12 +56,13 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 		if cached, ok := weatherCache.items[key]; ok {
 			age := time.Since(time.Unix(cached.FetchedAt, 0))
 			if cached.FetchedAt > 0 && age >= 0 && age < freshTTL {
+				// Copy before unlocking to avoid data race on shared struct.
+				result := cached
 				weatherCache.mu.Unlock()
-				// Ensure city label matches the request.
 				if strings.TrimSpace(city) != "" {
-					cached.City = city
+					result.City = city
 				}
-				return cached, nil
+				return result, nil
 			}
 		}
 		weatherCache.mu.Unlock()
@@ -92,10 +93,11 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 			if ok {
 				age := time.Since(time.Unix(cached.FetchedAt, 0))
 				if cached.FetchedAt > 0 && age >= 0 && age < maxStale {
+					result := cached
 					if strings.TrimSpace(city) != "" {
-						cached.City = city
+						result.City = city
 					}
-					return cached, nil
+					return result, nil
 				}
 			}
 		}
@@ -124,10 +126,11 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 			if ok {
 				age := time.Since(time.Unix(cached.FetchedAt, 0))
 				if cached.FetchedAt > 0 && age >= 0 && age < maxStale {
+					result := cached
 					if strings.TrimSpace(city) != "" {
-						cached.City = city
+						result.City = city
 					}
-					return cached, nil
+					return result, nil
 				}
 			}
 		}

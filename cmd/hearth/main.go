@@ -15,7 +15,10 @@ import (
 
 func main() {
 	cfg := server.LoadConfigFromEnv()
-	absDataDir, _ := filepath.Abs(cfg.DataDir)
+	absDataDir, err := filepath.Abs(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("data dir path: %v", err)
+	}
 	log.Printf("config storage (DataDir): %s", absDataDir)
 	log.Printf("icons cache: %s", filepath.Join(absDataDir, "icons"))
 	log.Printf("background cache: %s", filepath.Join(absDataDir, "cache"))
@@ -45,4 +48,5 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(ctx)
+	_ = srv.Close()
 }

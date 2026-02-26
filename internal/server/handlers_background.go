@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -102,7 +101,7 @@ func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request
 		if serveDefaultBackground(w, r) {
 			return
 		}
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to resolve background url: %v", err))
+		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	log.Printf("[bg] resolved url=%q", imgURL)
@@ -112,7 +111,7 @@ func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request
 		if serveDefaultBackground(w, r) {
 			return
 		}
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch background image: %v", err))
+		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	log.Printf("[bg] fetched ok file=%q mime=%q", res.FileName, res.MimeType)
@@ -191,13 +190,13 @@ func (s *Server) handleRefreshBackground(w http.ResponseWriter, r *http.Request)
 	imgURL, err := s.resolveBackgroundURL(ctx, provider)
 	if err != nil {
 		log.Printf("[bg] refresh resolve error: %v", err)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to resolve background url: %v", err))
+		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	res, err := s.bgSvc.FetchToFile(ctx, imgURL)
 	if err != nil {
 		log.Printf("[bg] refresh fetch error: %v", err)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch background image: %v", err))
+		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	if err := s.store.SetBackgroundCache(cacheKey, res.FileName); err != nil {

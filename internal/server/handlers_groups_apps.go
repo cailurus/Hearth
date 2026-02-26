@@ -44,6 +44,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -79,6 +80,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -111,6 +113,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReorderGroups(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req reorderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -135,6 +138,7 @@ func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -182,6 +186,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -238,6 +243,7 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReorderApps(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		GroupID *string  `json:"groupId"`
 		IDs     []string `json:"ids"`

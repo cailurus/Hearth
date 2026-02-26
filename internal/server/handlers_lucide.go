@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,10 +54,10 @@ func fetchLucideTags() (map[string][]string, error) {
 		if lucideTagsCache != nil {
 			return lucideTagsCache, nil
 		}
-		return nil, err
+		return nil, fmt.Errorf("lucide tags: status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		if lucideTagsCache != nil {
 			return lucideTagsCache, nil
@@ -87,7 +89,7 @@ func (s *Server) handleSearchLucideIcons(w http.ResponseWriter, r *http.Request)
 	limitStr := r.URL.Query().Get("limit")
 	limit := 100
 	if limitStr != "" {
-		if l, err := parseInt(limitStr); err == nil && l > 0 && l <= 500 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
 			limit = l
 		}
 	}
@@ -167,15 +169,4 @@ func (s *Server) handleListAllLucideIcons(w http.ResponseWriter, r *http.Request
 		"icons": names,
 		"count": len(names),
 	})
-}
-
-func parseInt(s string) (int, error) {
-	var n int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, nil
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, nil
 }

@@ -103,6 +103,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req Settings
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -131,37 +132,47 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		// UI is digital-only.
 		req.Time.Mode = "digital"
 	}
-	_ = s.store.SetKV(kvSiteTitle, req.SiteTitle)
-	_ = s.store.SetKV(kvLanguage, req.Language)
-	_ = s.store.SetKV(kvBackgroundProvider, req.Background.Provider)
-	_ = s.store.SetKV(kvBackgroundUnsplashQuery, req.Background.UnsplashQuery)
-	_ = s.store.SetKV(kvBackgroundInterval, req.Background.Interval)
+	var errs []error
+	setKV := func(key, value string) {
+		if err := s.store.SetKV(key, value); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	setKV(kvSiteTitle, req.SiteTitle)
+	setKV(kvLanguage, req.Language)
+	setKV(kvBackgroundProvider, req.Background.Provider)
+	setKV(kvBackgroundUnsplashQuery, req.Background.UnsplashQuery)
+	setKV(kvBackgroundInterval, req.Background.Interval)
 
 	if b, err := json.Marshal(req.Timezones); err == nil {
-		_ = s.store.SetKV(kvTimezones, string(b))
+		setKV(kvTimezones, string(b))
 	}
-	_ = s.store.SetKV(kvWeatherCity, req.Weather.City)
+	setKV(kvWeatherCity, req.Weather.City)
 	// Keep DB clean: lat/lon are no longer used (city-only weather).
-	_ = s.store.SetKV(kvWeatherLat, "")
-	_ = s.store.SetKV(kvWeatherLon, "")
+	setKV(kvWeatherLat, "")
+	setKV(kvWeatherLon, "")
 	if req.Time != nil {
 		if req.Time.Enabled {
-			_ = s.store.SetKV(kvTimeEnabled, "true")
+			setKV(kvTimeEnabled, "true")
 		} else {
-			_ = s.store.SetKV(kvTimeEnabled, "false")
+			setKV(kvTimeEnabled, "false")
 		}
 		if req.Time.ShowSeconds {
-			_ = s.store.SetKV(kvTimeShowSeconds, "true")
+			setKV(kvTimeShowSeconds, "true")
 		} else {
-			_ = s.store.SetKV(kvTimeShowSeconds, "false")
+			setKV(kvTimeShowSeconds, "false")
 		}
-		_ = s.store.SetKV(kvTimeTimezone, req.Time.Timezone)
-		_ = s.store.SetKV(kvTimeMode, "digital")
+		setKV(kvTimeTimezone, req.Time.Timezone)
+		setKV(kvTimeMode, "digital")
 	}
 
-	// Save title sort order
-	_ = s.store.SetKV(kvTitleSortOrder, fmt.Sprintf("%d", req.TitleSortOrder))
+	setKV(kvTitleSortOrder, fmt.Sprintf("%d", req.TitleSortOrder))
 
+	if len(errs) > 0 {
+		writeError(w, http.StatusInternalServerError, "failed to save settings")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

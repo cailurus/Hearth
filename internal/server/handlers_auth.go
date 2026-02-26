@@ -15,7 +15,19 @@ type meResponse struct {
 	Admin bool `json:"admin"`
 }
 
+func (s *Server) shouldSecureCookie(r *http.Request) bool {
+	switch s.cfg.CookieSecure {
+	case "true":
+		return true
+	case "false":
+		return false
+	default: // "auto"
+		return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	}
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")
@@ -38,8 +50,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		// Secure: true, // enable behind HTTPS
-		Expires: time.Now().Add(365 * 24 * time.Hour),
+		Secure:   s.shouldSecureCookie(r),
+		Expires:  time.Now().Add(s.auth.SessionTTL()),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
@@ -78,6 +90,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json")

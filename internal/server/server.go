@@ -21,12 +21,16 @@ import (
 	"github.com/morezhou/hearth/internal/store"
 )
 
+// db is stored so we can close it on shutdown.
+
+
 // Version is set at build time via ldflags.
 var Version = "dev"
 
 type Server struct {
 	cfg          Config
 	router       chi.Router
+	db           *sql.DB
 	store        *store.Store
 	auth         *auth.Service
 	iconResolver *icon.Resolver
@@ -55,12 +59,10 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	// Configure connection pool for SQLite.
-	// SQLite doesn't benefit from multiple connections for writes (due to locking),
-	// but this helps manage connection lifecycle.
-	db.SetMaxOpenConns(25)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(5 * time.Minute)
+	// SQLite works best with a single writer connection.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 
 	// SQLite pragmas for better performance and reliability.
 	if _, err := db.Exec("PRAGMA journal_mode = WAL;"); err != nil {
@@ -68,6 +70,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
 		slog.Warn("failed to enable foreign keys", "error", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000;"); err != nil {
+		slog.Warn("failed to set busy_timeout", "error", err)
 	}
 
 	st := store.New(db)
@@ -86,7 +91,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	s := &Server{cfg: cfg, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc}
+	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
 	}
@@ -96,6 +101,12 @@ func New(cfg Config) (*Server, error) {
 
 func (s *Server) Router() http.Handler { return s.router }
 
+// Close releases resources held by the server (database, background goroutines).
+func (s *Server) Close() error {
+	s.auth.Stop()
+	return s.db.Close()
+}
+
 func (s *Server) buildRouter() chi.Router {
 	r := chi.NewRouter()
 
@@ -104,13 +115,23 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+	corsOpts := cors.Options{
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 		MaxAge:           300,
-	}))
+	}
+	if s.cfg.CORSOrigins != "" {
+		origins := strings.Split(s.cfg.CORSOrigins, ",")
+		for i := range origins {
+			origins[i] = strings.TrimSpace(origins[i])
+		}
+		corsOpts.AllowedOrigins = origins
+	} else {
+		// Dev mode: allow all origins.
+		corsOpts.AllowedOrigins = []string{"*"}
+	}
+	r.Use(cors.Handler(corsOpts))
 
 	// Serve cached icons (local file cache).
 	iconsDir := http.Dir(filepath.Join(s.cfg.DataDir, "icons"))
@@ -245,5 +266,3 @@ func withNoCache(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-var _ = strings.Builder{}
