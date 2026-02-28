@@ -40,18 +40,6 @@ export function normalizeIanaTimeZone(tz: string, fallback: string = DEFAULT_TIM
 }
 
 /**
- * 获取系统时区
- */
-export function getSystemTimezone(): string {
-    try {
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-        return normalizeIanaTimeZone(tz, DEFAULT_TIMEZONE)
-    } catch {
-        return DEFAULT_TIMEZONE
-    }
-}
-
-/**
  * 标准化国家代码数组
  */
 export function normalizeCountryCodes(codes: string[]): string[] {
@@ -163,13 +151,6 @@ export function isSystemGroup(kind: string, name: string): boolean {
 }
 
 /**
- * 创建翻译函数
- */
-export function createTranslator(lang: 'zh' | 'en') {
-    return (zh: string, en: string) => (lang === 'en' ? en : zh)
-}
-
-/**
  * 显示分组名称（支持中英文切换）
  */
 export function displayGroupName(raw: string, lang: 'zh' | 'en'): string {
@@ -191,7 +172,7 @@ export function displayGroupName(raw: string, lang: 'zh' | 'en'): string {
 /**
  * 计算时区偏移分钟数
  */
-export function timeZoneOffsetMinutes(tz: string, d: Date): number {
+function timeZoneOffsetMinutes(tz: string, d: Date): number {
     const safeTz = normalizeIanaTimeZone(tz, 'UTC')
     const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: safeTz,
@@ -258,22 +239,6 @@ export function tzDeltaMeta(
     const isDay = otherHour >= 7 && otherHour <= 18
 
     return { dayLabel, offsetLabel, isDay }
-}
-
-/**
- * 高亮匹配文本
- */
-export function highlightMatch(text: string, query: string): { before: string; match: string; after: string } | null {
-    if (!query) return null
-    const lower = text.toLowerCase()
-    const qLower = query.toLowerCase()
-    const idx = lower.indexOf(qLower)
-    if (idx < 0) return null
-    return {
-        before: text.slice(0, idx),
-        match: text.slice(idx, idx + query.length),
-        after: text.slice(idx + query.length),
-    }
 }
 
 /**

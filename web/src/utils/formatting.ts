@@ -2,8 +2,6 @@
  * 格式化函数
  */
 
-import type { Language } from '../types'
-
 /**
  * 格式化字节数
  */
@@ -20,19 +18,6 @@ export function formatBytes(bytes: number, decimals = 1): string {
  */
 export function formatPercent(value: number, decimals = 1): string {
     return value.toFixed(decimals) + '%'
-}
-
-/**
- * 格式化价格
- */
-export function formatPrice(price: number): string {
-    if (price >= 1000) {
-        return price.toLocaleString('en-US', { maximumFractionDigits: 0 })
-    }
-    if (price >= 1) {
-        return price.toFixed(2)
-    }
-    return price.toFixed(4)
 }
 
 /**
@@ -69,73 +54,6 @@ export function ymdKey(date: Date, timezone: string): string {
     } catch {
         return ''
     }
-}
-
-/**
- * 格式化日期
- */
-export function formatDate(timestamp: number, timezone: string, lang: Language): string {
-    try {
-        return new Date(timestamp).toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN', {
-            timeZone: timezone,
-            month: 'short',
-            day: 'numeric',
-        })
-    } catch {
-        return ''
-    }
-}
-
-/**
- * 格式化日期字符串
- */
-export function formatDateStr(dateStr: string, lang: Language): string {
-    try {
-        const date = new Date(dateStr)
-        return date.toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN', {
-            month: 'short',
-            day: 'numeric',
-        })
-    } catch {
-        return dateStr
-    }
-}
-
-/**
- * 格式化星期名称
- */
-export function formatDayName(dateStr: string, lang: Language): string {
-    try {
-        const date = new Date(dateStr)
-        const today = new Date()
-        const tomorrow = new Date(today)
-        tomorrow.setDate(today.getDate() + 1)
-
-        if (date.toDateString() === today.toDateString()) {
-            return lang === 'en' ? 'Today' : '今天'
-        }
-        if (date.toDateString() === tomorrow.toDateString()) {
-            return lang === 'en' ? 'Tmrw' : '明天'
-        }
-
-        return date.toLocaleDateString(lang === 'en' ? 'en-US' : 'zh-CN', { weekday: 'short' })
-    } catch {
-        return dateStr
-    }
-}
-
-/**
- * 获取国家旗帜 emoji
- */
-export function getCountryFlag(countryCode: string): string {
-    const code = countryCode.toUpperCase()
-    if (code.length !== 2) return '🏳️'
-
-    const base = 0x1f1e6 - 65 // A
-    const first = code.charCodeAt(0)
-    const second = code.charCodeAt(1)
-
-    return String.fromCodePoint(base + first) + String.fromCodePoint(base + second)
 }
 
 /**

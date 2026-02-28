@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { normalizeMarketSymbol, iconForMarketSymbol } from '../../utils/markets'
+import { normalizeMarketSymbol, iconForMarketSymbol } from '../../utils'
 
 interface MarketLogoProps {
     symbol: string

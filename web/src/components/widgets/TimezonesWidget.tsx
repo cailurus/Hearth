@@ -4,9 +4,9 @@
 
 import { useMemo } from 'react'
 import { useNow } from '../../hooks/useNow'
-import { cityShort, ianaCityLabel, tzDeltaMeta } from '../../utils/helpers'
+import { cityShort, ianaCityLabel, tzDeltaMeta } from '../../utils'
+import type { WorldClockCity } from '../../utils'
 import { AppleClock } from './AppleClock'
-import type { WorldClockCity } from '../../utils/helpers'
 
 interface TimezonesWidgetProps {
     localTimezone: string

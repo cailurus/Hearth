@@ -2,7 +2,7 @@
  * Apple 风格模拟时钟组件
  */
 
-import { normalizeIanaTimeZone } from '../../utils/helpers'
+import { normalizeIanaTimeZone } from '../../utils'
 
 interface AppleClockProps {
     now: number

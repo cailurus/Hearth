@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiGet } from '../../api'
 import type { HolidayCountry } from '../../types'
-import { normalizeCountryCodes } from '../../utils/helpers'
+import { normalizeCountryCodes } from '../../utils'
 
 export interface HolidayCountryTagsProps {
     selected: string[]

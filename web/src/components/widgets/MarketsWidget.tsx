@@ -1,5 +1,5 @@
 import type { MarketsResponse } from '../../types'
-import { prettifyCompanyName } from '../../utils/helpers'
+import { prettifyCompanyName } from '../../utils'
 import { MarketLogo } from './MarketLogo'
 import { MiniSparkline } from './MiniSparkline'
 import { Spinner } from '../ui/Spinner'

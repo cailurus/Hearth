@@ -2,8 +2,7 @@
  * 时间显示组件
  */
 
-import { normalizeIanaTimeZone } from '../../utils/helpers'
-import { ymdKey, formatTime } from '../../utils/formatting'
+import { normalizeIanaTimeZone, ymdKey, formatTime } from '../../utils'
 
 interface TimeDisplayProps {
     now: number

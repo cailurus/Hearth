@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -75,33 +76,157 @@ func (r *Resolver) ResolveAndCache(ctx context.Context, pageURL string) (Result,
 		return r.tryFallbacks(ctx, u, pageKey)
 	}
 
-	title, candidates := parseHTMLIcons(finalURL, htmlBytes)
+	parsed := parseHTMLIcons(finalURL, htmlBytes)
+	title := parsed.title
 
-	// Step 2: Try downloading each icon candidate in priority order.
-	for _, href := range candidates {
-		if strings.HasPrefix(href, "data:") {
-			iconFile, err := r.saveDataURI(href, pageKey)
-			if err == nil {
-				return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
-			}
-			slog.Debug("failed to save data URI", "error", err)
-			continue
-		}
-		iconFile, err := r.downloadIconForPage(ctx, href, pageKey)
-		if err == nil {
+	// Step 2: Try manifest icons — PWA manifests contain the definitive
+	// favicon set and are what browsers actually use for tabs on JS-heavy sites.
+	if parsed.manifestURL != "" {
+		if iconFile, err := r.tryManifestIcons(ctx, parsed.manifestURL, pageKey); err == nil {
 			return Result{Title: title, IconPath: iconFile, IconSource: "site"}, nil
 		}
-		slog.Debug("failed to download icon candidate", "url", href, "error", err)
 	}
 
-	// Step 3: Try well-known fallback paths.
+	// Step 3: Try favicon candidates (rel="icon" / rel="shortcut icon").
+	if iconFile, src, ok := r.tryCandidates(ctx, parsed.favicons, pageKey); ok {
+		return Result{Title: title, IconPath: iconFile, IconSource: src}, nil
+	}
+
+	// Step 4: Try well-known fallback paths (/favicon.ico, etc.) + Google.
 	result, err := r.tryFallbacks(ctx, u, pageKey)
 	if err == nil {
 		result.Title = title
 		return result, nil
 	}
 
+	// Step 5: Try non-tab fallbacks (apple-touch-icon, og:image) as last resort.
+	if iconFile, src, ok := r.tryCandidates(ctx, parsed.fallbacks, pageKey); ok {
+		return Result{Title: title, IconPath: iconFile, IconSource: src}, nil
+	}
+
 	return Result{Title: title}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Candidate downloading
+// ---------------------------------------------------------------------------
+
+func (r *Resolver) tryCandidates(ctx context.Context, candidates []string, pageKey string) (string, string, bool) {
+	for _, href := range candidates {
+		if strings.HasPrefix(href, "data:") {
+			iconFile, err := r.saveDataURI(href, pageKey)
+			if err == nil {
+				return iconFile, "site", true
+			}
+			slog.Debug("failed to save data URI", "error", err)
+			continue
+		}
+		iconFile, err := r.downloadIconForPage(ctx, href, pageKey)
+		if err == nil {
+			return iconFile, "site", true
+		}
+		slog.Debug("failed to download icon candidate", "url", href, "error", err)
+	}
+	return "", "", false
+}
+
+// ---------------------------------------------------------------------------
+// Web-app manifest icon extraction
+// ---------------------------------------------------------------------------
+
+// tryManifestIcons fetches a web-app manifest JSON and tries to download icons
+// from it, preferring small square sizes (16-64px) that match browser tab favicons.
+func (r *Resolver) tryManifestIcons(ctx context.Context, manifestURL string, pageKey string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "application/json,*/*;q=0.5")
+
+	resp, err := r.Client.Do(req)
+	if err != nil {
+		if isTLSError(err) {
+			resp, err = r.InsecureClient.Do(req)
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("manifest fetch: bad status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return "", err
+	}
+
+	var manifest struct {
+		Icons []struct {
+			Src   string `json:"src"`
+			Sizes string `json:"sizes"`
+			Type  string `json:"type"`
+		} `json:"icons"`
+	}
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return "", err
+	}
+	if len(manifest.Icons) == 0 {
+		return "", errors.New("manifest has no icons")
+	}
+
+	// Build candidates sorted by favicon suitability (small square first).
+	candidates := make([]iconCandidate, 0, len(manifest.Icons))
+	for _, ic := range manifest.Icons {
+		if ic.Src == "" {
+			continue
+		}
+		href := resolveURL(manifestURL, ic.Src)
+		p := manifestIconPriority(ic.Sizes)
+		candidates = append(candidates, iconCandidate{href: href, priority: p})
+	}
+	sortCandidates(candidates)
+
+	for _, c := range candidates {
+		iconFile, err := r.downloadIconForPage(ctx, c.href, pageKey)
+		if err == nil {
+			return iconFile, nil
+		}
+		slog.Debug("failed to download manifest icon", "url", c.href, "error", err)
+	}
+	return "", errors.New("no downloadable manifest icon")
+}
+
+// manifestIconPriority scores manifest icons — prefer standard favicon sizes.
+func manifestIconPriority(sizes string) int {
+	if sizes == "" || sizes == "any" {
+		return 10
+	}
+	parts := strings.Split(strings.ToLower(sizes), "x")
+	if len(parts) < 2 {
+		return 10
+	}
+	w, err1 := strconv.Atoi(parts[0])
+	h, err2 := strconv.Atoi(parts[1])
+	if err1 != nil || err2 != nil {
+		return 10
+	}
+	// Non-square icons are less useful as favicons.
+	if w != h {
+		return 5
+	}
+	switch {
+	case w >= 16 && w <= 64:
+		return 100 // ideal tab favicon size
+	case w <= 128:
+		return 80
+	case w <= 256:
+		return 50
+	default:
+		return 20 // 512x512 etc — PWA install icon
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -111,27 +236,25 @@ func (r *Resolver) ResolveAndCache(ctx context.Context, pageURL string) (Result,
 func (r *Resolver) tryFallbacks(ctx context.Context, u *url.URL, pageKey string) (Result, error) {
 	baseURL := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 
-	paths := []string{
+	// 1. Standard favicon well-known paths (what browsers actually show in tabs).
+	faviconPaths := []string{
 		"/favicon.ico",
 		"/favicon.png",
 		"/favicon.svg",
-		"/apple-touch-icon.png",
-		"/apple-touch-icon-precomposed.png",
 	}
-
 	// Also try path-relative favicons for apps mounted under a sub-path.
 	if dir := path.Dir(u.Path); dir != "" && dir != "/" && dir != "." {
-		paths = append(paths, dir+"/favicon.ico", dir+"/favicon.png")
+		faviconPaths = append(faviconPaths, dir+"/favicon.ico", dir+"/favicon.png")
 	}
-
-	for _, p := range paths {
+	for _, p := range faviconPaths {
 		iconFile, err := r.downloadIconForPage(ctx, baseURL+p, pageKey)
 		if err == nil {
 			return Result{IconPath: iconFile, IconSource: "fallback"}, nil
 		}
 	}
 
-	// Google favicon service as last resort (public domains only).
+	// 2. Google favicon service — returns the real tab favicon that Google has
+	//    crawled (with JS execution), so it works for SPAs too.
 	if !isPrivateHost(u.Host) {
 		googleURL := fmt.Sprintf("https://www.google.com/s2/favicons?domain=%s&sz=128", u.Host)
 		iconFile, err := r.downloadIconForPage(ctx, googleURL, pageKey)
@@ -139,6 +262,19 @@ func (r *Resolver) tryFallbacks(ctx context.Context, u *url.URL, pageKey string)
 			return Result{IconPath: iconFile, IconSource: "google"}, nil
 		}
 		slog.Debug("google favicon service failed", "host", u.Host, "error", err)
+	}
+
+	// 3. Apple touch icon as absolute last resort — these are iOS home screen
+	//    icons, typically the site logo rather than the tab favicon.
+	applePaths := []string{
+		"/apple-touch-icon.png",
+		"/apple-touch-icon-precomposed.png",
+	}
+	for _, p := range applePaths {
+		iconFile, err := r.downloadIconForPage(ctx, baseURL+p, pageKey)
+		if err == nil {
+			return Result{IconPath: iconFile, IconSource: "fallback"}, nil
+		}
 	}
 
 	return Result{}, errors.New("no icon found")
@@ -250,25 +386,33 @@ type iconCandidate struct {
 	priority int
 }
 
-// parseHTMLIcons returns the page title and a list of icon URLs sorted by
-// priority (best first). It looks at <link rel="icon">, <link rel="apple-touch-icon">,
-// <link rel="shortcut icon">, and <meta> og:image / msapplication-TileImage.
-func parseHTMLIcons(baseURL string, htmlBytes []byte) (string, []string) {
+// htmlParseResult holds everything extracted from the HTML <head>.
+type htmlParseResult struct {
+	title       string
+	favicons    []string // rel="icon" / rel="shortcut icon"
+	fallbacks   []string // apple-touch-icon, og:image, msapplication-TileImage
+	manifestURL string   // <link rel="manifest"> href, if any
+}
+
+// parseHTMLIcons extracts the page title, icon candidates split into favicon
+// vs fallback tiers, and the web-app manifest URL.
+func parseHTMLIcons(baseURL string, htmlBytes []byte) htmlParseResult {
 	doc, err := html.Parse(bytes.NewReader(htmlBytes))
 	if err != nil {
-		return "", nil
+		return htmlParseResult{}
 	}
 
-	var title string
-	var candidates []iconCandidate
+	var res htmlParseResult
+	var favicons []iconCandidate
+	var fallbacks []iconCandidate
 
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			switch n.Data {
 			case "title":
-				if n.FirstChild != nil && title == "" {
-					title = strings.Join(strings.Fields(strings.TrimSpace(n.FirstChild.Data)), " ")
+				if n.FirstChild != nil && res.title == "" {
+					res.title = strings.Join(strings.Fields(strings.TrimSpace(n.FirstChild.Data)), " ")
 				}
 
 			case "link":
@@ -283,12 +427,19 @@ func parseHTMLIcons(baseURL string, htmlBytes []byte) (string, []string) {
 						sizes = strings.ToLower(a.Val)
 					}
 				}
-				if href != "" && strings.Contains(rel, "icon") {
+				if href == "" {
+					break
+				}
+				if rel == "manifest" {
+					res.manifestURL = resolveURL(baseURL, href)
+				} else if strings.Contains(rel, "icon") {
 					p := iconPriority(rel, sizes, href)
-					candidates = append(candidates, iconCandidate{
-						href:     resolveURL(baseURL, href),
-						priority: p,
-					})
+					c := iconCandidate{href: resolveURL(baseURL, href), priority: p}
+					if strings.Contains(rel, "apple-touch-icon") {
+						fallbacks = append(fallbacks, c)
+					} else {
+						favicons = append(favicons, c)
+					}
 				}
 
 			case "meta":
@@ -304,9 +455,9 @@ func parseHTMLIcons(baseURL string, htmlBytes []byte) (string, []string) {
 				}
 				if content != "" {
 					if prop == "og:image" || prop == "msapplication-tileimage" {
-						candidates = append(candidates, iconCandidate{
+						fallbacks = append(fallbacks, iconCandidate{
 							href:     resolveURL(baseURL, content),
-							priority: 5, // very low — only used as last resort
+							priority: 5,
 						})
 					}
 				}
@@ -318,19 +469,23 @@ func parseHTMLIcons(baseURL string, htmlBytes []byte) (string, []string) {
 	}
 	walk(doc)
 
-	// Sort by priority descending, then deduplicate.
-	sortCandidates(candidates)
-	seen := map[string]bool{}
-	out := make([]string, 0, len(candidates))
-	for _, c := range candidates {
-		if seen[c.href] {
-			continue
+	dedup := func(cs []iconCandidate) []string {
+		sortCandidates(cs)
+		seen := map[string]bool{}
+		out := make([]string, 0, len(cs))
+		for _, c := range cs {
+			if seen[c.href] {
+				continue
+			}
+			seen[c.href] = true
+			out = append(out, c.href)
 		}
-		seen[c.href] = true
-		out = append(out, c.href)
+		return out
 	}
 
-	return title, out
+	res.favicons = dedup(favicons)
+	res.fallbacks = dedup(fallbacks)
+	return res
 }
 
 func iconPriority(rel, sizes, href string) int {
@@ -343,17 +498,20 @@ func iconPriority(rel, sizes, href string) int {
 		p = 10
 	}
 
+	// Prefer standard favicon sizes (16-64px); penalize oversized icons that
+	// are likely logos rather than tab favicons.
 	if sizes != "" && sizes != "any" {
 		parts := strings.Split(sizes, "x")
 		if len(parts) >= 1 {
 			if s, err := strconv.Atoi(parts[0]); err == nil {
-				if s >= 128 && s <= 192 {
+				if s >= 16 && s <= 64 {
 					p += 30
-				} else if s >= 64 {
+				} else if s <= 128 {
 					p += 20
-				} else if s >= 32 {
+				} else if s <= 256 {
 					p += 10
 				}
+				// >256px gets no bonus — too large for a favicon
 			}
 		}
 	}

@@ -10,10 +10,9 @@ import { CityPicker } from '../pickers/CityPicker'
 import { MarketSymbolPicker } from '../pickers/MarketSymbolPicker'
 import { HolidayCountryTags } from '../pickers/HolidayCountryTags'
 import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
-import { Image as ImageIcon } from 'lucide-react'
+import { Image as ImageIcon, Loader2 } from 'lucide-react'
 import type { AppItem } from '../../types'
-
-const DEFAULT_MARKET_SYMBOLS = ['BTC', 'ETH', 'AAPL', 'MSFT']
+import { DEFAULT_MARKET_SYMBOLS } from '../../utils'
 
 interface EditItemDialogProps {
     open: boolean
@@ -34,6 +33,9 @@ interface EditItemDialogProps {
     editLucideIcon: string | null
     setEditLucideIcon: (v: string | null) => void
     iconResolving: boolean
+    fetchingIcon: boolean
+    fetchedIconPreview: string | null
+    onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
     widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null
@@ -91,6 +93,9 @@ export function EditItemDialog({
     editLucideIcon,
     setEditLucideIcon,
     iconResolving,
+    fetchingIcon,
+    fetchedIconPreview,
+    onFetchIcon,
     saveItem,
     widgetKind,
     onSaveWidget,
@@ -367,6 +372,15 @@ export function EditItemDialog({
                                     <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-white/10 bg-white/5">
                                         {editIconMode === 'lucide' && editLucideIcon ? (
                                             <LucideIconDisplay name={editLucideIcon} className="h-7 w-7 text-white/80" />
+                                        ) : editIconMode === 'auto' && fetchedIconPreview ? (
+                                            <img
+                                                src={fetchedIconPreview}
+                                                alt=""
+                                                className="h-7 w-7 object-contain"
+                                                onError={(e) => {
+                                                    e.currentTarget.style.display = 'none'
+                                                }}
+                                            />
                                         ) : currentIconPath && !currentIconPath.startsWith('lucide:') ? (
                                             <img
                                                 src={`/assets/icons/${currentIconPath}`}
@@ -393,17 +407,25 @@ export function EditItemDialog({
                                 <div className="flex flex-wrap gap-2 mb-3">
                                     <button
                                         type="button"
+                                        disabled={editIconMode === 'auto' && (fetchingIcon || !editUrl.trim())}
                                         onClick={() => {
-                                            setEditIconMode('auto')
-                                            setEditLucideIcon(null)
-                                            setEditIconUrl('')
+                                            if (editIconMode === 'auto') {
+                                                onFetchIcon()
+                                            } else {
+                                                setEditIconMode('auto')
+                                                setEditLucideIcon(null)
+                                                setEditIconUrl('')
+                                            }
                                         }}
-                                        className={
+                                        className={`flex items-center gap-1.5 ${
                                             editIconMode === 'auto'
-                                                ? 'rounded-lg bg-white/20 px-3 py-2 text-sm'
+                                                ? 'rounded-lg bg-white/20 px-3 py-2 text-sm disabled:opacity-40'
                                                 : 'rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20'
-                                        }
+                                        }`}
                                     >
+                                        {editIconMode === 'auto' && fetchingIcon ? (
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        ) : null}
                                         {t('common:iconAuto')}
                                     </button>
                                     <button
@@ -434,12 +456,6 @@ export function EditItemDialog({
                                 </div>
 
                                 {/* Mode-specific content */}
-                                {editIconMode === 'auto' && (
-                                    <div className="text-xs text-white/50">
-                                        {t('common:iconAutoHint')}
-                                    </div>
-                                )}
-
                                 {editIconMode === 'url' && (
                                     <div>
                                         <div className="mb-1 text-xs text-white/70">{t('common:iconUrlHint')}</div>

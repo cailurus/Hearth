@@ -13,7 +13,7 @@ import { HolidaysWidget } from '../widgets/HolidaysWidget'
 import { TimezonesWidget } from '../widgets/TimezonesWidget'
 import { Spinner } from '../ui/Spinner'
 
-import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg } from '../../utils'
+import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
 
 interface GroupBlockProps {
     groupId: string | null
@@ -67,9 +67,8 @@ export function GroupBlock({
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
     const draggingIdRef = useRef<string | null>(null)
 
-    const isSystemGroup = groupKind === 'system' || name === '系统组件' || name === 'System Tools' || name === 'System Widgets'
-    const isWidgetItem = (it: AppItem) => !!it.url?.startsWith('widget:')
-    const isSystemWidgetsOnly = isSystemGroup && items.length > 0 && items.every(isWidgetItem)
+    const isSysGroup = isSystemGroup(groupKind, name)
+    const isSystemWidgetsOnly = isSysGroup && items.length > 0 && items.every((it) => isWidgetItem(it.url))
 
     const dragItems = items
 

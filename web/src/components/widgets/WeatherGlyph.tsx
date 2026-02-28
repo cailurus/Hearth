@@ -2,7 +2,7 @@
  * 天气图标组件
  */
 
-import { weatherKind } from '../../utils/weather'
+import { weatherKind } from '../../utils'
 
 interface WeatherGlyphProps {
     code: number

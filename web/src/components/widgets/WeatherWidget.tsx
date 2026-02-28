@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import type { Weather } from '../../types'
-import { cityShort } from '../../utils/helpers'
-import { weatherCodeLabel } from '../../utils/weather'
+import { cityShort, weekdayLabel, weatherCodeLabel } from '../../utils'
 import { WeatherGlyph } from './WeatherGlyph'
 import { Spinner } from '../ui/Spinner'
 
@@ -60,12 +59,6 @@ export function WeatherWidget({ data, error }: WeatherWidgetProps) {
             ) : null}
         </div>
     )
-}
-
-function weekdayLabel(dateStr: string, lang: 'zh' | 'en'): string {
-    const d = new Date(`${dateStr}T00:00:00`)
-    if (Number.isNaN(d.getTime())) return dateStr
-    return new Intl.DateTimeFormat(lang === 'en' ? 'en-US' : 'zh-CN', { weekday: 'short' }).format(d)
 }
 
 export default WeatherWidget

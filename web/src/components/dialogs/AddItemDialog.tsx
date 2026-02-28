@@ -118,7 +118,7 @@ export function AddItemDialog({
         setResolvedIcon({ iconPath: null, iconSource: null })
 
         try {
-            const res = await apiPost<IconResolve>('/api/icon/resolve', { url: trimmedUrl })
+            const res = await apiPost<IconResolve>('/api/icon/resolve', { url: trimmedUrl, refresh: true })
             if (fetchSeqRef.current !== seq) return
 
             if (res.iconPath) {
