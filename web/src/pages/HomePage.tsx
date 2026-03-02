@@ -15,6 +15,7 @@ import { BookmarkGroup } from '../components/layout/BookmarkGroup'
 import { QuickLaunch } from '../components/layout/QuickLaunch'
 import { useQuickLaunch } from '../hooks/useQuickLaunch'
 import { useAppStatus } from '../hooks/useAppStatus'
+import { useVersionCheck } from '../hooks/useVersionCheck'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog } from '../components/dialogs'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 import { SnowEffect } from '../components/effects/SnowEffect'
@@ -62,6 +63,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     // ── App status indicators ────────────────────────────────────
     const { statusMap } = useAppStatus(true)
+
+    // ── Version check ────────────────────────────────────────────
+    const versionCheck = useVersionCheck()
 
     const [showSnowEffect, setShowSnowEffect] = useState(false)
 
@@ -517,6 +521,9 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 bgRefreshErr={bgRefresh.error}
                 refreshBackground={bgRefresh.refresh}
                 onLogout={onLogout}
+                currentVersion={versionCheck.currentVersion}
+                latestVersion={versionCheck.latestVersion}
+                hasUpdate={versionCheck.hasUpdate}
             />
 
             <CreateGroupDialog

@@ -43,5 +43,8 @@
     "bgBlurLight": "Light",
     "bgBlurMedium": "Medium",
     "bgBlurHeavy": "Heavy",
-    "showGreeting": "Show greeting"
+    "showGreeting": "Show greeting",
+    "version": "Version",
+    "updateAvailable": "{{version}} available",
+    "upToDate": "Up to date"
 }

@@ -43,5 +43,8 @@
     "bgBlurLight": "轻微",
     "bgBlurMedium": "中等",
     "bgBlurHeavy": "强烈",
-    "showGreeting": "显示问候语"
+    "showGreeting": "显示问候语",
+    "version": "当前版本",
+    "updateAvailable": "{{version}} 可用",
+    "upToDate": "已是最新"
 }

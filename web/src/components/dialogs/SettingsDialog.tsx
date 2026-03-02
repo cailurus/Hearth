@@ -29,6 +29,10 @@ interface SettingsDialogProps {
     refreshBackground: () => void
     // Account
     onLogout: () => void
+    // Version
+    currentVersion: string | null
+    latestVersion: string | null
+    hasUpdate: boolean
 }
 
 export function SettingsDialog({
@@ -43,6 +47,9 @@ export function SettingsDialog({
     bgRefreshErr,
     refreshBackground,
     onLogout,
+    currentVersion,
+    latestVersion,
+    hasUpdate,
 }: SettingsDialogProps) {
     const { t } = useTranslation(['settings', 'common'])
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
@@ -119,9 +126,12 @@ export function SettingsDialog({
                     </button>
                     <button
                         onClick={() => setSettingsTab('account')}
-                        className={`mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'account' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
+                        className={`relative mb-1 rounded-lg px-3 py-2 text-left text-sm transition-colors ${settingsTab === 'account' ? 'bg-white/15 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/80'}`}
                     >
                         {t('settings:account')}
+                        {hasUpdate ? (
+                            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-400" />
+                        ) : null}
                     </button>
                 </div>
 
@@ -390,6 +400,30 @@ export function SettingsDialog({
                                     {t('common:logout')}
                                 </button>
                             </div>
+
+                            {/* Version */}
+                            {currentVersion ? (
+                                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="text-sm text-white/70">
+                                            {t('settings:version')} <span className="text-white font-mono">{currentVersion}</span>
+                                        </div>
+                                        {hasUpdate && latestVersion ? (
+                                            <a
+                                                href="https://github.com/cailurus/Hearth/releases/latest"
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="flex items-center gap-1.5 rounded-lg bg-red-500/20 px-2.5 py-1 text-xs text-red-300 hover:bg-red-500/30 transition-colors"
+                                            >
+                                                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                                                {t('settings:updateAvailable', { version: latestVersion })}
+                                            </a>
+                                        ) : (
+                                            <span className="text-xs text-green-400/70">{t('settings:upToDate')}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : null}
 
                             {/* Password Change Section */}
                             <div>
