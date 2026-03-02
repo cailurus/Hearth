@@ -42,5 +42,6 @@
     "bgBlurNone": "None",
     "bgBlurLight": "Light",
     "bgBlurMedium": "Medium",
-    "bgBlurHeavy": "Heavy"
+    "bgBlurHeavy": "Heavy",
+    "showGreeting": "Show greeting"
 }

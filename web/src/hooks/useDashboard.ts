@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api'
 import type { AppItem, BackgroundInfo, Group, Settings } from '../types'
 
-type Me = { admin: boolean }
+type Me = { admin: boolean; username?: string }
 
 interface DashboardState {
     me: Me | null
@@ -19,7 +19,7 @@ interface DashboardActions {
     login: (username: string, password: string) => Promise<void>
     logout: () => Promise<void>
     updateSettings: (settings: Settings) => Promise<void>
-    createGroup: (name: string, kind: 'system' | 'app') => Promise<Group>
+    createGroup: (name: string, kind: 'system' | 'app' | 'bookmark') => Promise<Group>
     updateGroup: (id: string, name: string) => Promise<void>
     deleteGroup: (id: string) => Promise<void>
     reorderGroups: (ids: string[]) => Promise<void>
@@ -122,7 +122,7 @@ export function useDashboard(): [DashboardState, DashboardActions] {
     )
 
     const createGroup = useCallback(
-        async (name: string, kind: 'system' | 'app') => {
+        async (name: string, kind: 'system' | 'app' | 'bookmark') => {
             const group = await apiPost<Group>('/api/groups', { name, kind })
             await reload()
             return group

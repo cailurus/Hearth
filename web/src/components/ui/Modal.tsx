@@ -104,7 +104,7 @@ export function Modal({
                                     className="rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 hover:bg-white/20 transition-colors"
                                     aria-label="close"
                                 >
-                                    {closeText ?? '关闭'}
+                                    {closeText ?? 'Close'}
                                 </button>
                             )}
                         </div>

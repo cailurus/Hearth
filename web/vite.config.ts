@@ -20,8 +20,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Split lucide icons into a separate chunk (only loaded when icon picker is used)
           'lucide-icons': ['lucide-react'],
+          'pinyin': ['pinyin-pro'],
         },
       },
     },

@@ -11,8 +11,9 @@ import (
 
 // Group kind constants.
 const (
-	GroupKindSystem = "system"
-	GroupKindApp    = "app"
+	GroupKindSystem   = "system"
+	GroupKindApp      = "app"
+	GroupKindBookmark = "bookmark"
 )
 
 type createGroupRequest struct {
@@ -55,7 +56,10 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := strings.ToLower(strings.TrimSpace(req.Kind))
-	if kind != GroupKindSystem {
+	switch kind {
+	case GroupKindSystem, GroupKindBookmark:
+		// keep as-is
+	default:
 		kind = GroupKindApp
 	}
 	if kind == GroupKindSystem {

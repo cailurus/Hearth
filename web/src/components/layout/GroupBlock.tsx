@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
 import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
+import { StatusDot } from '../ui/StatusDot'
 import { WeatherWidget } from '../widgets/WeatherWidget'
 import { MarketsWidget } from '../widgets/MarketsWidget'
 import { HolidaysWidget } from '../widgets/HolidaysWidget'
@@ -37,6 +38,7 @@ interface GroupBlockProps {
     metrics: HostMetrics | null
     netRate?: { upBps: number; downBps: number } | null
     localTimezone: string
+    statusMap?: Record<string, { status: string }>
 }
 
 export function GroupBlock({
@@ -61,6 +63,7 @@ export function GroupBlock({
     metrics,
     netRate,
     localTimezone,
+    statusMap,
 }: GroupBlockProps) {
     const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -391,7 +394,15 @@ export function GroupBlock({
                                     className={`group block rounded-2xl border bg-black/40 p-3 transition-all duration-200 ease-out hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 ${isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'border-white/10'}`}
                                 >
                                     <div className="flex items-center gap-3">
-                                        <AppIcon iconPath={a.iconPath} name={a.name} />
+                                        <div className="relative">
+                                            <AppIcon iconPath={a.iconPath} name={a.name} />
+                                            {statusMap?.[a.id] ? (
+                                                <StatusDot
+                                                    status={statusMap[a.id].status}
+                                                    className="absolute -bottom-0.5 -right-0.5 ring-1 ring-black/40"
+                                                />
+                                            ) : null}
+                                        </div>
                                         <div className="min-w-0">
                                             <div className="truncate text-sm font-medium text-white">{a.name}</div>
                                             {a.description ? (

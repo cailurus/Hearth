@@ -13,6 +13,11 @@ export interface Settings {
     timezones: string[]
     weather: WeatherSettings
     titleSortOrder?: number
+    greeting?: GreetingSettings
+}
+
+export interface GreetingSettings {
+    enabled: boolean
 }
 
 export interface BackgroundSettings {

@@ -42,5 +42,6 @@
     "bgBlurNone": "无",
     "bgBlurLight": "轻微",
     "bgBlurMedium": "中等",
-    "bgBlurHeavy": "强烈"
+    "bgBlurHeavy": "强烈",
+    "showGreeting": "显示问候语"
 }

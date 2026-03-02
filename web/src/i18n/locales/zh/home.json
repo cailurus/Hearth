@@ -7,5 +7,15 @@
     "systemGroup": "系统组件",
     "systemGroupHint": "系统组件只能有一个；系统组只能添加内置组件，App 组只能添加 App 链接。",
     "createFailed": "创建失败",
-    "itemSettings": "组件设置"
+    "itemSettings": "组件设置",
+    "bookmarkGroup": "书签组",
+    "bookmarkGroupHint": "书签组以紧凑标签形式显示，而非完整卡片。",
+    "quickLaunchPlaceholder": "搜索应用或输入关键词...",
+    "quickLaunchNoResults": "没有找到匹配的应用",
+    "quickLaunchSearchWeb": "按回车搜索网页",
+    "quickLaunchNavigate": "导航",
+    "quickLaunchOpen": "打开",
+    "quickLaunchClose": "关闭",
+    "bgDownloading": "下载背景视频中...",
+    "bgPreparing": "准备中..."
 }

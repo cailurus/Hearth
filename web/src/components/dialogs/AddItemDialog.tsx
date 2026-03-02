@@ -10,7 +10,7 @@ interface AddItemDialogProps {
     open: boolean
     onClose: () => void
     groupId: string | null
-    groupKind: 'system' | 'app'
+    groupKind: 'system' | 'app' | 'bookmark'
     onSubmit: (data: AddItemData) => Promise<void>
 }
 

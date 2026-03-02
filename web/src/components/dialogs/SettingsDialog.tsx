@@ -13,7 +13,7 @@ import type { Settings } from '../../types'
 type SettingsTab = 'general' | 'time' | 'background' | 'account'
 
 // Use the same type as HomePage: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>
-type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>
+type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language' | 'greeting'>
 
 interface SettingsDialogProps {
     open: boolean
@@ -165,6 +165,22 @@ export function SettingsDialog({
                                     <option value="zh">{t('settings:languageChinese')}</option>
                                     <option value="en">{t('settings:languageEnglish')}</option>
                                 </select>
+                            </label>
+
+                            <label className="flex items-center gap-2 text-sm text-white/80">
+                                <input
+                                    type="checkbox"
+                                    checked={siteDraft?.greeting?.enabled !== false}
+                                    onChange={(e) =>
+                                        setSiteDraft((prev) => {
+                                            if (!prev) return prev
+                                            const next = { ...prev, greeting: { enabled: e.target.checked } }
+                                            schedulePersistSiteDraft(next, 'now')
+                                            return next
+                                        })
+                                    }
+                                />
+                                {t('settings:showGreeting')}
                             </label>
                         </div>
                     )}

@@ -22,6 +22,7 @@ const (
 	kvTimeShowSeconds         = "settings.time.showSeconds" // "true"|"false"
 	kvTimeMode                = "settings.time.mode"        // digital|clock
 	kvTitleSortOrder          = "settings.title.sortOrder"  // int, position of title block among groups
+	kvGreetingEnabled         = "settings.greeting.enabled" // "true"|"false"
 )
 
 const defaultWeatherCity = "Shanghai, Shanghai, China"
@@ -44,7 +45,12 @@ type Settings struct {
 
 	Time *TimeSettings `json:"time"`
 
-	TitleSortOrder int `json:"titleSortOrder"` // Position of title block among groups, default 0 (top)
+	TitleSortOrder int              `json:"titleSortOrder"` // Position of title block among groups, default 0 (top)
+	Greeting       *GreetingSettings `json:"greeting"`
+}
+
+type GreetingSettings struct {
+	Enabled bool `json:"enabled"`
 }
 
 type TimeSettings struct {
@@ -98,6 +104,10 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 	// Title sort order (default 0 = at top)
 	st.TitleSortOrder = s.getIntSetting(kvTitleSortOrder, 0)
+
+	st.Greeting = &GreetingSettings{
+		Enabled: s.getStringSetting(kvGreetingEnabled, "true") == "true",
+	}
 
 	writeJSON(w, http.StatusOK, st)
 }
@@ -168,6 +178,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setKV(kvTitleSortOrder, fmt.Sprintf("%d", req.TitleSortOrder))
+
+	if req.Greeting != nil {
+		if req.Greeting.Enabled {
+			setKV(kvGreetingEnabled, "true")
+		} else {
+			setKV(kvGreetingEnabled, "false")
+		}
+	}
 
 	if len(errs) > 0 {
 		writeError(w, http.StatusInternalServerError, "failed to save settings")

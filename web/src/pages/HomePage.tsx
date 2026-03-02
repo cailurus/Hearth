@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import i18n from '../i18n'
 import { apiPost, apiPut } from '../api'
-import { Cog } from 'lucide-react'
+import { Cog, Search } from 'lucide-react'
 import type { Group, IconResolve } from '../types'
 import { useNow, useWidgets, useVideoBackground, useDialogState, useBackgroundRefresh, useSettingsDraft, useDashboard } from '../hooks'
 import { useWidgetEditor } from '../hooks/useWidgetEditor'
 import { useGroupDragSort } from '../hooks/useGroupDragSort'
 import { UserIcon } from '../components/ui/UserIcon'
 import { TimeDisplay } from '../components/layout/TimeDisplay'
+import { Greeting } from '../components/layout/Greeting'
 import { GroupBlock } from '../components/layout/GroupBlock'
+import { BookmarkGroup } from '../components/layout/BookmarkGroup'
+import { QuickLaunch } from '../components/layout/QuickLaunch'
+import { useQuickLaunch } from '../hooks/useQuickLaunch'
+import { useAppStatus } from '../hooks/useAppStatus'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog } from '../components/dialogs'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 import { SnowEffect } from '../components/effects/SnowEffect'
@@ -19,9 +26,16 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const { dialogs, openDialog, closeDialog, openContextMenu, contextMenuPos, openAddItem, addItemGroupId, addItemGroupKind } = useDialogState(initialDialog === 'login')
 
+    const { t: tr } = useTranslation(['home', 'common'])
     const isAdmin = !!me?.admin
     const lang: 'zh' | 'en' = settings?.language === 'en' ? 'en' : 'zh'
-    const t = (zh: string, en: string) => (lang === 'en' ? en : zh)
+
+    // Sync i18next language with settings
+    useEffect(() => {
+        if (lang !== i18n.language) {
+            i18n.changeLanguage(lang)
+        }
+    }, [lang])
 
     // ── Widget editor (EditItemDialog state + logic) ──────────────
     const editor = useWidgetEditor({
@@ -42,6 +56,12 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         settings,
         reload: actions.reload,
     })
+
+    // ── Quick Launch (Cmd/Ctrl+K) ──────────────────────────────────
+    const quickLaunch = useQuickLaunch(apps)
+
+    // ── App status indicators ────────────────────────────────────
+    const { statusMap } = useAppStatus(true)
 
     const [showSnowEffect, setShowSnowEffect] = useState(false)
 
@@ -151,7 +171,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const openAddForGroup = (groupId: string | null) => {
         if (!isAdmin) return
         const g = groupId ? groups.find((x) => x.id === groupId) : null
-        const kind = g && isSystemGroup(g.kind, g.name) ? 'system' : 'app'
+        const kind = g && isSystemGroup(g.kind, g.name) ? 'system' : (g?.kind === 'bookmark' ? 'bookmark' : 'app')
         openAddItem(groupId, kind)
     }
 
@@ -224,11 +244,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                 {isDownloading ? (
                                     <div className="text-center text-white/70">
                                         <div className="mb-2 h-8 w-8 mx-auto animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-                                        <div className="text-sm">{t('下载背景视频中...', 'Downloading video...')}</div>
+                                        <div className="text-sm">{tr('bgDownloading')}</div>
                                         <div className="text-xs text-white/50">{downloadProgress}%</div>
                                     </div>
                                 ) : (
-                                    <div className="text-white/50 text-sm">{t('准备中...', 'Loading...')}</div>
+                                    <div className="text-white/50 text-sm">{tr('bgPreparing')}</div>
                                 )}
                             </div>
                         )}
@@ -252,7 +272,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         }}
                         className="p-1.5 text-white/90 transition-colors hover:text-white"
                         aria-label="settings"
-                        title={t('设置', 'Settings')}
+                        title={tr('common:settings')}
                     >
                         <Cog className="h-5 w-5" />
                     </button>
@@ -261,7 +281,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         onClick={() => openDialog('login')}
                         className="p-1.5 text-white/90 transition-colors hover:text-white"
                         aria-label="user"
-                        title={t('登录', 'Login')}
+                        title={tr('common:login')}
                     >
                         <UserIcon />
                     </button>
@@ -318,16 +338,36 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                             }`}
                                     >
                                         <h1 className="text-4xl font-semibold tracking-tight">{title}</h1>
+                                        {settings?.greeting?.enabled !== false ? (
+                                            <Greeting now={now} username={me?.username} lang={lang} />
+                                        ) : null}
                                         {settings?.time?.enabled ? (
-                                            <div className="mt-3 flex items-center justify-center">
+                                            <div className="mt-3 flex items-center justify-center gap-3">
                                                 <TimeDisplay
                                                     now={now}
                                                     timezone={systemTimezone}
                                                     showSeconds={!!settings.time?.showSeconds}
                                                     mode={settings.time?.mode || 'digital'}
                                                 />
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); quickLaunch.openOverlay() }}
+                                                    className="p-1 text-white/40 transition-colors hover:text-white/70"
+                                                    title={tr('quickLaunchPlaceholder')}
+                                                >
+                                                    <Search className="h-4 w-4" />
+                                                </button>
                                             </div>
-                                        ) : null}
+                                        ) : (
+                                            <div className="mt-3 flex items-center justify-center">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); quickLaunch.openOverlay() }}
+                                                    className="p-1 text-white/40 transition-colors hover:text-white/70"
+                                                    title={tr('quickLaunchPlaceholder')}
+                                                >
+                                                    <Search className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 )
                             }
@@ -337,7 +377,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                     <GroupBlock
                                         key="__ungrouped__"
                                         groupId={null}
-                                        name={t('未分组', 'Ungrouped')}
+                                        name={tr('common:ungrouped')}
                                         groupKind={'app'}
                                         items={groupItems(null)}
                                         isAdmin={isAdmin}
@@ -356,23 +396,40 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         metrics={metrics}
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
+                                        statusMap={statusMap}
                                     />
                                 )
                             }
 
                             // block.type === 'group'
                             const g = block.group!
+                            const dragWrapClass = `transition-all ${isAdmin ? 'cursor-grab' : ''} ${draggingGroupId === g.id ? 'opacity-30' : ''
+                                } ${dropTargetGroupId === g.id && draggingGroupId !== g.id
+                                    ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-transparent scale-[1.01]'
+                                    : ''
+                                }`
+
+                            if (g.kind === 'bookmark') {
+                                return (
+                                    <div key={g.id} draggable={isAdmin} {...getDragHandlers(g.id)} className={dragWrapClass}>
+                                        <BookmarkGroup
+                                            groupId={g.id}
+                                            name={displayGroupName(g.name, lang)}
+                                            items={groupItems(g.id)}
+                                            isAdmin={isAdmin}
+                                            onAdd={openAddForGroup}
+                                            onEdit={editor.openEditItem}
+                                            onDelete={deleteItem}
+                                            onDeleteGroup={deleteGroup}
+                                            onReorder={reorderItems}
+                                            statusMap={statusMap}
+                                        />
+                                    </div>
+                                )
+                            }
+
                             return (
-                                <div
-                                    key={g.id}
-                                    draggable={isAdmin}
-                                    {...getDragHandlers(g.id)}
-                                    className={`transition-all ${isAdmin ? 'cursor-grab' : ''} ${draggingGroupId === g.id ? 'opacity-30' : ''
-                                        } ${dropTargetGroupId === g.id && draggingGroupId !== g.id
-                                            ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-transparent scale-[1.01]'
-                                            : ''
-                                        }`}
-                                >
+                                <div key={g.id} draggable={isAdmin} {...getDragHandlers(g.id)} className={dragWrapClass}>
                                     <GroupBlock
                                         groupId={g.id}
                                         name={displayGroupName(g.name, lang)}
@@ -395,6 +452,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         metrics={metrics}
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
+                                        statusMap={statusMap}
                                     />
                                 </div>
                             )
@@ -433,7 +491,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                 openDialog('createGroup')
                             }}
                         >
-                            {t('新建分组', 'New Group')}
+                            {tr('common:newGroup')}
                         </button>
                     </div>
                 </div>
@@ -484,6 +542,20 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 open={dialogs.edit}
                 onClose={() => closeDialog('edit')}
                 {...editor}
+            />
+
+            <QuickLaunch
+                open={quickLaunch.open}
+                query={quickLaunch.query}
+                setQuery={quickLaunch.setQuery}
+                results={quickLaunch.results}
+                selectedIndex={quickLaunch.selectedIndex}
+                setSelectedIndex={quickLaunch.setSelectedIndex}
+                onClose={quickLaunch.closeOverlay}
+                onEscape={quickLaunch.handleEscape}
+                onNavigateUp={quickLaunch.navigateUp}
+                onNavigateDown={quickLaunch.navigateDown}
+                onSelect={quickLaunch.selectCurrent}
             />
         </div>
     )

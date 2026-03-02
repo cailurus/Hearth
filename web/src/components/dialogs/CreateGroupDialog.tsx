@@ -5,7 +5,7 @@ import { Modal } from '../ui'
 interface CreateGroupDialogProps {
     open: boolean
     onClose: () => void
-    onSubmit: (name: string, kind: 'system' | 'app') => Promise<void>
+    onSubmit: (name: string, kind: 'system' | 'app' | 'bookmark') => Promise<void>
     hasSystemGroup: boolean
 }
 
@@ -18,7 +18,7 @@ export function CreateGroupDialog({
     const { t } = useTranslation(['home', 'common'])
 
     const [name, setName] = useState('')
-    const [kind, setKind] = useState<'system' | 'app'>('app')
+    const [kind, setKind] = useState<'system' | 'app' | 'bookmark'>('app')
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
 
@@ -83,9 +83,19 @@ export function CreateGroupDialog({
                             />
                             {t('home:systemGroup')}
                         </label>
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="radio"
+                                name="group-kind"
+                                value="bookmark"
+                                checked={kind === 'bookmark'}
+                                onChange={() => setKind('bookmark')}
+                            />
+                            {t('home:bookmarkGroup')}
+                        </label>
                     </div>
                     <div className="mt-2 text-xs text-white/50">
-                        {t('home:systemGroupHint')}
+                        {kind === 'bookmark' ? t('home:bookmarkGroupHint') : t('home:systemGroupHint')}
                     </div>
                 </div>
                 <label className="block text-sm">

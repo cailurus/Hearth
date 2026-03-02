@@ -25,8 +25,8 @@ export interface UseDialogStateResult {
 
     // Add item specific
     addItemGroupId: string | null
-    addItemGroupKind: 'system' | 'app'
-    openAddItem: (groupId: string | null, kind: 'system' | 'app') => void
+    addItemGroupKind: 'system' | 'app' | 'bookmark'
+    openAddItem: (groupId: string | null, kind: 'system' | 'app' | 'bookmark') => void
 }
 
 const initialDialogs: DialogStates = {
@@ -46,7 +46,7 @@ export function useDialogState(initialLogin?: boolean): UseDialogStateResult {
 
     const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
     const [addItemGroupId, setAddItemGroupId] = useState<string | null>(null)
-    const [addItemGroupKind, setAddItemGroupKind] = useState<'system' | 'app'>('app')
+    const [addItemGroupKind, setAddItemGroupKind] = useState<'system' | 'app' | 'bookmark'>('app')
 
     const openDialog = useCallback((name: keyof DialogStates) => {
         setDialogs((prev) => ({ ...prev, [name]: true }))
@@ -65,7 +65,7 @@ export function useDialogState(initialLogin?: boolean): UseDialogStateResult {
         setDialogs((prev) => ({ ...prev, contextMenu: true }))
     }, [])
 
-    const openAddItem = useCallback((groupId: string | null, kind: 'system' | 'app') => {
+    const openAddItem = useCallback((groupId: string | null, kind: 'system' | 'app' | 'bookmark') => {
         setAddItemGroupId(groupId)
         setAddItemGroupKind(kind)
         setDialogs((prev) => ({ ...prev, addItem: true }))

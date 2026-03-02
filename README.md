@@ -14,6 +14,7 @@
   <a href="https://hub.docker.com/r/cailurus/hearth"><img src="https://img.shields.io/docker/image-size/cailurus/hearth/latest?style=flat-square" alt="Docker Image Size"></a>
   <a href="https://github.com/cailurus/Hearth/blob/main/LICENSE"><img src="https://img.shields.io/github/license/cailurus/Hearth?style=flat-square" alt="License"></a>
   <a href="https://github.com/cailurus/Hearth/releases"><img src="https://img.shields.io/github/v/release/cailurus/Hearth?style=flat-square" alt="Release"></a>
+  <a href="https://github.com/cailurus/Hearth"><img src="https://img.shields.io/github/stars/cailurus/Hearth?style=flat-square" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -23,13 +24,19 @@
 ## ✨ Features
 
 - 🏠 **Grouped App Links** - Organize your services into custom groups
+- 🔖 **Bookmarks** - Compact pill-style link groups for quick access
+- 🔍 **Quick Launch** - `Cmd/Ctrl+K` to search apps instantly, with pinyin support
+- 🟢 **Service Status** - Live health-check indicators on every app card
+- 👋 **Greeting** - Time-based personalized greeting message
 - 🌤️ **Weather Widget** - Current weather with 5-day forecast
 - 🕐 **World Clock** - Up to 4 configurable timezone clocks
-- 📊 **System Status** - CPU, memory, disk, and network monitoring
+- 📊 **System Metrics** - CPU, memory, disk, and network monitoring
 - 📈 **Market Ticker** - Stock and crypto price tracking
-- 🎨 **Dynamic Backgrounds** - Bing daily or random images
-- 🌓 **Bilingual UI** - Chinese and English support
+- 🗓️ **Holidays** - Upcoming holidays for selected countries
+- 🎨 **Dynamic Backgrounds** - Bing daily, random, or video backgrounds
+- 🌓 **Bilingual UI** - Chinese and English with full i18n
 - 📱 **Mobile Friendly** - Responsive design for all devices
+- 🖱️ **Drag & Drop** - Reorder groups and items with drag and drop
 
 ## 🚀 Quick Start
 

@@ -47,5 +47,8 @@
     "iconSearch": "搜索",
     "iconFoundCount": "找到 {{count}} 个图标",
     "iconPopular": "热门图标",
-    "iconNotFound": "没有找到匹配的图标"
+    "iconNotFound": "没有找到匹配的图标",
+    "statusUp": "在线",
+    "statusSlow": "缓慢",
+    "statusDown": "离线"
 }

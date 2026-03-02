@@ -172,6 +172,7 @@ func (s *Server) buildRouter() chi.Router {
 	r.With(s.requireAdmin).Post("/api/groups/reorder", s.handleReorderGroups)
 
 	r.Get("/api/apps", s.handleListApps)
+	r.Get("/api/apps/status", s.handleGetAppsStatus)
 	r.With(s.requireAdmin).Post("/api/apps", s.handleCreateApp)
 	r.With(s.requireAdmin).Put("/api/apps/{id}", s.handleUpdateApp)
 	r.With(s.requireAdmin).Delete("/api/apps/{id}", s.handleDeleteApp)

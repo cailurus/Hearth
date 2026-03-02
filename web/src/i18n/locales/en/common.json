@@ -47,5 +47,8 @@
     "iconSearch": "Search",
     "iconFoundCount": "Found {{count}} icons",
     "iconPopular": "Popular icons",
-    "iconNotFound": "No icons found"
+    "iconNotFound": "No icons found",
+    "statusUp": "Online",
+    "statusSlow": "Slow",
+    "statusDown": "Offline"
 }

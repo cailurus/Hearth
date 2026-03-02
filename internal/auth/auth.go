@@ -290,6 +290,13 @@ func newToken(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+// UsernameByID looks up a username by user ID.
+func (s *Service) UsernameByID(userID string) (string, error) {
+	var username string
+	err := s.db.QueryRow(`SELECT username FROM users WHERE id = ?`, userID).Scan(&username)
+	return username, err
+}
+
 // --------------------------------------------------------------------------- //
 // ChangePassword changes a user's password after verifying the old password.
 func (s *Service) ChangePassword(userID string, oldPassword, newPassword string) error {

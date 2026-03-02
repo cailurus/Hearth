@@ -7,5 +7,15 @@
     "systemGroup": "System group",
     "systemGroupHint": "Only one system group; system groups only allow widgets, app groups only allow app links.",
     "createFailed": "Failed to create",
-    "itemSettings": "Item Settings"
+    "itemSettings": "Item Settings",
+    "bookmarkGroup": "Bookmark group",
+    "bookmarkGroupHint": "Bookmarks display as compact pills instead of full cards.",
+    "quickLaunchPlaceholder": "Search apps or type a query...",
+    "quickLaunchNoResults": "No matching apps",
+    "quickLaunchSearchWeb": "Press Enter to search the web",
+    "quickLaunchNavigate": "Navigate",
+    "quickLaunchOpen": "Open",
+    "quickLaunchClose": "Close",
+    "bgDownloading": "Downloading video...",
+    "bgPreparing": "Loading..."
 }
