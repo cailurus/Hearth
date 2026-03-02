@@ -6,12 +6,14 @@ import { useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
 import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather } from '../../types'
+import type { DockerResponse } from '../../types/models'
 import { AppIcon } from '../cards/AppIcon'
 import { StatusDot } from '../ui/StatusDot'
 import { WeatherWidget } from '../widgets/WeatherWidget'
 import { MarketsWidget } from '../widgets/MarketsWidget'
 import { HolidaysWidget } from '../widgets/HolidaysWidget'
 import { TimezonesWidget } from '../widgets/TimezonesWidget'
+import { DockerWidget } from '../widgets/DockerWidget'
 import { Spinner } from '../ui/Spinner'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -39,6 +41,8 @@ interface GroupBlockProps {
     netRate?: { upBps: number; downBps: number } | null
     localTimezone: string
     statusMap?: Record<string, { status: string }>
+    dockerById?: Record<string, DockerResponse | null>
+    dockerErrById?: Record<string, string | null>
 }
 
 export function GroupBlock({
@@ -64,6 +68,8 @@ export function GroupBlock({
     netRate,
     localTimezone,
     statusMap,
+    dockerById,
+    dockerErrById,
 }: GroupBlockProps) {
     const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -139,7 +145,7 @@ export function GroupBlock({
                                     ? 'col-span-2 sm:col-span-1'  // All widgets: full width on mobile, 1 col on tablet+
                                     : widget === 'timezones'
                                         ? 'col-span-2 sm:col-span-3 lg:col-span-2'
-                                        : widget === 'metrics'
+                                        : widget === 'metrics' || widget === 'docker'
                                             ? 'col-span-2 sm:col-span-1'
                                             : ''
 
@@ -238,7 +244,9 @@ export function GroupBlock({
                                                     ? t('widgets:markets')
                                                     : widget === 'holidays'
                                                         ? t('widgets:upcomingHolidays')
-                                                        : t('widgets:worldClock')}
+                                                        : widget === 'docker'
+                                                            ? t('widgets:docker')
+                                                            : t('widgets:worldClock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
@@ -295,6 +303,8 @@ export function GroupBlock({
                                             <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} />
                                         ) : widget === 'holidays' ? (
                                             <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
+                                        ) : widget === 'docker' ? (
+                                            <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}

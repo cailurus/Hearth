@@ -46,5 +46,17 @@
     "weatherRain": "雨",
     "weatherSnow": "雪",
     "weatherStorm": "雷暴",
-    "weatherCode": "天气码 {{code}}"
+    "weatherCode": "天气码 {{code}}",
+    "docker": "Docker",
+    "dockerNotAvailable": "Docker 未连接",
+    "dockerMountHint": "挂载 Docker Socket 以启用",
+    "dockerRunning": "运行中",
+    "dockerStopped": "已停止",
+    "dockerPaused": "已暂停",
+    "dockerContainers": "容器",
+    "dockerCpuUsage": "CPU 使用率",
+    "dockerMemUsage": "内存使用",
+    "dockerNetwork": "网络",
+    "dockerDetails": "容器详情",
+    "refreshSec30": "30 秒"
 }

@@ -46,5 +46,17 @@
     "weatherRain": "Rain",
     "weatherSnow": "Snow",
     "weatherStorm": "Thunderstorm",
-    "weatherCode": "Code {{code}}"
+    "weatherCode": "Code {{code}}",
+    "docker": "Docker",
+    "dockerNotAvailable": "Docker not connected",
+    "dockerMountHint": "Mount Docker socket to enable",
+    "dockerRunning": "Running",
+    "dockerStopped": "Stopped",
+    "dockerPaused": "Paused",
+    "dockerContainers": "Containers",
+    "dockerCpuUsage": "CPU Usage",
+    "dockerMemUsage": "Memory Usage",
+    "dockerNetwork": "Network",
+    "dockerDetails": "Container Details",
+    "refreshSec30": "30s"
 }

@@ -5,6 +5,7 @@
 // 业务模型
 export type {
     Settings,
+    GreetingSettings,
     BackgroundSettings,
     TimeSettings,
     WeatherSettings,
@@ -19,6 +20,8 @@ export type {
     HolidayItem,
     HolidaysResponse,
     HolidayCountry,
+    DockerContainer,
+    DockerResponse,
     Language,
     GroupKind,
     BackgroundProvider,

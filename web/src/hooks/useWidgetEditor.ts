@@ -16,7 +16,7 @@ import {
 } from '../utils'
 import { useCitySearch } from './useCitySearch'
 
-type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null
+type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | null
 
 interface UseWidgetEditorOptions {
     isAdmin: boolean
@@ -95,6 +95,9 @@ export interface WidgetEditorResult {
     tzClocks: Array<{ city: string; timezone: string }>
     setTzClocks: React.Dispatch<React.SetStateAction<Array<{ city: string; timezone: string }>>>
     resolveCityToTimezoneEn: (city: string) => Promise<{ city: string; timezone: string }>
+    // Docker
+    dRefreshSec: 5 | 10 | 30
+    setDRefreshSec: (v: 5 | 10 | 30) => void
     // Opener
     openEditItem: (item: AppItem) => void
 }
@@ -142,6 +145,9 @@ export function useWidgetEditor({
     const [mShowDisk, setMShowDisk] = useState(true)
     const [mShowNet, setMShowNet] = useState(true)
     const [mRefreshSec, setMRefreshSec] = useState<1 | 5 | 10>(1)
+
+    // Docker
+    const [dRefreshSec, setDRefreshSec] = useState<5 | 10 | 30>(5)
 
     // ── refs ───────────────────────────────────────────────────────
     const widgetLastSavedDescRef = useRef<string>('')
@@ -296,6 +302,10 @@ export function useWidgetEditor({
                 setHCountryQuery('')
                 setCityQuery('')
             }
+            if (widgetType === 'docker') {
+                const rs = Number(cfg?.refreshSec)
+                setDRefreshSec(rs === 10 || rs === 30 ? rs as 10 | 30 : 5)
+            }
         } else {
             setWidgetKind(null)
         }
@@ -418,6 +428,8 @@ export function useWidgetEditor({
                     } else if (widgetKind === 'holidays') {
                         const countries = normalizeCountryCodes(hCountryCodes)
                         description = JSON.stringify({ countries })
+                    } else if (widgetKind === 'docker') {
+                        description = JSON.stringify({ refreshSec: dRefreshSec })
                     }
 
                     if (description == null) return
@@ -462,6 +474,7 @@ export function useWidgetEditor({
         mRefreshSec,
         hCountryCodes,
         hCountryQuery,
+        dRefreshSec,
         reload,
     ])
 
@@ -686,6 +699,8 @@ export function useWidgetEditor({
         tzClocks,
         setTzClocks,
         resolveCityToTimezoneEn,
+        dRefreshSec,
+        setDRefreshSec,
         openEditItem,
     }
 }

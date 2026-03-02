@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
 import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics } from '../types'
+import type { DockerResponse } from '../types/models'
 import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
 
 export interface UseWidgetsResult {
@@ -20,6 +21,9 @@ export interface UseWidgetsResult {
     metrics: HostMetrics | null
     /** Network rate */
     netRate: { upBps: number; downBps: number } | null
+    /** Docker data by widget ID */
+    dockerById: Record<string, DockerResponse | null>
+    dockerErrById: Record<string, string | null>
 }
 
 interface UseWidgetsOptions {
@@ -42,6 +46,9 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
 
     const [holidaysById, setHolidaysById] = useState<Record<string, HolidaysResponse | null>>({})
     const [holidaysErrById, setHolidaysErrById] = useState<Record<string, string | null>>({})
+
+    const [dockerById, setDockerById] = useState<Record<string, DockerResponse | null>>({})
+    const [dockerErrById, setDockerErrById] = useState<Record<string, string | null>>({})
 
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
@@ -273,6 +280,57 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
+    // Fetch docker data
+    useEffect(() => {
+        let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'docker')
+        if (ws.length === 0) {
+            setDockerById({})
+            setDockerErrById({})
+            return
+        }
+
+        let intervalMs = 5000
+        for (const a of ws) {
+            const cfg = safeParseJSON(a.description)
+            const rs = Number(cfg?.refreshSec)
+            const ms = (rs === 10 || rs === 30 ? rs : 5) * 1000
+            intervalMs = Math.min(intervalMs, ms)
+        }
+
+        const run = async () => {
+            try {
+                const data = await apiGet<DockerResponse>('/api/widgets/docker')
+                if (cancelled) return
+                const next: Record<string, DockerResponse | null> = {}
+                const nextErr: Record<string, string | null> = {}
+                for (const a of ws) {
+                    next[a.id] = data
+                    nextErr[a.id] = null
+                }
+                setDockerById(next)
+                setDockerErrById(nextErr)
+            } catch (e) {
+                if (cancelled) return
+                const next: Record<string, DockerResponse | null> = {}
+                const nextErr: Record<string, string | null> = {}
+                for (const a of ws) {
+                    next[a.id] = null
+                    nextErr[a.id] = e instanceof Error ? e.message : 'failed'
+                }
+                setDockerById(next)
+                setDockerErrById(nextErr)
+            }
+        }
+
+        void run()
+        const id = window.setInterval(run, intervalMs)
+        return () => {
+            cancelled = true
+            window.clearInterval(id)
+        }
+    }, [apps])
+
     return {
         weather,
         weatherErr,
@@ -284,6 +342,8 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         holidaysErrById,
         metrics,
         netRate,
+        dockerById,
+        dockerErrById,
     }
 }
 

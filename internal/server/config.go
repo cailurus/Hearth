@@ -12,6 +12,7 @@ type Config struct {
 	MarketIconBaseURL string
 	CORSOrigins       string // comma-separated allowed origins; empty = allow all (dev mode)
 	CookieSecure      string // "auto" | "true" | "false"; default "auto"
+	DockerSocket      string // Docker socket path; default "/var/run/docker.sock"
 }
 
 const defaultMarketIconBaseURL = "https://raw.githubusercontent.com/nvstly/icons/main"
@@ -24,6 +25,7 @@ func LoadConfigFromEnv() Config {
 	marketIconBaseURL := getEnv("HEARTH_MARKET_ICON_BASE_URL", defaultMarketIconBaseURL)
 	corsOrigins := getEnv("HEARTH_CORS_ORIGINS", "")
 	cookieSecure := getEnv("HEARTH_COOKIE_SECURE", "auto")
+	dockerSocket := getEnv("HEARTH_DOCKER_SOCKET", "/var/run/docker.sock")
 
 	return Config{
 		Addr:              addr,
@@ -33,6 +35,7 @@ func LoadConfigFromEnv() Config {
 		MarketIconBaseURL: marketIconBaseURL,
 		CORSOrigins:       corsOrigins,
 		CookieSecure:      cookieSecure,
+		DockerSocket:      dockerSocket,
 	}
 }
 

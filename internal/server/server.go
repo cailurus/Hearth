@@ -17,6 +17,7 @@ import (
 
 	"github.com/morezhou/hearth/internal/auth"
 	"github.com/morezhou/hearth/internal/background"
+	"github.com/morezhou/hearth/internal/docker"
 	"github.com/morezhou/hearth/internal/icon"
 	"github.com/morezhou/hearth/internal/store"
 )
@@ -35,6 +36,7 @@ type Server struct {
 	auth         *auth.Service
 	iconResolver *icon.Resolver
 	bgSvc        *background.Service
+	dockerClient *docker.Client
 }
 
 func New(cfg Config) (*Server, error) {
@@ -91,7 +93,8 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc}
+	dockerClient := docker.New(cfg.DockerSocket)
+	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc, dockerClient: dockerClient}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
 	}
@@ -204,6 +207,7 @@ func (s *Server) buildRouter() chi.Router {
 
 	// Host metrics are public (visitor dashboard).
 	r.Get("/api/metrics/host", s.handleGetHostMetrics)
+	r.Get("/api/widgets/docker", s.handleGetDocker)
 
 	// Import/export requires admin.
 	r.With(s.requireAdmin).Get("/api/export", s.handleExport)

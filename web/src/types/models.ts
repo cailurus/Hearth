@@ -147,6 +147,34 @@ export interface HolidayCountry {
     name: string
 }
 
+/**
+ * Docker 容器
+ */
+export interface DockerContainer {
+    id: string
+    name: string
+    image: string
+    status: 'running' | 'exited' | 'paused'
+    state: string
+    upSince: string
+    cpuPercent: number
+    memUsed: number
+    memLimit: number
+    memPercent: number
+    netRx: number
+    netTx: number
+}
+
+export interface DockerResponse {
+    available: boolean
+    containers: DockerContainer[]
+    totalCpu: number
+    totalMemUsed: number
+    totalMemLimit: number
+    collectedAt: number
+    error?: string
+}
+
 // ============ 枚举类型 ============
 
 export type Language = 'zh' | 'en' | string

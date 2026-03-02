@@ -5,7 +5,7 @@
 /**
  * Widget 类型
  */
-export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays'
+export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | 'docker'
 
 /**
  * 设置对话框标签页

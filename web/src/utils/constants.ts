@@ -20,4 +20,4 @@ export const WIDGET_URL_PREFIX = 'widget:'
 /**
  * 支持的 Widget 类型
  */
-export const WIDGET_KINDS = ['weather', 'metrics', 'timezones', 'markets', 'holidays'] as const
+export const WIDGET_KINDS = ['weather', 'metrics', 'timezones', 'markets', 'holidays', 'docker'] as const

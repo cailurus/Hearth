@@ -113,6 +113,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         holidaysErrById,
         metrics,
         netRate,
+        dockerById,
+        dockerErrById,
     } = useWidgets({
         apps,
         lang,
@@ -401,6 +403,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
                                         statusMap={statusMap}
+                                        dockerById={dockerById}
+                                        dockerErrById={dockerErrById}
                                     />
                                 )
                             }
@@ -457,6 +461,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         netRate={netRate}
                                         localTimezone={systemTimezone}
                                         statusMap={statusMap}
+                                        dockerById={dockerById}
+                                        dockerErrById={dockerErrById}
                                     />
                                 </div>
                             )

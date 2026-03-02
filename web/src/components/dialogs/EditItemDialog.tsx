@@ -38,7 +38,7 @@ interface EditItemDialogProps {
     onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
-    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | null
+    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | null
     // Widget save callback (for weather, timezones, markets)
     onSaveWidget?: () => Promise<void>
     widgetSaving?: boolean
@@ -73,6 +73,9 @@ interface EditItemDialogProps {
     tzClocks: Array<{ city: string; timezone: string }>
     setTzClocks: React.Dispatch<React.SetStateAction<Array<{ city: string; timezone: string }>>>
     resolveCityToTimezoneEn: (city: string) => Promise<{ city: string; timezone: string }>
+    // Docker
+    dRefreshSec: 5 | 10 | 30
+    setDRefreshSec: (v: 5 | 10 | 30) => void
 }
 
 export function EditItemDialog({
@@ -126,6 +129,8 @@ export function EditItemDialog({
     tzClocks,
     setTzClocks,
     resolveCityToTimezoneEn,
+    dRefreshSec,
+    setDRefreshSec,
 }: EditItemDialogProps) {
     const { t } = useTranslation(['home', 'common', 'widgets'])
 
@@ -291,6 +296,24 @@ export function EditItemDialog({
                                     onQueryChange={setHCountryQuery}
                                     onChange={setHCountryCodes}
                                 />
+                            </div>
+                        ) : widgetKind === 'docker' ? (
+                            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:docker')}</div>
+                                <div className="grid grid-cols-1 gap-3">
+                                    <label className="block text-sm">
+                                        <div className="mb-1 text-white/70">{t('widgets:refreshInterval')}</div>
+                                        <select
+                                            value={dRefreshSec}
+                                            onChange={(e) => setDRefreshSec((Number(e.target.value) === 10 ? 10 : Number(e.target.value) === 30 ? 30 : 5) as 5 | 10 | 30)}
+                                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                        >
+                                            <option value={5}>{t('widgets:refreshSec5')}</option>
+                                            <option value={10}>{t('widgets:refreshSec10')}</option>
+                                            <option value={30}>{t('widgets:refreshSec30')}</option>
+                                        </select>
+                                    </label>
+                                </div>
                             </div>
                         ) : (
                             <div className="space-y-4">
