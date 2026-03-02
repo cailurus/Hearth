@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/cailurus/Hearth/actions"><img src="https://img.shields.io/github/actions/workflow/status/cailurus/Hearth/docker.yml?branch=main&style=flat-square" alt="Build Status"></a>
+  <a href="https://github.com/cailurus/Hearth/actions"><img src="https://img.shields.io/github/actions/workflow/status/cailurus/Hearth/dockerhub.yml?branch=main&style=flat-square" alt="Build Status"></a>
   <a href="https://hub.docker.com/r/cailurus/hearth"><img src="https://img.shields.io/docker/pulls/cailurus/hearth?style=flat-square" alt="Docker Pulls"></a>
   <a href="https://hub.docker.com/r/cailurus/hearth"><img src="https://img.shields.io/docker/image-size/cailurus/hearth/latest?style=flat-square" alt="Docker Image Size"></a>
   <a href="https://github.com/cailurus/Hearth/blob/main/LICENSE"><img src="https://img.shields.io/github/license/cailurus/Hearth?style=flat-square" alt="License"></a>
@@ -36,6 +36,7 @@
 - 🎨 **Dynamic Backgrounds** - Bing daily, random, or video backgrounds
 - 🌓 **Bilingual UI** - Chinese and English with full i18n
 - 📱 **Mobile Friendly** - Responsive design for all devices
+- 🐳 **Docker Monitoring** - Container status, CPU, memory, and network I/O
 - 🖱️ **Drag & Drop** - Reorder groups and items with drag and drop
 
 ## 🚀 Quick Start
@@ -47,11 +48,14 @@ docker run -d \
   --name hearth \
   -p 8787:8787 \
   -v hearth-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   --restart unless-stopped \
   cailurus/hearth:latest
 ```
 
 Open `http://localhost:8787` and login with `admin` / `admin`.
+
+> The Docker socket mount (`-v /var/run/docker.sock:...`) is **optional** — it enables the Docker monitoring widget. Without it, all other features work normally.
 
 ### Docker Compose
 
@@ -63,6 +67,7 @@ services:
       - "8787:8787"
     volumes:
       - hearth-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock  # Optional: enables Docker monitoring
     restart: unless-stopped
 
 volumes:
@@ -86,6 +91,7 @@ volumes:
 | `HEARTH_ADDR` | `:8787` | Listen address |
 | `HEARTH_DATA_DIR` | `/data` | Data directory |
 | `HEARTH_SESSION_TTL` | `168h` | Session expiration |
+| `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 
 ## 🛠️ Development
 
