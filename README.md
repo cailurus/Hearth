@@ -93,6 +93,8 @@ volumes:
 | `HEARTH_SESSION_TTL` | `168h` | Session expiration |
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 
+> **NAS users** (fnOS, Synology, etc.): If your NAS Docker UI only supports directory mounts, mount the directory containing the socket (e.g., host `/var/run` → container `/host-run`), then set `HEARTH_DOCKER_SOCKET=/host-run/docker.sock`. The paths `/host-run/docker.sock` and `/host/run/docker.sock` are auto-detected.
+
 ## 🛠️ Development
 
 ```bash

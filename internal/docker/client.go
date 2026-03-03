@@ -48,30 +48,32 @@ type Client struct {
 
 // Common Docker socket paths across platforms.
 var defaultSocketPaths = []string{
-	"/var/run/docker.sock",                          // Linux standard
-	os.Getenv("HOME") + "/.docker/run/docker.sock",  // Docker Desktop (macOS/Windows)
-	os.Getenv("HOME") + "/.orbstack/run/docker.sock", // OrbStack (macOS)
+	"/var/run/docker.sock",                            // Linux standard
+	"/host-run/docker.sock",                           // NAS directory mount (e.g. fnOS: /var/run → /host-run)
+	"/host/run/docker.sock",                           // NAS alternative mount path
+	os.Getenv("HOME") + "/.docker/run/docker.sock",   // Docker Desktop (macOS/Windows)
+	os.Getenv("HOME") + "/.orbstack/run/docker.sock",  // OrbStack (macOS)
 	os.Getenv("HOME") + "/.colima/default/docker.sock", // Colima (macOS)
 	os.Getenv("HOME") + "/.docker/desktop/docker.sock", // Docker Desktop alternative
-	"/run/docker.sock",                               // Some Linux distros
+	"/run/docker.sock",                                // Some Linux distros
 }
 
 // New creates a Docker client. If socketPath is non-empty and exists, it is used directly.
 // Otherwise, common paths are probed automatically.
 func New(socketPath string) *Client {
-	resolved := resolveSocketPath(socketPath)
-	return &Client{
-		socketPath: resolved,
-		httpClient: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					// Always use the latest resolved path (it may change at runtime)
-					return (&net.Dialer{}).DialContext(ctx, "unix", resolved)
-				},
-			},
-			Timeout: 15 * time.Second,
-		},
+	c := &Client{
+		socketPath: resolveSocketPath(socketPath),
 	}
+	c.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				// Use c.socketPath so it reflects any re-probing from Available()
+				return (&net.Dialer{}).DialContext(ctx, "unix", c.socketPath)
+			},
+		},
+		Timeout: 15 * time.Second,
+	}
+	return c
 }
 
 func resolveSocketPath(explicit string) string {
