@@ -5,7 +5,6 @@ const colors: Record<string, string> = {
     unknown: 'bg-gray-400',
 }
 
-// Shadow glow colors for the breathing effect
 const glowColors: Record<string, string> = {
     up: 'rgba(74,222,128,0.7)',
     slow: 'rgba(250,204,21,0.7)',
@@ -31,17 +30,4 @@ export function StatusDot({ status, className = '' }: StatusDotProps) {
             title={status}
         />
     )
-}
-
-// Inject the keyframes once
-if (typeof document !== 'undefined' && !document.getElementById('status-breath-style')) {
-    const style = document.createElement('style')
-    style.id = 'status-breath-style'
-    style.textContent = `
-        @keyframes statusBreath {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(0.8); }
-        }
-    `
-    document.head.appendChild(style)
 }

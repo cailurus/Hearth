@@ -2,7 +2,7 @@
  * 分组区块组件 - 显示应用和小组件的分组
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
 import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather } from '../../types'
@@ -28,6 +28,7 @@ interface GroupBlockProps {
     onEdit: (item: AppItem) => void
     onDelete: (id: string) => void
     onDeleteGroup?: (groupId: string) => void
+    onRenameGroup?: (groupId: string, name: string) => void
     onReorder: (groupId: string | null, ids: string[]) => Promise<void>
     weather: Weather | null
     weatherErr: string | null
@@ -55,6 +56,7 @@ export function GroupBlock({
     onEdit,
     onDelete,
     onDeleteGroup,
+    onRenameGroup,
     onReorder,
     weather,
     weatherErr,
@@ -75,6 +77,26 @@ export function GroupBlock({
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
     const draggingIdRef = useRef<string | null>(null)
+
+    // Inline rename state
+    const [renaming, setRenaming] = useState(false)
+    const [renameValue, setRenameValue] = useState('')
+    const renameInputRef = useRef<HTMLInputElement>(null)
+
+    const startRename = useCallback(() => {
+        if (!isAdmin || !groupId || !onRenameGroup) return
+        setRenameValue(name)
+        setRenaming(true)
+        requestAnimationFrame(() => renameInputRef.current?.select())
+    }, [isAdmin, groupId, onRenameGroup, name])
+
+    const commitRename = useCallback(() => {
+        const trimmed = renameValue.trim()
+        if (trimmed && trimmed !== name && groupId && onRenameGroup) {
+            onRenameGroup(groupId, trimmed)
+        }
+        setRenaming(false)
+    }, [renameValue, name, groupId, onRenameGroup])
 
     const isSysGroup = isSystemGroup(groupKind, name)
     const isSystemWidgetsOnly = isSysGroup && items.length > 0 && items.every((it) => isWidgetItem(it.url))
@@ -97,7 +119,27 @@ export function GroupBlock({
     return (
         <div className="group">
             <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-base font-semibold text-white/80">{name}</h2>
+                {renaming ? (
+                    <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename()
+                            if (e.key === 'Escape') setRenaming(false)
+                        }}
+                        className="rounded bg-white/10 px-2 py-0.5 text-base font-semibold text-white/80 outline-none focus:ring-1 focus:ring-white/30"
+                        autoFocus
+                    />
+                ) : (
+                    <h2
+                        className={`text-base font-semibold text-white/80 ${isAdmin && groupId ? 'cursor-pointer hover:text-white/90' : ''}`}
+                        onDoubleClick={startRename}
+                    >
+                        {name}
+                    </h2>
+                )}
                 {isAdmin ? (
                     <>
                         <button
@@ -253,6 +295,7 @@ export function GroupBlock({
                                             <WeatherWidget
                                                 data={(weatherById && a.id in weatherById) ? (weatherById[a.id] ?? weather) : null}
                                                 error={(weatherErrById && a.id in weatherErrById) ? (weatherErrById[a.id] ?? weatherErr) : null}
+                                                cityName={cfg?.city as string | undefined}
                                             />
                                         ) : widget === 'metrics' ? (
                                             metrics ? (
@@ -300,7 +343,7 @@ export function GroupBlock({
                                                 <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
                                             )
                                         ) : widget === 'markets' ? (
-                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} />
+                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} symbols={cfg?.symbols as string[] | undefined} />
                                         ) : widget === 'holidays' ? (
                                             <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
                                         ) : widget === 'docker' ? (

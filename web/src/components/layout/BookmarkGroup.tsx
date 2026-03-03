@@ -2,7 +2,7 @@
  * 书签组组件 - 以紧凑 pill 形式显示链接
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cog, Trash2 } from 'lucide-react'
 import type { AppItem } from '../../types'
@@ -18,6 +18,7 @@ interface BookmarkGroupProps {
     onEdit: (item: AppItem) => void
     onDelete: (id: string) => void
     onDeleteGroup: (groupId: string) => void
+    onRenameGroup?: (groupId: string, name: string) => void
     onReorder: (groupId: string | null, ids: string[]) => Promise<void>
     statusMap?: Record<string, { status: 'up' | 'slow' | 'down' | 'unknown' }>
 }
@@ -31,6 +32,7 @@ export function BookmarkGroup({
     onEdit,
     onDelete,
     onDeleteGroup,
+    onRenameGroup,
     onReorder,
     statusMap,
 }: BookmarkGroupProps) {
@@ -38,6 +40,26 @@ export function BookmarkGroup({
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
     const draggingIdRef = useRef<string | null>(null)
+
+    // Inline rename
+    const [renaming, setRenaming] = useState(false)
+    const [renameValue, setRenameValue] = useState('')
+    const renameInputRef = useRef<HTMLInputElement>(null)
+
+    const startRename = useCallback(() => {
+        if (!isAdmin || !onRenameGroup) return
+        setRenameValue(name)
+        setRenaming(true)
+        requestAnimationFrame(() => renameInputRef.current?.select())
+    }, [isAdmin, onRenameGroup, name])
+
+    const commitRename = useCallback(() => {
+        const trimmed = renameValue.trim()
+        if (trimmed && trimmed !== name && onRenameGroup) {
+            onRenameGroup(groupId, trimmed)
+        }
+        setRenaming(false)
+    }, [renameValue, name, groupId, onRenameGroup])
 
     const getNextOrder = (fromId: string, toId: string) => {
         const ids = items.map((it) => it.id)
@@ -53,7 +75,27 @@ export function BookmarkGroup({
     return (
         <div className="group">
             <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-base font-semibold text-white/80">{name}</h2>
+                {renaming ? (
+                    <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename()
+                            if (e.key === 'Escape') setRenaming(false)
+                        }}
+                        className="rounded bg-white/10 px-2 py-0.5 text-base font-semibold text-white/80 outline-none focus:ring-1 focus:ring-white/30"
+                        autoFocus
+                    />
+                ) : (
+                    <h2
+                        className={`text-base font-semibold text-white/80 ${isAdmin ? 'cursor-pointer hover:text-white/90' : ''}`}
+                        onDoubleClick={startRename}
+                    >
+                        {name}
+                    </h2>
+                )}
                 {isAdmin ? (
                     <>
                         <button

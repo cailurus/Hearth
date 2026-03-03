@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,8 +32,9 @@ type MarketsResponse struct {
 
 type MarketSymbol struct {
 	Symbol string `json:"symbol"`
-	Kind   string `json:"kind"` // "stock" | "crypto"
+	Kind   string `json:"kind"`   // "stock" | "crypto"
 	Name   string `json:"name"`
+	Market string `json:"market"` // "US" | "HK" | "" (crypto has no market)
 }
 
 var defaultMarketSymbols = []string{"BTC", "ETH", "AAPL", "MSFT"}
@@ -47,17 +49,15 @@ var marketsCache = struct {
 var coinGeckoSymbolCache = struct {
 	mu    sync.Mutex
 	items map[string]struct {
-		ID       string
-		Name     string
-		Fetched  int64
-		SymbolUp string
+		ID      string
+		Name    string
+		Fetched int64
 	}
 }{
 	items: map[string]struct {
-		ID       string
-		Name     string
-		Fetched  int64
-		SymbolUp string
+		ID      string
+		Name    string
+		Fetched int64
 	}{},
 }
 
@@ -146,9 +146,127 @@ var cryptoFullNames = map[string]string{
 	"FIL":   "Filecoin",
 }
 
+// yahooFinanceSearch searches Yahoo Finance for stock/ETF symbols by query.
+// Returns results with full company name, exchange info, and normalized symbol.
+func yahooFinanceSearch(ctx context.Context, query string, limit int) ([]MarketSymbol, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	q := url.Values{}
+	q.Set("q", query)
+	q.Set("quotesCount", strconv.Itoa(limit))
+	q.Set("newsCount", "0")
+	endpoint := "https://query2.finance.yahoo.com/v1/finance/search?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Hearth/1.0")
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("yahoo search: status=%d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Quotes []struct {
+			Symbol   string `json:"symbol"`
+			LongName string `json:"longname"`
+			ShortName string `json:"shortname"`
+			Exchange string `json:"exchange"`
+			ExchDisp string `json:"exchDisp"`
+			QuoteType string `json:"quoteType"`
+		} `json:"quotes"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	var results []MarketSymbol
+	for _, q := range payload.Quotes {
+		if q.QuoteType != "EQUITY" && q.QuoteType != "ETF" {
+			continue
+		}
+
+		sym := strings.TrimSpace(q.Symbol)
+		name := strings.TrimSpace(q.LongName)
+		if name == "" {
+			name = strings.TrimSpace(q.ShortName)
+		}
+
+		// Determine market from exchange
+		market := "US"
+		exchUp := strings.ToUpper(q.Exchange)
+		if exchUp == "HKG" || strings.Contains(strings.ToUpper(q.ExchDisp), "HONG KONG") {
+			market = "HK"
+			// Normalize Yahoo's "0700.HK" → "0700" for display
+			sym = strings.TrimSuffix(sym, ".HK")
+		} else if strings.HasSuffix(sym, ".HK") {
+			market = "HK"
+			sym = strings.TrimSuffix(sym, ".HK")
+		}
+
+		results = append(results, MarketSymbol{
+			Symbol: sym,
+			Kind:   "stock",
+			Name:   name,
+			Market: market,
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results, nil
+}
+
+// yahooLookupName resolves a symbol to its full company name via Yahoo Finance.
+func yahooLookupName(ctx context.Context, symbol string) string {
+	results, err := yahooFinanceSearch(ctx, symbol, 1)
+	if err != nil || len(results) == 0 {
+		return ""
+	}
+	// Only return name if the symbol matches
+	symUp := strings.ToUpper(strings.TrimSuffix(symbol, ".HK"))
+	if strings.ToUpper(results[0].Symbol) == symUp {
+		return results[0].Name
+	}
+	return ""
+}
+
+// isHKStock checks if a symbol looks like a Hong Kong stock (numeric code).
+func isHKStock(sym string) bool {
+	s := strings.TrimSpace(strings.ToUpper(sym))
+	s = strings.TrimPrefix(s, "HK:")
+	s = strings.TrimSuffix(s, ".HK")
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func isCryptoSymbol(symUpper string) bool {
 	s := strings.TrimSpace(strings.ToUpper(symUpper))
 	if s == "" {
+		return false
+	}
+	// HK stocks are numeric — don't treat them as crypto
+	if isHKStock(s) {
 		return false
 	}
 	if strings.HasPrefix(s, "CRYPTO:") {
@@ -234,14 +352,24 @@ func FetchMarkets(ctx context.Context, symbols []string) (MarketsResponse, error
 			itemsBySymbol[strings.ToUpper(keySym)] = it
 		}
 	}
-	for _, s := range stockSyms {
-		it, err := fetchStooqStock(ctx, s)
-		if err != nil {
-			// Keep widget resilient: represent missing items as 0/empty.
-			itemsBySymbol[strings.ToUpper(s)] = MarketQuote{Symbol: strings.ToUpper(s), Kind: "stock"}
-			continue
+	if len(stockSyms) > 0 {
+		var stockWg sync.WaitGroup
+		var stockMu sync.Mutex
+		for _, s := range stockSyms {
+			stockWg.Add(1)
+			go func(sym string) {
+				defer stockWg.Done()
+				it, err := fetchStooqStock(ctx, sym)
+				stockMu.Lock()
+				defer stockMu.Unlock()
+				if err != nil {
+					itemsBySymbol[strings.ToUpper(sym)] = MarketQuote{Symbol: strings.ToUpper(sym), Kind: "stock"}
+				} else {
+					itemsBySymbol[strings.ToUpper(it.Symbol)] = it
+				}
+			}(s)
 		}
-		itemsBySymbol[strings.ToUpper(it.Symbol)] = it
+		stockWg.Wait()
 	}
 
 	out := MarketsResponse{FetchedAt: time.Now().Unix()}
@@ -290,29 +418,51 @@ func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]Market
 	if q == "" {
 		push(MarketSymbol{Symbol: "BTC", Kind: "crypto", Name: "Bitcoin"})
 		push(MarketSymbol{Symbol: "ETH", Kind: "crypto", Name: "Ethereum"})
-		push(MarketSymbol{Symbol: "AAPL", Kind: "stock", Name: "APPLE INC"})
-		push(MarketSymbol{Symbol: "MSFT", Kind: "stock", Name: "MICROSOFT CORP"})
+		push(MarketSymbol{Symbol: "AAPL", Kind: "stock", Name: "APPLE INC", Market: "US"})
+		push(MarketSymbol{Symbol: "MSFT", Kind: "stock", Name: "MICROSOFT CORP", Market: "US"})
 		for _, sym := range []string{"SOL", "BNB", "XRP", "DOGE"} {
-			push(MarketSymbol{Symbol: sym, Kind: "crypto", Name: ""})
+			push(MarketSymbol{Symbol: sym, Kind: "crypto", Name: cryptoFullNames[sym]})
 		}
+		push(MarketSymbol{Symbol: "0700", Kind: "stock", Name: "Tencent Holdings Ltd", Market: "HK"})
+		push(MarketSymbol{Symbol: "9988", Kind: "stock", Name: "Alibaba Group", Market: "HK"})
 		if len(results) > limit {
 			results = results[:limit]
 		}
 		return results, nil
 	}
 
-	// Stocks: treat the query as a ticker candidate and validate it via Stooq quote.
-	if sym, code := normalizeStockSearchQuery(q); sym != "" {
-		name, _, ok, _ := fetchStooqQuote(ctx, code)
-		if ok {
-			push(MarketSymbol{Symbol: sym, Kind: "stock", Name: name})
+	// Parallel: Yahoo Finance search (stocks) + CoinGecko search (crypto)
+	type yahooResult struct {
+		items []MarketSymbol
+		err   error
+	}
+	yahooCh := make(chan yahooResult, 1)
+	go func() {
+		items, err := yahooFinanceSearch(ctx, q, limit)
+		yahooCh <- yahooResult{items, err}
+	}()
+
+	type geckoResult struct {
+		coins []coinGeckoSearchCoin
+		err   error
+	}
+	geckoCh := make(chan geckoResult, 1)
+	go func() {
+		coins, err := coinGeckoSearch(ctx, q, limit)
+		geckoCh <- geckoResult{coins, err}
+	}()
+
+	// Collect results: Yahoo (stocks) first, then CoinGecko (crypto)
+	if yr := <-yahooCh; yr.err == nil {
+		for _, m := range yr.items {
+			push(m)
+			if len(results) >= limit {
+				break
+			}
 		}
 	}
-
-	// Crypto: CoinGecko search.
-	coins, err := coinGeckoSearch(ctx, q, limit)
-	if err == nil {
-		for _, c := range coins {
+	if gr := <-geckoCh; gr.err == nil {
+		for _, c := range gr.coins {
 			push(MarketSymbol{Symbol: strings.ToUpper(c.Symbol), Kind: "crypto", Name: c.Name})
 			if len(results) >= limit {
 				break
@@ -324,34 +474,6 @@ func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]Market
 		results = results[:limit]
 	}
 	return results, nil
-}
-
-func normalizeStockSearchQuery(q string) (symbolUpper string, stooqCode string) {
-	s := strings.TrimSpace(q)
-	if s == "" {
-		return "", ""
-	}
-	s = strings.ToUpper(s)
-	s = strings.TrimPrefix(s, "STOCK:")
-	s = strings.TrimSpace(s)
-	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' {
-			continue
-		}
-		return "", ""
-	}
-	if s == "" {
-		return "", ""
-	}
-	code := strings.ToLower(s)
-	if !strings.Contains(code, ".") {
-		code = code + ".us"
-	}
-	parts := strings.Split(strings.ToUpper(code), ".")
-	if len(parts) == 0 || parts[0] == "" {
-		return "", ""
-	}
-	return parts[0], code
 }
 
 type coinGeckoSearchCoin struct {
@@ -500,38 +622,50 @@ func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, 
 
 func fetchBinanceCrypto(ctx context.Context, symbolsUpper []string) (map[string]MarketQuote, error) {
 	out := map[string]MarketQuote{}
+	var mu sync.Mutex
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	anyOK := false
+	var anyOK int64
 	var anyErr error
+	var errMu sync.Mutex
 
+	var wg sync.WaitGroup
 	for _, symRaw := range symbolsUpper {
 		origKey := strings.ToUpper(strings.TrimSpace(symRaw))
 		base := strings.ToUpper(strings.TrimSpace(stripCryptoPrefix(symRaw)))
 		if base == "" || origKey == "" {
 			continue
 		}
-		pair := base + "USDT"
 
-		// 24h ticker
-		{
+		wg.Add(1)
+		go func(origKey, base string) {
+			defer wg.Done()
+			pair := base + "USDT"
+
+			// 24h ticker
 			endpoint := "https://api.binance.com/api/v3/ticker/24hr?" + url.Values{"symbol": []string{pair}}.Encode()
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 			if err != nil {
+				errMu.Lock()
 				anyErr = err
-				continue
+				errMu.Unlock()
+				return
 			}
 			req.Header.Set("User-Agent", "Hearth/0.1")
 			resp, err := client.Do(req)
 			if err != nil {
+				errMu.Lock()
 				anyErr = err
-				continue
+				errMu.Unlock()
+				return
 			}
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 			_ = resp.Body.Close()
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				errMu.Lock()
 				anyErr = fmt.Errorf("binance ticker: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-				continue
+				errMu.Unlock()
+				return
 			}
 
 			var ticker struct {
@@ -539,14 +673,18 @@ func fetchBinanceCrypto(ctx context.Context, symbolsUpper []string) (map[string]
 				PriceChangePct24h string `json:"priceChangePercent"`
 			}
 			if err := json.Unmarshal(body, &ticker); err != nil {
+				errMu.Lock()
 				anyErr = err
-				continue
+				errMu.Unlock()
+				return
 			}
 
 			price, err := strconv.ParseFloat(strings.TrimSpace(ticker.LastPrice), 64)
 			if err != nil {
+				errMu.Lock()
 				anyErr = err
-				continue
+				errMu.Unlock()
+				return
 			}
 			pct := 0.0
 			if p, err := strconv.ParseFloat(strings.TrimSpace(ticker.PriceChangePct24h), 64); err == nil {
@@ -590,6 +728,7 @@ func fetchBinanceCrypto(ctx context.Context, symbolsUpper []string) (map[string]
 			}
 
 			name := strings.TrimSpace(cryptoFullNames[base])
+			mu.Lock()
 			out[origKey] = MarketQuote{
 				Symbol:       base,
 				Kind:         "crypto",
@@ -598,11 +737,14 @@ func fetchBinanceCrypto(ctx context.Context, symbolsUpper []string) (map[string]
 				ChangePct24h: pct,
 				Series:       series,
 			}
-			anyOK = true
-		}
+			mu.Unlock()
+			atomic.AddInt64(&anyOK, 1)
+		}(origKey, base)
 	}
 
-	if !anyOK {
+	wg.Wait()
+
+	if atomic.LoadInt64(&anyOK) == 0 {
 		if anyErr != nil {
 			return nil, anyErr
 		}
@@ -679,15 +821,13 @@ func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string) (id string,
 
 	coinGeckoSymbolCache.mu.Lock()
 	coinGeckoSymbolCache.items[sym] = struct {
-		ID       string
-		Name     string
-		Fetched  int64
-		SymbolUp string
+		ID      string
+		Name    string
+		Fetched int64
 	}{
-		ID:       pickedID,
-		Name:     pickedName,
-		Fetched:  time.Now().Unix(),
-		SymbolUp: sym,
+		ID:      pickedID,
+		Name:    pickedName,
+		Fetched: time.Now().Unix(),
 	}
 	coinGeckoSymbolCache.mu.Unlock()
 
@@ -701,12 +841,31 @@ func fetchStooqStock(ctx context.Context, symbolUpper string) (MarketQuote, erro
 	}
 
 	code := strings.ToLower(sym)
-	if strings.HasPrefix(code, "STOCK:") {
+	if strings.HasPrefix(code, "stock:") {
 		code = strings.TrimSpace(strings.TrimPrefix(code, "stock:"))
 	}
+	if strings.HasPrefix(code, "hk:") {
+		code = strings.TrimSpace(strings.TrimPrefix(code, "hk:"))
+	}
 	if !strings.Contains(code, ".") {
-		// Default to US market.
-		code = code + ".us"
+		if isHKStock(sym) {
+			// Stooq uses no leading zeros for HK stocks: 0700 → 700.hk
+			code = strings.TrimLeft(code, "0")
+			if code == "" {
+				code = "0"
+			}
+			code = code + ".hk"
+		} else {
+			code = code + ".us"
+		}
+	} else if strings.HasSuffix(code, ".hk") {
+		// Also strip leading zeros for explicit .hk codes
+		parts := strings.SplitN(code, ".", 2)
+		num := strings.TrimLeft(parts[0], "0")
+		if num == "" {
+			num = "0"
+		}
+		code = num + ".hk"
 	}
 
 	name, lastClose, ok, err := fetchStooqQuote(ctx, code)
@@ -715,6 +874,11 @@ func fetchStooqStock(ctx context.Context, symbolUpper string) (MarketQuote, erro
 	}
 	if !ok {
 		return MarketQuote{}, errors.New("stooq: no quote")
+	}
+
+	// Enrich name via Yahoo Finance (Stooq often returns abbreviated names)
+	if betterName := yahooLookupName(ctx, sym); betterName != "" {
+		name = betterName
 	}
 
 	closes, err := fetchStooqDailyClosesTail(ctx, code, 90)

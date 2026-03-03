@@ -7,18 +7,46 @@ import { Spinner } from '../ui/Spinner'
 interface WeatherWidgetProps {
     data: Weather | null
     error?: string | null
+    cityName?: string // configured city — shown immediately before data loads
 }
 
 /**
  * 天气组件 - 显示当前天气和5日预报
  */
-export function WeatherWidget({ data, error }: WeatherWidgetProps) {
+export function WeatherWidget({ data, error, cityName }: WeatherWidgetProps) {
     const { t, i18n } = useTranslation('widgets')
     const lang = i18n.language === 'en' ? 'en' : 'zh'
 
     if (!data) {
         const msg = String(error || '').trim()
         if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+
+        // Show city name placeholder while loading
+        if (cityName) {
+            return (
+                <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-5 gap-1.5 items-center">
+                        <div className="flex items-center justify-center">
+                            <div className="h-11 w-11 rounded-full bg-white/5 animate-pulse" />
+                        </div>
+                        <div className="col-span-4 min-w-0 flex flex-col justify-center">
+                            <div className="truncate text-sm font-semibold text-white">{cityShort(cityName)}</div>
+                            <div className="mt-1 h-5 w-24 rounded bg-white/5 animate-pulse" />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-5 gap-1">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                            <div key={i} className="flex flex-col items-center gap-0.5">
+                                <div className="h-3 w-6 rounded bg-white/5 animate-pulse" />
+                                <div className="h-8 w-8 rounded bg-white/5 animate-pulse" />
+                                <div className="h-3 w-8 rounded bg-white/5 animate-pulse" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )
+        }
+
         return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
     const cond = weatherCodeLabel(data.weatherCode, lang)

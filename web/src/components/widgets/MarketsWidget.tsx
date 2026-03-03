@@ -1,4 +1,4 @@
-import type { MarketsResponse } from '../../types'
+import type { MarketQuote, MarketsResponse } from '../../types'
 import { prettifyCompanyName } from '../../utils'
 import { MarketLogo } from './MarketLogo'
 import { MiniSparkline } from './MiniSparkline'
@@ -7,60 +7,89 @@ import { Spinner } from '../ui/Spinner'
 interface MarketsWidgetProps {
     data: MarketsResponse | null
     error?: string | null
+    symbols?: string[] // configured symbols — shown immediately before data loads
 }
 
 /**
- * 行情组件 - 显示股票/加密货币行情
+ * Render a single market row (shared between loaded and placeholder states).
  */
-export function MarketsWidget({ data, error }: MarketsWidgetProps) {
-    if (!data) {
+function MarketRow({ sym, item }: { sym: string; item?: MarketQuote }) {
+    const hasData = item && typeof item.priceUsd === 'number' && item.priceUsd > 0
+    const name = hasData ? prettifyCompanyName(String(item.name || '').trim()) : ''
+    const price = hasData ? `$${item.priceUsd.toFixed(2)}` : '—'
+    const pct = hasData && typeof item.changePct24h === 'number' && Number.isFinite(item.changePct24h) ? item.changePct24h : null
+    const pctLabel = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
+    const pctColor = pct == null ? 'text-white/60' : pct >= 0 ? 'text-green-400/80' : 'text-red-400/80'
+    const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼'
+    const series = hasData && Array.isArray(item.series)
+        ? (item.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n))
+        : []
+
+    return (
+        <div className="flex items-center gap-2 text-[10px] sm:text-[11px]">
+            {/* Symbol and name */}
+            <div className="w-[72px] sm:w-20 shrink-0">
+                <div className="flex items-center gap-1">
+                    <MarketLogo symbol={sym} />
+                    <span className="truncate font-medium text-white/90">{sym}</span>
+                    {arrow ? <span className={`text-[9px] sm:text-[10px] ${pctColor}`}>{arrow}</span> : null}
+                </div>
+                <div className={`truncate text-[8px] sm:text-[9px] ${name ? 'text-white/45' : 'text-white/20'}`}>
+                    {name || '—'}
+                </div>
+            </div>
+
+            {/* Sparkline */}
+            <div className="min-w-[40px] flex-1">
+                {hasData ? (
+                    <MiniSparkline series={series} />
+                ) : (
+                    <div className="h-4 rounded bg-white/5 animate-pulse" />
+                )}
+            </div>
+
+            {/* Price and change */}
+            <div className="w-[60px] sm:w-[68px] shrink-0 text-right">
+                <div className={`tabular-nums ${hasData ? 'text-white/90' : 'text-white/20'}`}>{price}</div>
+                <div className={`tabular-nums text-[9px] sm:text-[10px] ${pctColor}`}>{pctLabel}</div>
+            </div>
+        </div>
+    )
+}
+
+export function MarketsWidget({ data, error, symbols }: MarketsWidgetProps) {
+    const configuredSymbols = (symbols || []).filter(Boolean).slice(0, 4).map((s) => s.toUpperCase())
+
+    // Build a lookup from loaded data
+    const dataBySymbol: Record<string, MarketQuote> = {}
+    if (data?.items) {
+        for (const it of data.items) {
+            dataBySymbol[String(it.symbol || '').toUpperCase()] = it
+        }
+    }
+
+    // If no data at all and no symbols configured, show spinner or error
+    if (!data && configuredSymbols.length === 0) {
         const msg = String(error || '').trim()
         if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
         return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
 
-    const items = Array.isArray(data.items) ? data.items.slice(0, 4) : []
-    if (items.length === 0) {
+    // Use configured symbols as the source of truth (always show them)
+    // Fall back to data items if no symbols configured
+    const displaySymbols = configuredSymbols.length > 0
+        ? configuredSymbols
+        : (data?.items || []).slice(0, 4).map((it) => String(it.symbol || '').toUpperCase())
+
+    if (displaySymbols.length === 0) {
         return <div className="flex h-full items-center justify-center text-sm text-white/60">—</div>
     }
 
     return (
         <div className="flex flex-col gap-1.5 sm:gap-2">
-            {items.map((it) => {
-                const sym = String(it.symbol || '').toUpperCase() || '—'
-                const name = prettifyCompanyName(String(it.name || '').trim())
-                const price = typeof it.priceUsd === 'number' && Number.isFinite(it.priceUsd) ? `$${it.priceUsd.toFixed(2)}` : '—'
-                const pct = typeof it.changePct24h === 'number' && Number.isFinite(it.changePct24h) ? it.changePct24h : null
-                const pctLabel = pct == null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`
-                const pctColor = pct == null ? 'text-white/60' : pct >= 0 ? 'text-green-400/80' : 'text-red-400/80'
-                const arrow = pct == null ? '' : pct >= 0 ? '▲' : '▼'
-                const series = Array.isArray(it.series) ? (it.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n)) : []
-
-                return (
-                    <div key={sym} className="flex items-center gap-2 text-[10px] sm:text-[11px]">
-                        {/* Symbol and name - fixed width */}
-                        <div className="w-[72px] sm:w-20 shrink-0">
-                            <div className="flex items-center gap-1">
-                                <MarketLogo symbol={sym} />
-                                <span className="truncate font-medium text-white/90">{sym}</span>
-                                {arrow ? <span className={`text-[9px] sm:text-[10px] ${pctColor}`}>{arrow}</span> : null}
-                            </div>
-                            <div className="truncate text-[8px] sm:text-[9px] text-white/45">{name || '—'}</div>
-                        </div>
-
-                        {/* Sparkline - always visible, fills remaining space */}
-                        <div className="min-w-[40px] flex-1">
-                            <MiniSparkline series={series} />
-                        </div>
-
-                        {/* Price and change - fixed width */}
-                        <div className="w-[60px] sm:w-[68px] shrink-0 text-right">
-                            <div className="tabular-nums text-white/90">{price}</div>
-                            <div className={`tabular-nums text-[9px] sm:text-[10px] ${pctColor}`}>{pctLabel}</div>
-                        </div>
-                    </div>
-                )
-            })}
+            {displaySymbols.map((sym) => (
+                <MarketRow key={sym} sym={sym} item={dataBySymbol[sym]} />
+            ))}
         </div>
     )
 }

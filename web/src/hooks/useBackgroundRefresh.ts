@@ -62,42 +62,20 @@ export function useBackgroundRefresh({
                 throw new Error(msg)
             }
 
-            // Preload the next background
+            // Force the browser to load the new image by changing the nonce.
+            // Always update nonce after successful refresh — even if preload fails,
+            // the <img> tag will fetch the new background on its own.
             const nextNonce = Date.now()
-            const base = '/api/background/image'
-            const nextUrl = base + `?v=${nextNonce}`
-
-            const res = await fetchWithTimeout(nextUrl, { credentials: 'include' }, 20000)
-            if (!res.ok) {
-                const text = await res.text().catch(() => '')
-                const msg = (() => {
-                    try {
-                        const data = text ? (JSON.parse(text) as unknown) : null
-                        if (data && typeof data === 'object' && 'error' in data) {
-                            const e = (data as { error?: unknown }).error
-                            if (typeof e === 'string' && e.trim()) return e.trim()
-                        }
-                    } catch {
-                        // ignore
-                    }
-                    return text?.trim() || res.statusText || 'failed'
-                })()
-                throw new Error(msg)
-            }
-
-            await res.blob()
-
-            await new Promise<void>((resolve, reject) => {
-                const timer = window.setTimeout(() => {
-                    reject(new Error('timeout'))
-                }, 12000)
-                const img = new Image()
-                img.onload = () => { clearTimeout(timer); resolve() }
-                img.onerror = () => { clearTimeout(timer); reject(new Error('failed')) }
-                img.src = nextUrl
-            })
-
             setBgNonce(nextNonce)
+
+            // Best-effort preload so the transition feels instant
+            try {
+                const nextUrl = `/api/background/image?v=${nextNonce}`
+                const img = new Image()
+                img.src = nextUrl
+            } catch {
+                // ignore — nonce is already updated, <img> will load it
+            }
         } catch (e) {
             setError(e instanceof Error ? e.message : 'failed')
         } finally {

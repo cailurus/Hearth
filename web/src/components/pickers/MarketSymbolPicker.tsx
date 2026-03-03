@@ -7,6 +7,7 @@ export type MarketSymbolResult = {
     symbol: string
     kind?: string
     name?: string
+    market?: string // "US" | "HK" | ""
 }
 
 export interface MarketSymbolPickerProps {
@@ -156,6 +157,9 @@ export function MarketSymbolPicker({
                                 const sym = String(r.symbol || '').trim().toUpperCase()
                                 const name = String(r.name || '').trim()
                                 const kind = String(r.kind || '').trim()
+                                const market = String(r.market || '').trim().toUpperCase()
+                                // Display label: "US" / "HK" for stocks, "CRYPTO" for crypto
+                                const badge = kind === 'crypto' ? 'CRYPTO' : (market || 'STOCK')
                                 return (
                                     <button
                                         key={`${sym}-${kind}-${name}`}
@@ -173,7 +177,11 @@ export function MarketSymbolPicker({
                                             <div className="truncate font-semibold text-white/90">{sym}</div>
                                             <div className="truncate text-xs text-white/60">{name || '—'}</div>
                                         </div>
-                                        <div className="shrink-0 text-xs text-white/50">{kind ? kind.toUpperCase() : ''}</div>
+                                        <div className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                            market === 'HK' ? 'bg-red-500/20 text-red-300'
+                                                : kind === 'crypto' ? 'bg-amber-500/20 text-amber-300'
+                                                    : 'bg-blue-500/20 text-blue-300'
+                                        }`}>{badge}</div>
                                     </button>
                                 )
                             })

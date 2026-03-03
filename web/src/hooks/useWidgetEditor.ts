@@ -473,7 +473,6 @@ export function useWidgetEditor({
         mShowNet,
         mRefreshSec,
         hCountryCodes,
-        hCountryQuery,
         dRefreshSec,
         reload,
     ])

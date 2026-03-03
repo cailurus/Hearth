@@ -237,22 +237,46 @@ func (s *Server) handleGetMarketIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := strings.TrimRight(strings.TrimSpace(s.cfg.MarketIconBaseURL), "/")
-	if base == "" {
-		http.NotFound(w, r)
-		return
-	}
+	const nvstlyBase = "https://raw.githubusercontent.com/nvstly/icons/main"
 
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	// Build the raw symbol with exchange suffix for Parqet (e.g., "0700.HK" for HK stocks)
+	parqetSym := norm
+	rawSym := strings.TrimSpace(r.URL.Query().Get("symbol"))
+	if rawSym == "" {
+		rawSym = strings.TrimSpace(r.URL.Query().Get("s"))
+	}
+	rawUp := strings.ToUpper(strings.TrimSpace(rawSym))
+	if strings.HasSuffix(rawUp, ".HK") {
+		parqetSym = rawUp // "0700.HK" — Parqet needs the exchange suffix
+	} else if norm != "" {
+		// Check if pure numeric (HK stock stored without suffix)
+		allDigits := true
+		for _, ch := range norm {
+			if ch < '0' || ch > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits {
+			parqetSym = norm + ".HK"
+		}
+	}
+
 	client := &http.Client{Timeout: 8 * time.Second}
 	candidates := []string{
-		fmt.Sprintf("%s/ticker_icons/%s.png", base, norm),
-		fmt.Sprintf("%s/crypto_icons/%s.png", base, norm),
+		// Parqet: best coverage for stocks (US + HK) and some crypto
+		fmt.Sprintf("https://assets.parqet.com/logos/symbol/%s?format=png", parqetSym),
+		// nvstly: good crypto coverage fallback
+		fmt.Sprintf("%s/ticker_icons/%s.png", nvstlyBase, norm),
+		fmt.Sprintf("%s/crypto_icons/%s.png", nvstlyBase, norm),
 	}
+
+	const iconUA = "Mozilla/5.0 (compatible; Hearth/1.0; +https://github.com/cailurus/Hearth)"
 
 	if r.Method == http.MethodHead {
 		for _, url := range candidates {
@@ -260,6 +284,7 @@ func (s *Server) handleGetMarketIcon(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
+			req.Header.Set("User-Agent", iconUA)
 			resp, err := client.Do(req)
 			if err != nil {
 				continue
@@ -282,6 +307,7 @@ func (s *Server) handleGetMarketIcon(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
+		req.Header.Set("User-Agent", iconUA)
 		req.Header.Set("Accept", "image/png,image/*;q=0.9,*/*;q=0.1")
 		resp, err := client.Do(req)
 		if err != nil {

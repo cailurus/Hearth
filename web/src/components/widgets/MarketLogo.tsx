@@ -12,66 +12,50 @@ interface MarketLogoProps {
 export function MarketLogo({ symbol }: MarketLogoProps) {
     const norm = useMemo(() => normalizeMarketSymbol(symbol), [symbol])
     const Icon = useMemo(() => iconForMarketSymbol(symbol), [symbol])
-    const localUrl = useMemo(() => (norm ? `/market-icons/${norm}.png` : ''), [norm])
     const cachedUrl = useMemo(() => {
         if (!symbol) return ''
         const qs = new URLSearchParams({ symbol: String(symbol) })
         return `/api/widgets/markets/icon?${qs.toString()}`
     }, [symbol])
 
-    const [maskUrl, setMaskUrl] = useState<string>('')
-    
+    const [imgUrl, setImgUrl] = useState<string>('')
+
     useEffect(() => {
         let cancelled = false
+        if (!cachedUrl) { setImgUrl(''); return }
 
-        const tryLoad = (url: string) =>
-            new Promise<boolean>((resolve) => {
-                if (!url) return resolve(false)
-                const img = new Image()
-                img.onload = () => resolve(true)
-                img.onerror = () => resolve(false)
-                img.src = url
-            })
+        const img = new Image()
+        img.onload = () => { if (!cancelled) setImgUrl(cachedUrl) }
+        img.onerror = () => { if (!cancelled) setImgUrl('') }
+        img.src = cachedUrl
 
-        ;(async () => {
-            // Keep previous maskUrl while loading to avoid flicker.
-            if (localUrl && (await tryLoad(localUrl))) {
-                if (!cancelled) setMaskUrl(localUrl)
-                return
-            }
-            if (cachedUrl && (await tryLoad(cachedUrl))) {
-                if (!cancelled) setMaskUrl(cachedUrl)
-                return
-            }
-            if (!cancelled) setMaskUrl('')
-        })()
+        return () => { cancelled = true }
+    }, [cachedUrl])
 
-        return () => {
-            cancelled = true
-        }
-    }, [localUrl, cachedUrl])
-
-    if (maskUrl) {
+    if (imgUrl) {
         return (
-            <span
+            <img
                 aria-hidden="true"
-                className="h-3 w-3 shrink-0 self-center text-white/70"
-                style={{
-                    display: 'inline-block',
-                    backgroundColor: 'currentColor',
-                    WebkitMaskImage: `url(${maskUrl})`,
-                    WebkitMaskRepeat: 'no-repeat',
-                    WebkitMaskSize: 'contain',
-                    WebkitMaskPosition: 'center',
-                    maskImage: `url(${maskUrl})`,
-                    maskRepeat: 'no-repeat',
-                    maskSize: 'contain',
-                    maskPosition: 'center',
-                }}
+                src={imgUrl}
+                alt=""
+                className="h-3.5 w-3.5 shrink-0 self-center rounded-sm object-contain"
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
             />
         )
     }
 
-    if (!Icon) return null
-    return <Icon aria-hidden="true" className="h-3 w-3 shrink-0 self-center text-white/70" />
+    if (Icon) {
+        return <Icon aria-hidden="true" className="h-3 w-3 shrink-0 self-center text-white/70" />
+    }
+
+    // Letter fallback
+    const letter = (norm || symbol || '?').charAt(0).toUpperCase()
+    return (
+        <span
+            aria-hidden="true"
+            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center self-center rounded-full bg-white/10 text-[7px] font-bold leading-none text-white/60"
+        >
+            {letter}
+        </span>
+    )
 }

@@ -98,8 +98,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const isVideoBackground = settings?.background?.provider === 'default_video'
     const { videoUrl, isDownloading, downloadProgress, isReady: videoReady } = useVideoBackground(isVideoBackground)
 
-    // Background blur (video default: 0, image default: 3)
-    const bgBlur = settings?.background?.blur ?? (isVideoBackground ? 0 : 3)
+    // Background blur: prefer draft (live slider value) over saved settings
+    const bgBlur = siteDraft?.background?.blur ?? settings?.background?.blur ?? (isVideoBackground ? 0 : 3)
 
     // Use the useWidgets hook for widget data fetching
     const {
@@ -194,6 +194,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         if (!isAdmin) return
         try {
             await actions.deleteGroup(groupId)
+        } catch {
+            // ignore
+        }
+    }
+
+    const renameGroup = async (groupId: string, newName: string) => {
+        if (!isAdmin) return
+        try {
+            await actions.updateGroup(groupId, newName)
         } catch {
             // ignore
         }
@@ -294,7 +303,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 )}
             </div>
 
-            <main className="mx-auto max-w-6xl px-4 pb-10 pt-[20vh] text-white">
+            <main className="mx-auto max-w-6xl px-4 pb-10 pt-[8vh] text-white">
                 {error ? (
                     <div className="rounded-lg border border-white/10 bg-black/40 p-4 text-sm text-white/80">
                         {error}
@@ -429,6 +438,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                             onEdit={editor.openEditItem}
                                             onDelete={deleteItem}
                                             onDeleteGroup={deleteGroup}
+                                            onRenameGroup={renameGroup}
                                             onReorder={reorderItems}
                                             statusMap={statusMap}
                                         />
@@ -448,6 +458,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         onEdit={editor.openEditItem}
                                         onDelete={deleteItem}
                                         onDeleteGroup={deleteGroup}
+                                            onRenameGroup={renameGroup}
                                         onReorder={reorderItems}
                                         weather={weather}
                                         weatherErr={weatherErr}
