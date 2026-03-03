@@ -94,7 +94,31 @@ volumes:
 | `HEARTH_COOKIE_SECURE` | `auto` | Secure cookie flag (`auto` / `true` / `false`) |
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 
-> **NAS users** (fnOS, Synology, etc.): If your NAS Docker UI only supports directory mounts, mount the directory containing the socket (e.g., host `/var/run` → container `/host-run`), then set `HEARTH_DOCKER_SOCKET=/host-run/docker.sock`. The paths `/host-run/docker.sock` and `/host/run/docker.sock` are auto-detected.
+<details>
+<summary><b>NAS Docker Monitoring Setup</b> (fnOS, Synology, etc.)</summary>
+
+NAS Docker UIs typically only allow **directory** mounts, not individual files. To enable Docker monitoring:
+
+1. Add a **directory mount** in your NAS Docker settings:
+
+   | Host Path | Container Path |
+   |-----------|---------------|
+   | `/var/run` | `/host-run` |
+
+2. Add an **environment variable**:
+
+   | Variable | Value |
+   |----------|-------|
+   | `HEARTH_DOCKER_SOCKET` | `/host-run/docker.sock` |
+
+If your NAS restricts access to `/var/run`, SSH into the NAS and run:
+```bash
+mkdir -p /vol2/1000/ServiceStore/docker-sock
+mount --bind /var/run /vol2/1000/ServiceStore/docker-sock
+```
+Then mount `/vol2/1000/ServiceStore/docker-sock` → `/host-run` instead.
+
+</details>
 
 ## 🛠️ Development
 
