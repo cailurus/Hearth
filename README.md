@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/screenshot.jpeg" alt="Screenshot" width="800">
+  <img src="https://raw.githubusercontent.com/cailurus/Hearth/main/screenshot.png" alt="Screenshot" width="800">
 </p>
 
 ## ✨ Features
@@ -31,7 +31,7 @@
 - 🌤️ **Weather Widget** - Current weather with 5-day forecast
 - 🕐 **World Clock** - Up to 4 configurable timezone clocks
 - 📊 **System Metrics** - CPU, memory, disk, and network monitoring
-- 📈 **Market Ticker** - Stock and crypto price tracking
+- 📈 **Market Ticker** - US stocks, HK stocks, and crypto price tracking
 - 🗓️ **Holidays** - Upcoming holidays for selected countries
 - 🎨 **Dynamic Backgrounds** - Bing daily, random, or video backgrounds
 - 🌓 **Bilingual UI** - Chinese and English with full i18n
