@@ -8,6 +8,7 @@ RUN npm run build
 
 # Build backend (must satisfy go.mod `go 1.24.0`)
 FROM golang:1.24-alpine AS gobuild
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -15,7 +16,7 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 COPY README.md LICENSE ./
 COPY --from=webbuild /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/hearth ./cmd/hearth && \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/morezhou/hearth/internal/server.Version=${VERSION}" -o /out/hearth ./cmd/hearth && \
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/reset-password ./cmd/reset-password
 
 # Prepare default writable data dirs for the nonroot runtime.

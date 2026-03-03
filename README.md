@@ -91,6 +91,7 @@ volumes:
 | `HEARTH_ADDR` | `:8787` | Listen address |
 | `HEARTH_DATA_DIR` | `/data` | Data directory |
 | `HEARTH_SESSION_TTL` | `168h` | Session expiration |
+| `HEARTH_COOKIE_SECURE` | `auto` | Secure cookie flag (`auto` / `true` / `false`) |
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 
 > **NAS users** (fnOS, Synology, etc.): If your NAS Docker UI only supports directory mounts, mount the directory containing the socket (e.g., host `/var/run` → container `/host-run`), then set `HEARTH_DOCKER_SOCKET=/host-run/docker.sock`. The paths `/host-run/docker.sock` and `/host/run/docker.sock` are auto-detected.
@@ -140,7 +141,10 @@ When updating the container, your data remains intact:
 ```bash
 docker pull cailurus/hearth:latest
 docker stop hearth && docker rm hearth
-docker run -d --name hearth -p 8787:8787 -v hearth-data:/data cailurus/hearth:latest
+docker run -d --name hearth -p 8787:8787 \
+  -v hearth-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  cailurus/hearth:latest
 ```
 
 ## 📄 License
