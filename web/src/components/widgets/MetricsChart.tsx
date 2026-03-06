@@ -225,13 +225,11 @@ export function MetricsChart({ points, metric, period, lang }: MetricsChartProps
                     <HoverTooltip
                         x={xOf(hoverIdx)}
                         point={points[hoverIdx]}
-                        metric={metric}
                         isNet={isNet}
                         series2Val={series2?.[hoverIdx]}
                         seriesVal={series[hoverIdx]}
                         formatY={formatY}
                         period={period}
-                        lang={lang}
                     />
                 </>
             )}
@@ -256,7 +254,6 @@ export function MetricsChart({ points, metric, period, lang }: MetricsChartProps
 function HoverTooltip({
     x,
     point,
-    metric,
     isNet,
     seriesVal,
     series2Val,
@@ -265,13 +262,11 @@ function HoverTooltip({
 }: {
     x: number
     point: MetricsHistoryPoint
-    metric: MetricKey
     isNet: boolean
     seriesVal: number
     series2Val?: number
     formatY: (v: number) => string
     period: Period
-    lang: 'zh' | 'en'
 }) {
     const time = formatTimeLabel(point.ts, period)
     const label = isNet

@@ -15,15 +15,17 @@ const PERIODS: { value: Period; zhLabel: string; enLabel: string }[] = [
     { value: '7d', zhLabel: '7天', enLabel: '7d' },
 ]
 
-const TABS: { value: MetricTab; i18nKey: string }[] = [
-    { value: 'cpu', i18nKey: 'widgets:metricsCpu' },
-    { value: 'mem', i18nKey: 'widgets:metricsMem' },
-    { value: 'disk', i18nKey: 'widgets:metricsDisk' },
-    { value: 'net', i18nKey: 'widgets:metricsNet' },
-]
+const TAB_LABELS: Record<MetricTab, { zh: string; en: string }> = {
+    cpu: { zh: 'CPU', en: 'CPU' },
+    mem: { zh: '内存', en: 'Memory' },
+    disk: { zh: '磁盘', en: 'Disk' },
+    net: { zh: '网络', en: 'Network' },
+}
+
+const TAB_ORDER: MetricTab[] = ['cpu', 'mem', 'disk', 'net']
 
 export function MetricsHistoryPanel() {
-    const { t, i18n } = useTranslation()
+    const { t, i18n } = useTranslation('widgets')
     const lang = (i18n.language?.startsWith('zh') ? 'zh' : 'en') as 'zh' | 'en'
 
     const [period, setPeriod] = useState<Period>('1h')
@@ -49,7 +51,7 @@ export function MetricsHistoryPanel() {
 
     return (
         <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-            <div className="mb-3 text-sm font-semibold text-white/80">{t('widgets:metricsHistory')}</div>
+            <div className="mb-3 text-sm font-semibold text-white/80">{t('metricsHistory')}</div>
 
             {/* Period selector */}
             <div className="mb-3 flex gap-1.5">
@@ -70,17 +72,17 @@ export function MetricsHistoryPanel() {
 
             {/* Metric tabs */}
             <div className="mb-3 flex gap-1.5">
-                {TABS.map((tab) => (
+                {TAB_ORDER.map((tab) => (
                     <button
-                        key={tab.value}
-                        onClick={() => setMetric(tab.value)}
+                        key={tab}
+                        onClick={() => setMetric(tab)}
                         className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
-                            metric === tab.value
+                            metric === tab
                                 ? 'bg-white/20 text-white'
                                 : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70'
                         }`}
                     >
-                        {t(tab.i18nKey)}
+                        {TAB_LABELS[tab][lang]}
                     </button>
                 ))}
             </div>
