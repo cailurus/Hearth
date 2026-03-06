@@ -111,7 +111,7 @@ export function Modal({
                     )}
 
                     {/* 内容区域 */}
-                    <div className="max-h-[85vh] overflow-auto px-4 py-4">{children}</div>
+                    <div className="max-h-[85vh] overflow-auto scrollbar-thin px-4 py-4">{children}</div>
                 </div>
             </div>
         </div>

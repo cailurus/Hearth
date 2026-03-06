@@ -100,7 +100,7 @@ export function QuickLaunch({
                     </div>
 
                     {/* Results list */}
-                    <div ref={listRef} className="max-h-[50vh] overflow-auto py-1">
+                    <div ref={listRef} className="max-h-[50vh] overflow-auto scrollbar-thin py-1">
                         {results.length === 0 && query.trim() ? (
                             <div className="px-4 py-6 text-center text-sm text-white/50">
                                 {t('quickLaunchNoResults')}
