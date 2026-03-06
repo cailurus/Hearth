@@ -31,6 +31,7 @@ const WIDGET_TYPES: { kind: WidgetKind; labelKey: string }[] = [
     { kind: 'holidays', labelKey: 'widgets:upcomingHolidays' },
     { kind: 'docker', labelKey: 'widgets:docker' },
     { kind: 'notes', labelKey: 'widgets:notes' },
+    { kind: 'rss', labelKey: 'widgets:rss' },
 ]
 
 const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
@@ -41,6 +42,7 @@ const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
     timezones: null,
     docker: { refreshSec: 5 },
     notes: null,
+    rss: { feeds: ['https://hnrss.org/frontpage', 'https://github.blog/feed/'] },
 }
 
 function isValidUrl(str: string): boolean {
@@ -161,7 +163,8 @@ export function AddItemDialog({
                                     : kind === 'holidays' ? t('widgets:upcomingHolidays')
                                         : kind === 'docker' ? t('widgets:docker')
                                             : kind === 'notes' ? t('widgets:notes')
-                                                : kind
+                                                : kind === 'rss' ? t('widgets:rss')
+                                                    : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,

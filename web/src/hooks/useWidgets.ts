@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
-import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics } from '../types'
+import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics, RSSResponse } from '../types'
 import type { DockerResponse } from '../types/models'
 import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
 
@@ -24,6 +24,13 @@ export interface UseWidgetsResult {
     /** Docker data by widget ID */
     dockerById: Record<string, DockerResponse | null>
     dockerErrById: Record<string, string | null>
+    /** RSS data by widget ID */
+    rssById: Record<string, RSSResponse | null>
+    rssErrById: Record<string, string | null>
+    /** Trigger RSS refresh (bypass cache) */
+    refreshRss: () => void
+    /** Whether RSS is currently refreshing */
+    rssRefreshing: boolean
 }
 
 interface UseWidgetsOptions {
@@ -49,6 +56,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
 
     const [dockerById, setDockerById] = useState<Record<string, DockerResponse | null>>({})
     const [dockerErrById, setDockerErrById] = useState<Record<string, string | null>>({})
+
+    const [rssById, setRssById] = useState<Record<string, RSSResponse | null>>({})
+    const [rssErrById, setRssErrById] = useState<Record<string, string | null>>({})
+    const [rssRefreshSeq, setRssRefreshSeq] = useState(0)
+    const [rssRefreshing, setRssRefreshing] = useState(false)
 
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
@@ -331,6 +343,63 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
+    // Fetch RSS data
+    useEffect(() => {
+        let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'rss')
+        if (ws.length === 0) {
+            setRssById({})
+            setRssErrById({})
+            return
+        }
+
+        const isManualRefresh = rssRefreshSeq > 0
+
+        const run = async (useNoCache: boolean) => {
+            if (useNoCache) setRssRefreshing(true)
+
+            const next: Record<string, RSSResponse | null> = {}
+            const nextErr: Record<string, string | null> = {}
+
+            await Promise.all(
+                ws.map(async (a) => {
+                    const cfg = safeParseJSON(a.description)
+                    const rawFeeds = Array.isArray(cfg?.feeds) ? (cfg?.feeds as unknown[]) : []
+                    const feeds = rawFeeds.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
+                    if (feeds.length === 0) {
+                        next[a.id] = { fetchedAt: 0, items: [] }
+                        nextErr[a.id] = null
+                        return
+                    }
+                    try {
+                        const qs = new URLSearchParams()
+                        for (const f of feeds) qs.append('feed', f)
+                        if (useNoCache) qs.set('nocache', '1')
+                        const res = await apiGet<RSSResponse>(`/api/widgets/rss?${qs.toString()}`)
+                        next[a.id] = res
+                        nextErr[a.id] = null
+                    } catch (e) {
+                        next[a.id] = null
+                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
+                    }
+                })
+            )
+
+            if (!cancelled) {
+                setRssById(next)
+                setRssErrById(nextErr)
+                setRssRefreshing(false)
+            }
+        }
+
+        void run(isManualRefresh)
+        const id = window.setInterval(() => run(false), 15 * 60 * 1000)
+        return () => {
+            cancelled = true
+            window.clearInterval(id)
+        }
+    }, [apps, rssRefreshSeq])
+
     return {
         weather,
         weatherErr,
@@ -344,6 +413,10 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         netRate,
         dockerById,
         dockerErrById,
+        rssById,
+        rssErrById,
+        refreshRss: () => setRssRefreshSeq((n) => n + 1),
+        rssRefreshing,
     }
 }
 

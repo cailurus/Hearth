@@ -209,6 +209,7 @@ func (s *Server) buildRouter() chi.Router {
 	r.Head("/api/widgets/markets/icon", s.handleGetMarketIcon)
 	r.Get("/api/widgets/holidays", s.handleGetHolidays)
 	r.Get("/api/widgets/holidays/countries", s.handleListHolidayCountries)
+	r.Get("/api/widgets/rss", s.handleGetRSS)
 
 	// Host metrics are public (visitor dashboard).
 	r.Get("/api/metrics/host", s.handleGetHostMetrics)

@@ -70,5 +70,13 @@
     "metricsDisk": "磁盘",
     "metricsNet": "网络",
     "metricsUpload": "上传",
-    "metricsDownload": "下载"
+    "metricsDownload": "下载",
+    "rss": "RSS 订阅",
+    "rssFeedUrl": "订阅地址 (RSS/Atom)",
+    "rssAddFeed": "+ 添加订阅",
+    "rssRemoveFeed": "移除",
+    "rssNoItems": "暂无文章",
+    "rssSize": "组件高度",
+    "rssSizeNormal": "标准",
+    "rssSizeTall": "加高"
 }

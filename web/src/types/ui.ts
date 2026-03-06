@@ -5,7 +5,7 @@
 /**
  * Widget 类型
  */
-export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | 'docker' | 'notes'
+export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss'
 
 /**
  * 设置对话框标签页
@@ -62,6 +62,11 @@ export interface HolidaysConfig {
  */
 export interface TimezonesConfig {
     clocks: ClockConfig[]
+}
+
+export interface RSSConfig {
+    feeds: string[]
+    size?: 'normal' | 'tall'
 }
 
 /**

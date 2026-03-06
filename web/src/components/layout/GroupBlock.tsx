@@ -4,8 +4,8 @@
 
 import { useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
-import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather } from '../../types'
+import { Cog, Cpu, Download, HardDrive, MemoryStick, RefreshCw, Trash2, Upload } from 'lucide-react'
+import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather, RSSResponse } from '../../types'
 import type { DockerResponse } from '../../types/models'
 import { AppIcon } from '../cards/AppIcon'
 import { StatusDot } from '../ui/StatusDot'
@@ -15,6 +15,7 @@ import { HolidaysWidget } from '../widgets/HolidaysWidget'
 import { TimezonesWidget } from '../widgets/TimezonesWidget'
 import { DockerWidget } from '../widgets/DockerWidget'
 import { NotesWidget } from '../widgets/NotesWidget'
+import { RSSWidget } from '../widgets/RSSWidget'
 import { Spinner } from '../ui/Spinner'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -45,6 +46,11 @@ interface GroupBlockProps {
     statusMap?: Record<string, { status: string }>
     dockerById?: Record<string, DockerResponse | null>
     dockerErrById?: Record<string, string | null>
+    rssById?: Record<string, RSSResponse | null>
+    rssErrById?: Record<string, string | null>
+    refreshRss?: () => void
+    rssRefreshing?: boolean
+    lang?: 'zh' | 'en'
 }
 
 export function GroupBlock({
@@ -73,6 +79,11 @@ export function GroupBlock({
     statusMap,
     dockerById,
     dockerErrById,
+    rssById,
+    rssErrById,
+    refreshRss,
+    rssRefreshing,
+    lang = 'en',
 }: GroupBlockProps) {
     const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -193,8 +204,10 @@ export function GroupBlock({
                                             : ''
 
                             // Fixed height for all widgets to prevent layout shift during loading
-                            // All standard widgets use the same height for visual consistency
-                            const widgetHeightClass = 'h-[190px] sm:h-[210px]'
+                            const isRssTall = widget === 'rss' && cfg?.size === 'tall'
+                            const widgetHeightClass = isRssTall
+                                ? 'h-[392px] sm:h-[432px] row-span-2'
+                                : 'h-[190px] sm:h-[210px]'
 
                             const widgetPadClass = 'p-4'
 
@@ -205,13 +218,25 @@ export function GroupBlock({
                             return (
                                 <div
                                     key={a.id}
-                                    className={`group/card relative flex flex-col rounded-2xl border bg-black/40 ${widgetPadClass} transition-all duration-200 ease-out ${widgetCardClass} ${widgetHeightClass} ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30 border-dashed border-white/30 bg-white/5' : isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 border-white/10'}`}
+                                    className={`group/card relative flex flex-col overflow-hidden rounded-2xl border bg-black/40 ${widgetPadClass} transition-all duration-200 ease-out ${widgetCardClass} ${widgetHeightClass} ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30 border-dashed border-white/30 bg-white/5' : isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 border-white/10'}`}
                                     draggable={isAdmin}
                                     onDragStart={(e) => {
                                         if (!isAdmin) return
                                         draggingIdRef.current = a.id
                                         e.dataTransfer.effectAllowed = 'move'
                                         e.dataTransfer.setData('text/plain', a.id)
+                                        // Create a clipped drag ghost to avoid showing full scrollable content
+                                        const el = e.currentTarget
+                                        const ghost = el.cloneNode(true) as HTMLElement
+                                        ghost.style.width = `${el.offsetWidth}px`
+                                        ghost.style.height = `${el.offsetHeight}px`
+                                        ghost.style.overflow = 'hidden'
+                                        ghost.style.position = 'absolute'
+                                        ghost.style.top = '-9999px'
+                                        ghost.style.left = '-9999px'
+                                        document.body.appendChild(ghost)
+                                        e.dataTransfer.setDragImage(ghost, e.nativeEvent.offsetX, e.nativeEvent.offsetY)
+                                        setTimeout(() => document.body.removeChild(ghost), 0)
                                         // Delay state update so browser can capture drag image first
                                         setTimeout(() => {
                                             setDraggingId(a.id)
@@ -254,6 +279,20 @@ export function GroupBlock({
                                 >
                                     {isAdmin ? (
                                         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
+                                            {widget === 'rss' && refreshRss ? (
+                                                <button
+                                                    className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60 disabled:opacity-50"
+                                                    aria-label="refresh"
+                                                    title={lang === 'zh' ? '刷新' : 'Refresh'}
+                                                    disabled={rssRefreshing}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation()
+                                                        refreshRss()
+                                                    }}
+                                                >
+                                                    <RefreshCw className={`h-4 w-4 ${rssRefreshing ? 'animate-spin' : ''}`} />
+                                                </button>
+                                            ) : null}
                                             <button
                                                 className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
                                                 aria-label="edit"
@@ -291,7 +330,9 @@ export function GroupBlock({
                                                             ? t('widgets:docker')
                                                             : widget === 'notes'
                                                                 ? t('widgets:notes')
-                                                                : t('widgets:worldClock')}
+                                                                : widget === 'rss'
+                                                                    ? t('widgets:rss')
+                                                                    : t('widgets:worldClock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
@@ -353,6 +394,8 @@ export function GroupBlock({
                                             <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} isAdmin={isAdmin} />
                                         ) : widget === 'notes' ? (
                                             <NotesWidget isAdmin={isAdmin} />
+                                        ) : widget === 'rss' ? (
+                                            <RSSWidget data={rssById?.[a.id] || null} error={rssErrById?.[a.id] || null} lang={lang} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}

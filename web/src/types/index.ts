@@ -24,6 +24,8 @@ export type {
     DockerResponse,
     MetricsHistoryPoint,
     MetricsHistoryResponse,
+    RSSItem,
+    RSSResponse,
     Language,
     GroupKind,
     BackgroundProvider,
@@ -65,4 +67,5 @@ export type {
     DragState,
     NetRate,
     Position,
+    RSSConfig,
 } from './ui'

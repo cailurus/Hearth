@@ -311,12 +311,10 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	yahooRateWait()
 
 	yahooSym := toYahooSymbol(symbol, isCrypto)
-	chartRange := "3mo"
-	interval := "1d"
-	if isCrypto {
-		chartRange = "1d"
-		interval = "1h"
-	}
+	// Use 1-day range with 15-minute intervals for both stocks and crypto.
+	// This ensures the sparkline chart and change % both reflect the same trading day.
+	chartRange := "1d"
+	interval := "15m"
 
 	q := url.Values{}
 	q.Set("range", chartRange)
@@ -358,7 +356,6 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 					LongName           string  `json:"longName"`
 					RegularMarketPrice float64 `json:"regularMarketPrice"`
 					ChartPreviousClose float64 `json:"chartPreviousClose"`
-					PreviousClose      float64 `json:"previousClose"`
 				} `json:"meta"`
 				Indicators struct {
 					Quote []struct {
@@ -387,14 +384,6 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	meta := result.Meta
 
 	price := meta.RegularMarketPrice
-	prevClose := meta.PreviousClose
-	if prevClose == 0 {
-		prevClose = meta.ChartPreviousClose
-	}
-	changePct := 0.0
-	if prevClose > 0 {
-		changePct = (price - prevClose) / prevClose * 100
-	}
 
 	name := strings.TrimSpace(meta.LongName)
 	if name == "" {
@@ -422,10 +411,15 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 		}
 	}
 
-	maxPoints := 30
-	if isCrypto {
-		maxPoints = 24
+	// With range=1d, chartPreviousClose is the previous trading day's close.
+	// This gives us the standard daily change percentage.
+	changePct := 0.0
+	prevClose := meta.ChartPreviousClose
+	if prevClose > 0 && price > 0 {
+		changePct = (price - prevClose) / prevClose * 100
 	}
+
+	maxPoints := 30
 	series := downsampleTail(closes, maxPoints)
 
 	return MarketQuote{

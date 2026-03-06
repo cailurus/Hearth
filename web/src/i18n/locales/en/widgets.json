@@ -70,5 +70,13 @@
     "metricsDisk": "Disk",
     "metricsNet": "Network",
     "metricsUpload": "Upload",
-    "metricsDownload": "Download"
+    "metricsDownload": "Download",
+    "rss": "RSS Feed",
+    "rssFeedUrl": "Feed URL (RSS/Atom)",
+    "rssAddFeed": "+ Add Feed",
+    "rssRemoveFeed": "Remove",
+    "rssNoItems": "No articles yet",
+    "rssSize": "Widget height",
+    "rssSizeNormal": "Normal",
+    "rssSizeTall": "Tall"
 }

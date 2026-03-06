@@ -39,7 +39,7 @@ interface EditItemDialogProps {
     onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
-    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | null
+    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | null
     // Widget save callback (for weather, timezones, markets)
     onSaveWidget?: () => Promise<void>
     widgetSaving?: boolean
@@ -77,6 +77,11 @@ interface EditItemDialogProps {
     // Docker
     dRefreshSec: 5 | 10 | 30
     setDRefreshSec: (v: 5 | 10 | 30) => void
+    // RSS
+    rssFeeds: string[]
+    setRssFeeds: React.Dispatch<React.SetStateAction<string[]>>
+    rssSize: 'normal' | 'tall'
+    setRssSize: (v: 'normal' | 'tall') => void
 }
 
 export function EditItemDialog({
@@ -132,6 +137,10 @@ export function EditItemDialog({
     resolveCityToTimezoneEn,
     dRefreshSec,
     setDRefreshSec,
+    rssFeeds,
+    setRssFeeds,
+    rssSize,
+    setRssSize,
 }: EditItemDialogProps) {
     const { t } = useTranslation(['home', 'common', 'widgets', 'settings'])
 
@@ -318,6 +327,65 @@ export function EditItemDialog({
                                         </select>
                                     </label>
                                 </div>
+                            </div>
+                        ) : widgetKind === 'rss' ? (
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:rss')}</div>
+                                    <div className="mb-3">
+                                        <div className="mb-1 text-sm text-white/70">{t('widgets:rssSize')}</div>
+                                        <div className="flex gap-1.5">
+                                            <button type="button" onClick={() => setRssSize('normal')}
+                                                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${rssSize === 'normal' ? 'bg-white/20 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>
+                                                {t('widgets:rssSizeNormal')}
+                                            </button>
+                                            <button type="button" onClick={() => setRssSize('tall')}
+                                                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${rssSize === 'tall' ? 'bg-white/20 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>
+                                                {t('widgets:rssSizeTall')}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        {rssFeeds.map((feed, idx) => (
+                                            <div key={idx} className="flex gap-2">
+                                                <input
+                                                    value={feed}
+                                                    onChange={(e) => {
+                                                        const next = [...rssFeeds]
+                                                        next[idx] = e.target.value
+                                                        setRssFeeds(next)
+                                                    }}
+                                                    placeholder={t('widgets:rssFeedUrl')}
+                                                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRssFeeds(rssFeeds.filter((_, i) => i !== idx))}
+                                                    className="shrink-0 rounded-lg bg-white/10 px-2 py-2 text-xs text-white/70 hover:bg-red-500/30 hover:text-white"
+                                                >
+                                                    {t('widgets:rssRemoveFeed')}
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {rssFeeds.length < 10 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setRssFeeds([...rssFeeds, ''])}
+                                                className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white/70 hover:bg-white/20 hover:text-white"
+                                            >
+                                                {t('widgets:rssAddFeed')}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={widgetSaving}
+                                    onClick={() => onSaveWidget?.()}
+                                    className="flex items-center justify-center rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 min-w-[64px]"
+                                >
+                                    {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
+                                </button>
                             </div>
                         ) : widgetKind === 'notes' ? (
                             <div className="space-y-4">

@@ -191,6 +191,20 @@ export interface MetricsHistoryResponse {
     points: MetricsHistoryPoint[]
 }
 
+// ============ RSS 订阅 ============
+
+export interface RSSItem {
+    title: string
+    link: string
+    source: string
+    publishedAt: number
+}
+
+export interface RSSResponse {
+    fetchedAt: number
+    items: RSSItem[]
+}
+
 // ============ 枚举类型 ============
 
 export type Language = 'zh' | 'en' | string

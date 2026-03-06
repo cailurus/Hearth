@@ -115,6 +115,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         netRate,
         dockerById,
         dockerErrById,
+        rssById,
+        rssErrById,
+        refreshRss,
+        rssRefreshing,
     } = useWidgets({
         apps,
         lang,
@@ -414,6 +418,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         statusMap={statusMap}
                                         dockerById={dockerById}
                                         dockerErrById={dockerErrById}
+                                        rssById={rssById}
+                                        rssErrById={rssErrById}
+                                        refreshRss={refreshRss}
+                                        rssRefreshing={rssRefreshing}
+                                        lang={lang}
                                     />
                                 )
                             }
@@ -474,6 +483,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         statusMap={statusMap}
                                         dockerById={dockerById}
                                         dockerErrById={dockerErrById}
+                                        rssById={rssById}
+                                        rssErrById={rssErrById}
+                                        refreshRss={refreshRss}
+                                        rssRefreshing={rssRefreshing}
+                                        lang={lang}
                                     />
                                 </div>
                             )

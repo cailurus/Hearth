@@ -542,3 +542,28 @@ func (s *Server) handleListHolidayCountries(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
+
+func (s *Server) handleGetRSS(w http.ResponseWriter, r *http.Request) {
+	feeds := r.URL.Query()["feed"]
+	var valid []string
+	for _, f := range feeds {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !strings.HasPrefix(f, "http://") && !strings.HasPrefix(f, "https://") {
+			continue
+		}
+		valid = append(valid, f)
+		if len(valid) >= 10 {
+			break
+		}
+	}
+
+	noCache := strings.TrimSpace(r.URL.Query().Get("nocache")) == "1"
+	res, err := widgets.FetchRSSFeeds(r.Context(), valid, 8, noCache)
+	if err != nil {
+		log.Printf("[rss] fetch: %v", err)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
