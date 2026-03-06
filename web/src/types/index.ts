@@ -22,6 +22,8 @@ export type {
     HolidayCountry,
     DockerContainer,
     DockerResponse,
+    MetricsHistoryPoint,
+    MetricsHistoryResponse,
     Language,
     GroupKind,
     BackgroundProvider,

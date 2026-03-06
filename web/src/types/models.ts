@@ -175,6 +175,22 @@ export interface DockerResponse {
     error?: string
 }
 
+// ============ 指标历史 ============
+
+export interface MetricsHistoryPoint {
+    ts: number
+    cpuPercent: number
+    memPercent: number
+    diskPercent: number
+    netSendRate: number
+    netRecvRate: number
+}
+
+export interface MetricsHistoryResponse {
+    period: string
+    points: MetricsHistoryPoint[]
+}
+
 // ============ 枚举类型 ============
 
 export type Language = 'zh' | 'en' | string

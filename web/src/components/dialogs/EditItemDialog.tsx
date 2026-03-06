@@ -9,6 +9,7 @@ import { Spinner } from '../ui/Spinner'
 import { CityPicker } from '../pickers/CityPicker'
 import { MarketSymbolPicker } from '../pickers/MarketSymbolPicker'
 import { HolidayCountryTags } from '../pickers/HolidayCountryTags'
+import { MetricsHistoryPanel } from '../widgets/MetricsHistoryPanel'
 import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
 import { Image as ImageIcon, Loader2 } from 'lucide-react'
 import type { AppItem } from '../../types'
@@ -216,28 +217,31 @@ export function EditItemDialog({
                                 </button>
                             </div>
                         ) : widgetKind === 'metrics' ? (
-                            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:systemStatus')}</div>
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                    <label className="block text-sm">
-                                        <div className="mb-1 text-white/70">{t('widgets:refreshInterval')}</div>
-                                        <select
-                                            value={mRefreshSec}
-                                            onChange={(e) => setMRefreshSec((Number(e.target.value) === 5 ? 5 : Number(e.target.value) === 10 ? 10 : 1) as 1 | 5 | 10)}
-                                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                                        >
-                                            <option value={1}>{t('widgets:refreshSec1')}</option>
-                                            <option value={5}>{t('widgets:refreshSec5')}</option>
-                                            <option value={10}>{t('widgets:refreshSec10')}</option>
-                                        </select>
-                                    </label>
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:systemStatus')}</div>
+                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <label className="block text-sm">
+                                            <div className="mb-1 text-white/70">{t('widgets:refreshInterval')}</div>
+                                            <select
+                                                value={mRefreshSec}
+                                                onChange={(e) => setMRefreshSec((Number(e.target.value) === 5 ? 5 : Number(e.target.value) === 10 ? 10 : 1) as 1 | 5 | 10)}
+                                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                            >
+                                                <option value={1}>{t('widgets:refreshSec1')}</option>
+                                                <option value={5}>{t('widgets:refreshSec5')}</option>
+                                                <option value={10}>{t('widgets:refreshSec10')}</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-3 text-sm">
+                                        <label className="flex items-center gap-2"><input type="checkbox" checked={mShowCpu} onChange={(e) => setMShowCpu(e.target.checked)} />{t('widgets:cpu')}</label>
+                                        <label className="flex items-center gap-2"><input type="checkbox" checked={mShowMem} onChange={(e) => setMShowMem(e.target.checked)} />{t('widgets:memory')}</label>
+                                        <label className="flex items-center gap-2"><input type="checkbox" checked={mShowDisk} onChange={(e) => setMShowDisk(e.target.checked)} />{t('widgets:disk')}</label>
+                                        <label className="flex items-center gap-2"><input type="checkbox" checked={mShowNet} onChange={(e) => setMShowNet(e.target.checked)} />{t('widgets:network')}</label>
+                                    </div>
                                 </div>
-                                <div className="mt-3 flex flex-wrap gap-3 text-sm">
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowCpu} onChange={(e) => setMShowCpu(e.target.checked)} />{t('widgets:cpu')}</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowMem} onChange={(e) => setMShowMem(e.target.checked)} />{t('widgets:memory')}</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowDisk} onChange={(e) => setMShowDisk(e.target.checked)} />{t('widgets:disk')}</label>
-                                    <label className="flex items-center gap-2"><input type="checkbox" checked={mShowNet} onChange={(e) => setMShowNet(e.target.checked)} />{t('widgets:network')}</label>
-                                </div>
+                                <MetricsHistoryPanel />
                             </div>
                         ) : widgetKind === 'markets' ? (
                             <div className="space-y-4">

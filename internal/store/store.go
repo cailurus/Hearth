@@ -80,6 +80,16 @@ func (s *Store) Migrate() error {
 			created_at INTEGER NOT NULL,
 			updated_at INTEGER NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS metrics_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			cpu_percent REAL NOT NULL DEFAULT 0,
+			mem_percent REAL NOT NULL DEFAULT 0,
+			disk_percent REAL NOT NULL DEFAULT 0,
+			net_bytes_sent INTEGER NOT NULL DEFAULT 0,
+			net_bytes_recv INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_metrics_history_ts ON metrics_history(ts);`,
 	}
 
 	for _, stmt := range stmts {

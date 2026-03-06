@@ -62,5 +62,13 @@
     "dockerStart": "启动",
     "dockerStop": "停止",
     "dockerRestart": "重启",
-    "notes": "便签"
+    "notes": "便签",
+    "metricsHistory": "历史趋势",
+    "metricsNoData": "暂无历史数据",
+    "metricsCpu": "CPU",
+    "metricsMem": "内存",
+    "metricsDisk": "磁盘",
+    "metricsNet": "网络",
+    "metricsUpload": "上传",
+    "metricsDownload": "下载"
 }

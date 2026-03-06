@@ -62,5 +62,13 @@
     "dockerStart": "Start",
     "dockerStop": "Stop",
     "dockerRestart": "Restart",
-    "notes": "Notes"
+    "notes": "Notes",
+    "metricsHistory": "History",
+    "metricsNoData": "No historical data yet",
+    "metricsCpu": "CPU",
+    "metricsMem": "Memory",
+    "metricsDisk": "Disk",
+    "metricsNet": "Network",
+    "metricsUpload": "Upload",
+    "metricsDownload": "Download"
 }

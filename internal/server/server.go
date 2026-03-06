@@ -19,6 +19,7 @@ import (
 	"github.com/morezhou/hearth/internal/background"
 	"github.com/morezhou/hearth/internal/docker"
 	"github.com/morezhou/hearth/internal/icon"
+	"github.com/morezhou/hearth/internal/metrics"
 	"github.com/morezhou/hearth/internal/store"
 )
 
@@ -35,8 +36,9 @@ type Server struct {
 	store        *store.Store
 	auth         *auth.Service
 	iconResolver *icon.Resolver
-	bgSvc        *background.Service
-	dockerClient *docker.Client
+	bgSvc            *background.Service
+	dockerClient     *docker.Client
+	metricsCollector *metrics.Collector
 }
 
 func New(cfg Config) (*Server, error) {
@@ -94,7 +96,9 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	dockerClient := docker.New(cfg.DockerSocket)
-	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc, dockerClient: dockerClient}
+	mc := metrics.NewCollector(db)
+	mc.Start()
+	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc, dockerClient: dockerClient, metricsCollector: mc}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
 	}
@@ -106,6 +110,7 @@ func (s *Server) Router() http.Handler { return s.router }
 
 // Close releases resources held by the server (database, background goroutines).
 func (s *Server) Close() error {
+	s.metricsCollector.Stop()
 	s.auth.Stop()
 	return s.db.Close()
 }
@@ -207,6 +212,7 @@ func (s *Server) buildRouter() chi.Router {
 
 	// Host metrics are public (visitor dashboard).
 	r.Get("/api/metrics/host", s.handleGetHostMetrics)
+	r.Get("/api/metrics/history", s.handleGetMetricsHistory)
 	r.Get("/api/widgets/docker", s.handleGetDocker)
 	r.With(s.requireAdmin).Post("/api/widgets/docker/{id}/{action}", s.handleDockerAction)
 
