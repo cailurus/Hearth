@@ -58,5 +58,9 @@
     "dockerMemUsage": "内存使用",
     "dockerNetwork": "网络",
     "dockerDetails": "容器详情",
-    "refreshSec30": "30 秒"
+    "refreshSec30": "30 秒",
+    "dockerStart": "启动",
+    "dockerStop": "停止",
+    "dockerRestart": "重启",
+    "notes": "便签"
 }

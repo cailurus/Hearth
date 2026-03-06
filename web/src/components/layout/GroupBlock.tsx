@@ -14,6 +14,7 @@ import { MarketsWidget } from '../widgets/MarketsWidget'
 import { HolidaysWidget } from '../widgets/HolidaysWidget'
 import { TimezonesWidget } from '../widgets/TimezonesWidget'
 import { DockerWidget } from '../widgets/DockerWidget'
+import { NotesWidget } from '../widgets/NotesWidget'
 import { Spinner } from '../ui/Spinner'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -288,7 +289,9 @@ export function GroupBlock({
                                                         ? t('widgets:upcomingHolidays')
                                                         : widget === 'docker'
                                                             ? t('widgets:docker')
-                                                            : t('widgets:worldClock')}
+                                                            : widget === 'notes'
+                                                                ? t('widgets:notes')
+                                                                : t('widgets:worldClock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
@@ -347,7 +350,9 @@ export function GroupBlock({
                                         ) : widget === 'holidays' ? (
                                             <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
                                         ) : widget === 'docker' ? (
-                                            <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} />
+                                            <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} isAdmin={isAdmin} />
+                                        ) : widget === 'notes' ? (
+                                            <NotesWidget isAdmin={isAdmin} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}

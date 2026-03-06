@@ -30,6 +30,7 @@ const WIDGET_TYPES: { kind: WidgetKind; labelKey: string }[] = [
     { kind: 'markets', labelKey: 'widgets:markets' },
     { kind: 'holidays', labelKey: 'widgets:upcomingHolidays' },
     { kind: 'docker', labelKey: 'widgets:docker' },
+    { kind: 'notes', labelKey: 'widgets:notes' },
 ]
 
 const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
@@ -39,6 +40,7 @@ const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
     holidays: { countries: ['CN', 'US'] },
     timezones: null,
     docker: { refreshSec: 5 },
+    notes: null,
 }
 
 function isValidUrl(str: string): boolean {
@@ -158,7 +160,8 @@ export function AddItemDialog({
                                 : kind === 'markets' ? t('widgets:markets')
                                     : kind === 'holidays' ? t('widgets:upcomingHolidays')
                                         : kind === 'docker' ? t('widgets:docker')
-                                            : kind
+                                            : kind === 'notes' ? t('widgets:notes')
+                                                : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
@@ -285,7 +288,8 @@ export function AddItemDialog({
                                             : widget.kind === 'markets' ? t('widgets:markets')
                                                 : widget.kind === 'holidays' ? t('widgets:upcomingHolidays')
                                                     : widget.kind === 'docker' ? t('widgets:docker')
-                                                        : widget.kind}
+                                                        : widget.kind === 'notes' ? t('widgets:notes')
+                                                            : widget.kind}
                             </div>
                         </button>
                     ))}

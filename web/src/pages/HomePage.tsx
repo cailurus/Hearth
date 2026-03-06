@@ -538,6 +538,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 bgRefreshErr={bgRefresh.error}
                 refreshBackground={bgRefresh.refresh}
                 onLogout={onLogout}
+                onReload={actions.reload}
                 currentVersion={versionCheck.currentVersion}
                 latestVersion={versionCheck.latestVersion}
                 hasUpdate={versionCheck.hasUpdate}

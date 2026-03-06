@@ -8,9 +8,10 @@ import { DockerDetailModal } from './DockerDetailModal'
 interface DockerWidgetProps {
     data: DockerResponse | null
     error?: string | null
+    isAdmin?: boolean
 }
 
-export function DockerWidget({ data, error }: DockerWidgetProps) {
+export function DockerWidget({ data, error, isAdmin }: DockerWidgetProps) {
     const { t } = useTranslation('widgets')
     const [detailOpen, setDetailOpen] = useState(false)
 
@@ -90,6 +91,7 @@ export function DockerWidget({ data, error }: DockerWidgetProps) {
                 open={detailOpen}
                 onClose={() => setDetailOpen(false)}
                 data={data}
+                isAdmin={!!isAdmin}
             />
         </>
     )

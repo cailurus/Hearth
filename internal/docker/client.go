@@ -279,6 +279,28 @@ func (s *statsResponse) network() (rx, tx uint64) {
 	return
 }
 
+// ContainerAction sends a start/stop/restart command to a container.
+func (c *Client) ContainerAction(ctx context.Context, containerID, action string) error {
+	if !c.Available() {
+		return fmt.Errorf("docker not available")
+	}
+	endpoint := fmt.Sprintf("http://localhost/containers/%s/%s", containerID, action)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("docker %s: status %d: %s", action, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
 // ── HTTP helpers ─────────────────────────────────────────────────
 
 func (c *Client) listContainers(ctx context.Context) ([]containerListEntry, error) {

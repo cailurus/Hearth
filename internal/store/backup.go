@@ -11,6 +11,7 @@ type Export struct {
 	Settings map[string]string `json:"settings"`
 	Groups   []Group           `json:"groups"`
 	Apps     []AppItem         `json:"apps"`
+	Notes    []Note            `json:"notes,omitempty"`
 }
 
 func (s *Store) ExportAll() (Export, error) {
@@ -40,12 +41,18 @@ func (s *Store) ExportAll() (Export, error) {
 		return Export{}, err
 	}
 
+	notes, err := s.ListNotes()
+	if err != nil {
+		return Export{}, err
+	}
+
 	return Export{
 		Version:  2,
 		Exported: time.Now().Unix(),
 		Settings: settings,
 		Groups:   groups,
 		Apps:     apps,
+		Notes:    notes,
 	}, nil
 }
 
@@ -81,6 +88,16 @@ func (s *Store) ImportAll(payload Export) error {
 		_, err := tx.Exec(`INSERT INTO apps (id, group_id, name, description, url, icon_path, icon_source, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET group_id=excluded.group_id, name=excluded.name, description=excluded.description, url=excluded.url, icon_path=excluded.icon_path, icon_source=excluded.icon_source, sort_order=excluded.sort_order`,
 			a.ID, a.GroupID, a.Name, a.Description, a.URL, a.IconPath, a.IconSource, a.SortOrder, a.CreatedAt)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Notes
+	for _, n := range payload.Notes {
+		_, err := tx.Exec(`INSERT INTO notes (id, title, content, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET title=excluded.title, content=excluded.content, sort_order=excluded.sort_order, updated_at=excluded.updated_at`,
+			n.ID, n.Title, n.Content, n.SortOrder, n.CreatedAt, n.UpdatedAt)
 		if err != nil {
 			return err
 		}

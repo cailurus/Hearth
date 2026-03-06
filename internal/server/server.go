@@ -208,6 +208,13 @@ func (s *Server) buildRouter() chi.Router {
 	// Host metrics are public (visitor dashboard).
 	r.Get("/api/metrics/host", s.handleGetHostMetrics)
 	r.Get("/api/widgets/docker", s.handleGetDocker)
+	r.With(s.requireAdmin).Post("/api/widgets/docker/{id}/{action}", s.handleDockerAction)
+
+	// Notes require admin.
+	r.With(s.requireAdmin).Get("/api/notes", s.handleListNotes)
+	r.With(s.requireAdmin).Post("/api/notes", s.handleCreateNote)
+	r.With(s.requireAdmin).Put("/api/notes/{id}", s.handleUpdateNote)
+	r.With(s.requireAdmin).Delete("/api/notes/{id}", s.handleDeleteNote)
 
 	// Import/export requires admin.
 	r.With(s.requireAdmin).Get("/api/export", s.handleExport)

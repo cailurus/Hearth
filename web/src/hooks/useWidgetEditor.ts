@@ -16,7 +16,7 @@ import {
 } from '../utils'
 import { useCitySearch } from './useCitySearch'
 
-type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | null
+type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | null
 
 interface UseWidgetEditorOptions {
     isAdmin: boolean

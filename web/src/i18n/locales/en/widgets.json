@@ -58,5 +58,9 @@
     "dockerMemUsage": "Memory Usage",
     "dockerNetwork": "Network",
     "dockerDetails": "Container Details",
-    "refreshSec30": "30s"
+    "refreshSec30": "30s",
+    "dockerStart": "Start",
+    "dockerStop": "Stop",
+    "dockerRestart": "Restart",
+    "notes": "Notes"
 }

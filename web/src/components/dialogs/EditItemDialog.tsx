@@ -38,7 +38,7 @@ interface EditItemDialogProps {
     onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
-    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | null
+    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | null
     // Widget save callback (for weather, timezones, markets)
     onSaveWidget?: () => Promise<void>
     widgetSaving?: boolean
@@ -132,7 +132,7 @@ export function EditItemDialog({
     dRefreshSec,
     setDRefreshSec,
 }: EditItemDialogProps) {
-    const { t } = useTranslation(['home', 'common', 'widgets'])
+    const { t } = useTranslation(['home', 'common', 'widgets', 'settings'])
 
     // Lucide icon picker state
     const [showIconPicker, setShowIconPicker] = useState(false)
@@ -313,6 +313,58 @@ export function EditItemDialog({
                                             <option value={30}>{t('widgets:refreshSec30')}</option>
                                         </select>
                                     </label>
+                                </div>
+                            </div>
+                        ) : widgetKind === 'notes' ? (
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:notes')}</div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    const { apiGet } = await import('../../api')
+                                                    const notes = await apiGet<Array<{ title: string; content: string }>>('/api/notes')
+                                                    if (!Array.isArray(notes) || notes.length === 0) return
+                                                    const md = notes.map((n) => `# ${n.title}\n\n${n.content}`).join('\n\n---\n\n')
+                                                    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+                                                    const url = URL.createObjectURL(blob)
+                                                    const a = document.createElement('a')
+                                                    a.href = url
+                                                    a.download = `hearth-notes-${new Date().toISOString().slice(0, 10)}.md`
+                                                    a.click()
+                                                    URL.revokeObjectURL(url)
+                                                } catch { /* ignore */ }
+                                            }}
+                                            className="rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20"
+                                        >
+                                            {t('settings:export')}
+                                        </button>
+                                        <label className="inline-flex cursor-pointer items-center rounded-lg bg-white/10 px-3 py-2 text-sm hover:bg-white/20">
+                                            {t('settings:import')}
+                                            <input
+                                                type="file"
+                                                accept=".md,.markdown,.txt"
+                                                multiple
+                                                className="hidden"
+                                                onChange={async (e) => {
+                                                    const files = e.target.files
+                                                    if (!files || files.length === 0) return
+                                                    e.target.value = ''
+                                                    const { apiPost } = await import('../../api')
+                                                    for (const file of Array.from(files)) {
+                                                        try {
+                                                            const text = await file.text()
+                                                            const title = file.name.replace(/\.(md|markdown|txt)$/i, '')
+                                                            await apiPost('/api/notes', { title, content: text })
+                                                        } catch { /* skip */ }
+                                                    }
+                                                    window.location.reload()
+                                                }}
+                                            />
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
                         ) : (

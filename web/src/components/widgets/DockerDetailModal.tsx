@@ -1,12 +1,16 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui/Modal'
+import { Spinner } from '../ui/Spinner'
 import type { DockerResponse } from '../../types/models'
 import { formatGiB } from '../../utils'
+import { apiPost } from '../../api'
 
 interface DockerDetailModalProps {
     open: boolean
     onClose: () => void
     data: DockerResponse
+    isAdmin: boolean
 }
 
 function formatBytes(bytes: number): string {
@@ -16,8 +20,20 @@ function formatBytes(bytes: number): string {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
-export function DockerDetailModal({ open, onClose, data }: DockerDetailModalProps) {
+export function DockerDetailModal({ open, onClose, data, isAdmin }: DockerDetailModalProps) {
     const { t } = useTranslation(['widgets', 'common'])
+    const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({})
+
+    const doAction = async (containerId: string, action: string) => {
+        setActionLoading((prev) => ({ ...prev, [`${containerId}-${action}`]: true }))
+        try {
+            await apiPost(`/api/widgets/docker/${containerId}/${action}`)
+        } catch {
+            // ignore — next poll will show the result
+        } finally {
+            setActionLoading((prev) => ({ ...prev, [`${containerId}-${action}`]: false }))
+        }
+    }
 
     const statusDotColor = (status: string) => {
         switch (status) {
@@ -40,6 +56,19 @@ export function DockerDetailModal({ open, onClose, data }: DockerDetailModalProp
         return (order[a.status] ?? 3) - (order[b.status] ?? 3)
     })
 
+    const ActionBtn = ({ cid, action, label }: { cid: string; action: string; label: string }) => {
+        const loading = actionLoading[`${cid}-${action}`]
+        return (
+            <button
+                onClick={(e) => { e.stopPropagation(); doAction(cid, action) }}
+                disabled={loading}
+                className="rounded bg-white/10 px-2 py-0.5 text-[10px] text-white/70 hover:bg-white/20 disabled:opacity-40"
+            >
+                {loading ? <Spinner size="sm" className="h-3 w-3" /> : label}
+            </button>
+        )
+    }
+
     return (
         <Modal
             open={open}
@@ -54,8 +83,20 @@ export function DockerDetailModal({ open, onClose, data }: DockerDetailModalProp
                     <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                         <div className="flex items-center gap-2 mb-1.5">
                             <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${statusDotColor(c.status)}`} />
-                            <span className="font-medium text-sm text-white/90 truncate">{c.name}</span>
+                            <span className="font-medium text-sm text-white/90 truncate flex-1">{c.name}</span>
                             <span className="text-[11px] text-white/40 shrink-0">{statusLabel(c.status)}</span>
+                            {isAdmin ? (
+                                <div className="flex gap-1 shrink-0">
+                                    {c.status === 'running' ? (
+                                        <>
+                                            <ActionBtn cid={c.id} action="stop" label={t('widgets:dockerStop')} />
+                                            <ActionBtn cid={c.id} action="restart" label={t('widgets:dockerRestart')} />
+                                        </>
+                                    ) : (
+                                        <ActionBtn cid={c.id} action="start" label={t('widgets:dockerStart')} />
+                                    )}
+                                </div>
+                            ) : null}
                         </div>
                         <div className="text-[11px] text-white/40 mb-2 truncate">{c.image}</div>
                         {c.status === 'running' ? (

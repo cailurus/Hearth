@@ -46,5 +46,14 @@
     "showGreeting": "显示问候语",
     "version": "当前版本",
     "updateAvailable": "{{version}} 可用",
-    "upToDate": "已是最新"
+    "upToDate": "已是最新",
+    "data": "数据",
+    "exportData": "导出数据",
+    "exportHint": "导出所有应用、分组和设置",
+    "export": "导出",
+    "importData": "导入数据",
+    "importHint": "从备份文件恢复，将覆盖现有数据",
+    "import": "导入",
+    "importSuccess": "导入成功",
+    "importFailed": "导入失败"
 }

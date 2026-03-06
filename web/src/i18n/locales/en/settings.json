@@ -46,5 +46,14 @@
     "showGreeting": "Show greeting",
     "version": "Version",
     "updateAvailable": "{{version}} available",
-    "upToDate": "Up to date"
+    "upToDate": "Up to date",
+    "data": "Data",
+    "exportData": "Export Data",
+    "exportHint": "Export all apps, groups, and settings",
+    "export": "Export",
+    "importData": "Import Data",
+    "importHint": "Restore from backup. This will overwrite existing data.",
+    "import": "Import",
+    "importSuccess": "Import successful",
+    "importFailed": "Import failed"
 }
