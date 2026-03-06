@@ -387,9 +387,9 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	meta := result.Meta
 
 	price := meta.RegularMarketPrice
-	prevClose := meta.ChartPreviousClose
+	prevClose := meta.PreviousClose
 	if prevClose == 0 {
-		prevClose = meta.PreviousClose
+		prevClose = meta.ChartPreviousClose
 	}
 	changePct := 0.0
 	if prevClose > 0 {
