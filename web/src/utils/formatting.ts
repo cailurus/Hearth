@@ -136,7 +136,16 @@ export function shortenCpuModelName(model: string): string {
     }
 
     if (isAmd) {
-        const ryzen = s.match(/\bRyzen(?:\s+Threadripper)?\s+\d\s+\d{3,4}[A-Za-z0-9]{0,3}\b/i)
+        // Ryzen AI series: "Ryzen AI 9 HX 375", "Ryzen AI 7 PRO 360"
+        const ryzenAI = s.match(/\bRyzen\s+AI\s+\d[\w\s]{0,12}/i)
+        if (ryzenAI) return `AMD ${ryzenAI[0].trim()}`
+
+        // Ryzen Threadripper: "Ryzen Threadripper 7980X"
+        const threadripper = s.match(/\bRyzen\s+Threadripper(?:\s+PRO)?\s+\w+/i)
+        if (threadripper) return `AMD ${threadripper[0].trim()}`
+
+        // Ryzen standard: "Ryzen 9 5950X", "Ryzen 5 7600X"
+        const ryzen = s.match(/\bRyzen\s+\d\s+(?:PRO\s+)?\d{3,4}[A-Za-z0-9]{0,3}\b/i)
         if (ryzen) return `AMD ${ryzen[0]}`
 
         const epyc = s.match(/\bEPYC\s+\d{4}[A-Za-z0-9]{0,3}\b/i)
@@ -145,6 +154,12 @@ export function shortenCpuModelName(model: string): string {
         const athlon = s.match(/\bAthlon\s+\w+(?:\s+\w+)?\b/i)
         if (athlon) return `AMD ${athlon[0]}`
 
+        // Fallback: keep AMD + next few meaningful tokens
+        const amdIdx = lower.indexOf('amd')
+        if (amdIdx >= 0) {
+            const rest = s.slice(amdIdx).split(' ').filter(Boolean).slice(0, 5).join(' ')
+            if (rest.length > 4) return rest
+        }
         return 'AMD'
     }
 

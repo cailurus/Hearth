@@ -41,19 +41,33 @@ function formatCpuModel(model: string | undefined, compact: boolean = false): st
     }
 
     // 检测 AMD 处理器
-    const amdMatch = cleaned.match(/AMD\s*(Ryzen)?\s*([3579])?\s*(\d{4}[A-Z]?[^\s]*)?/i)
-    if (amdMatch) {
-        const isRyzen = !!amdMatch[1]
-        const tier = amdMatch[2] || ''
-        const modelNum = amdMatch[3] || ''
+    // Ryzen AI: "AMD Ryzen AI 9 HX 375"
+    const ryzenAI = cleaned.match(/AMD\s+Ryzen\s+AI\s+\d[\w\s]{0,12}/i)
+    if (ryzenAI) {
+        const full = ryzenAI[0].trim()
         if (compact) {
-            // 超短版: R9 5950X
-            return isRyzen ? `R${tier} ${modelNum}`.trim() : `AMD ${modelNum}`.trim()
+            // "Ryzen AI 9 HX 375" → "AI 9 HX 375"
+            return full.replace(/^AMD\s+Ryzen\s+/i, '').trim()
         }
-        // 精简版: AMD Ryzen 9 5950X
-        return isRyzen
-            ? `AMD Ryzen ${tier} ${modelNum}`.replace(/\s+/g, ' ').trim()
-            : `AMD ${modelNum}`.trim()
+        return full
+    }
+
+    const amdMatch = cleaned.match(/AMD\s*(Ryzen(?:\s+Threadripper)?|EPYC|Athlon)?\s*(PRO\s+)?([3579])?\s*(\d{3,5}[A-Za-z0-9]{0,3})?/i)
+    if (amdMatch) {
+        const series = (amdMatch[1] || '').trim()
+        const pro = (amdMatch[2] || '').trim()
+        const tier = amdMatch[3] || ''
+        const modelNum = amdMatch[4] || ''
+        const isRyzen = /ryzen/i.test(series)
+
+        if (compact) {
+            if (isRyzen && tier && modelNum) return `R${tier} ${pro}${modelNum}`.trim()
+            if (modelNum) return `AMD ${modelNum}`
+            if (series) return `AMD ${series}`
+        }
+        const parts = ['AMD', series, pro, tier, modelNum].filter(Boolean)
+        const result = parts.join(' ').replace(/\s+/g, ' ').trim()
+        return result || 'AMD'
     }
 
     // Apple Silicon

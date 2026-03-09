@@ -78,7 +78,7 @@ export function DockerDetailModal({ open, onClose, data, isAdmin }: DockerDetail
             maxWidthClass="max-w-2xl"
             containerClassName="items-start pt-[10vh] sm:pt-[14vh]"
         >
-            <div className="space-y-2">
+            <div className="scrollbar-thin max-h-[50vh] space-y-2 overflow-y-auto">
                 {sorted.map((c) => (
                     <div key={c.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
                         <div className="flex items-center gap-2 mb-1.5">
