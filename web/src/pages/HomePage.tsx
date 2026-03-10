@@ -252,7 +252,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 openContextMenu(e.clientX, e.clientY)
             }}
         >
-            <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+            <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-black">
                 {isVideoBackground ? (
                     <>
                         {videoReady && videoUrl ? (
