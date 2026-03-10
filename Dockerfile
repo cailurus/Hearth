@@ -6,8 +6,8 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-# Build backend (must satisfy go.mod `go 1.24.0`)
-FROM golang:1.24-alpine AS gobuild
+# Build backend (must satisfy go.mod `go 1.25.0`)
+FROM golang:1.25-alpine AS gobuild
 ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
