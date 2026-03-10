@@ -52,7 +52,7 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
     const lucidePx = size === 'sm' ? 18 : size === 'lg' ? 28 : 22
     const textClass = size === 'sm' ? 'text-xs' : size === 'lg' ? 'text-base' : 'text-sm'
     const boxStyle: React.CSSProperties = { width: px, height: px, minWidth: px, minHeight: px }
-    const boxClass = 'flex items-center justify-center rounded-lg bg-white/10 border border-white/[0.06]'
+    const boxClass = 'flex items-center justify-center rounded-lg bg-white/10 '
 
     // Lucide icon
     if (iconPath?.startsWith('lucide:')) {
@@ -83,7 +83,7 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         <img
             src={src}
             alt=""
-            className={`rounded-lg bg-white/10 border border-white/[0.06] object-contain`}
+            className={`rounded-lg bg-white/10  object-contain`}
             style={boxStyle}
             loading="lazy"
             onError={() => setHasError(true)}

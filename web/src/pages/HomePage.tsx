@@ -19,6 +19,13 @@ import { useVersionCheck } from '../hooks/useVersionCheck'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog } from '../components/dialogs'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 import { SnowEffect } from '../components/effects/SnowEffect'
+import { RainEffect } from '../components/effects/RainEffect'
+import { SakuraEffect } from '../components/effects/SakuraEffect'
+import { FireflyEffect } from '../components/effects/FireflyEffect'
+import { StarEffect } from '../components/effects/StarEffect'
+
+const EFFECTS = ['snow', 'rain', 'sakura', 'firefly', 'star'] as const
+type EffectType = typeof EFFECTS[number]
 import { normalizeIanaTimeZone, displayGroupName, isSystemGroup } from '../utils'
 
 export default function HomePage({ initialDialog }: { initialDialog?: 'login' } = {}) {
@@ -67,7 +74,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     // ── Version check ────────────────────────────────────────────
     const versionCheck = useVersionCheck()
 
-    const [showSnowEffect, setShowSnowEffect] = useState(false)
+    const [activeEffect, setActiveEffect] = useState<EffectType | null>(null)
 
     const systemTimezone = useMemo(() => {
         try {
@@ -280,7 +287,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         style={{ filter: bgBlur > 0 ? `blur(${bgBlur}px)` : undefined }}
                     />
                 )}
-                <div className="absolute inset-0 bg-black/30" />
+                <div className="absolute inset-0 bg-black/25" />
             </div>
 
             <div className="fixed right-4 top-4 z-20 flex items-center gap-2">
@@ -309,7 +316,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
             <main className="mx-auto max-w-6xl px-4 pb-10 pt-[8vh] text-white">
                 {error ? (
-                    <div className="rounded-lg border border-white/10 bg-black/40 p-4 text-sm text-white/80">
+                    <div className="rounded-lg bg-black/30 backdrop-blur-md p-4 text-sm text-white/80">
                         {error}
                     </div>
                 ) : null}
@@ -500,9 +507,12 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             <footer className="py-6 text-center text-xs text-white/40">
                 <span>
                     <button
-                        onClick={() => setShowSnowEffect((prev) => !prev)}
+                        onClick={() => setActiveEffect((prev) => {
+                            if (prev) return null
+                            return EFFECTS[Math.floor(Math.random() * EFFECTS.length)]
+                        })}
                         className="cursor-pointer transition-colors hover:text-white/60"
-                        title="❄️"
+                        title="✨"
                     >
                         &copy;
                     </button>
@@ -510,7 +520,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 </span>
             </footer>
 
-            {showSnowEffect ? <SnowEffect /> : null}
+            {activeEffect === 'snow' ? <SnowEffect /> :
+             activeEffect === 'rain' ? <RainEffect /> :
+             activeEffect === 'sakura' ? <SakuraEffect /> :
+             activeEffect === 'firefly' ? <FireflyEffect /> :
+             activeEffect === 'star' ? <StarEffect /> : null}
 
             {dialogs.contextMenu ? (
                 <div className="fixed inset-0 z-30" onClick={() => closeDialog('contextMenu')}>

@@ -156,7 +156,7 @@ export function GroupBlock({
                     <>
                         <button
                             onClick={() => onAdd(groupId)}
-                            className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-white/20 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
+                            className="invisible rounded-lg bg-white/[0.08] px-2 py-1 text-xs text-white/70 transition-colors hover:bg-white/[0.15] hover:text-white group-hover:visible"
                             aria-label="add"
                             title={t('widgets:add')}
                         >
@@ -169,7 +169,7 @@ export function GroupBlock({
                                         onDeleteGroup(groupId)
                                     }
                                 }}
-                                className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-red-500/50 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
+                                className="invisible rounded-lg bg-white/[0.08] px-2 py-1 text-xs text-white/70 transition-colors hover:bg-red-500/40 hover:text-white group-hover:visible"
                                 aria-label="delete group"
                                 title={t('widgets:deleteGroup')}
                             >
@@ -187,7 +187,7 @@ export function GroupBlock({
                 }
             >
                 {items.length === 0 ? (
-                    <div className="col-span-full rounded-2xl border border-white/10 bg-black/40 p-3 text-sm text-white/60">{t('widgets:noItems')}</div>
+                    <div className="col-span-full rounded-2xl bg-black/25 p-3 text-sm text-white/50">{t('widgets:noItems')}</div>
                 ) : (
                     items.map((a) => {
                         const widget = a.url?.startsWith('widget:') ? a.url.slice('widget:'.length) : null
@@ -218,7 +218,7 @@ export function GroupBlock({
                             return (
                                 <div
                                     key={a.id}
-                                    className={`group/card relative flex flex-col overflow-hidden rounded-2xl border bg-black/40 ${widgetPadClass} transition-all duration-200 ease-out ${widgetCardClass} ${widgetHeightClass} ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30 border-dashed border-white/30 bg-white/5' : isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 border-white/10'}`}
+                                    className={`group/card relative flex flex-col overflow-hidden rounded-2xl bg-black/30 backdrop-blur-md ${widgetPadClass} transition-all duration-200 ease-out ${widgetCardClass} ${widgetHeightClass} ${isAdmin ? 'cursor-grab active:cursor-grabbing' : ''} ${isDragging ? 'opacity-30 border-2 border-dashed border-white/20 bg-black/20' : isDropTarget ? 'ring-2 ring-white/30 scale-[1.02]' : 'hover:bg-black/35 hover:shadow-lg hover:shadow-black/10'}`}
                                     draggable={isAdmin}
                                     onDragStart={(e) => {
                                         if (!isAdmin) return
@@ -281,7 +281,7 @@ export function GroupBlock({
                                         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
                                             {widget === 'rss' && refreshRss ? (
                                                 <button
-                                                    className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60 disabled:opacity-50"
+                                                    className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white disabled:opacity-50"
                                                     aria-label="refresh"
                                                     title={lang === 'zh' ? '刷新' : 'Refresh'}
                                                     disabled={rssRefreshing}
@@ -294,7 +294,7 @@ export function GroupBlock({
                                                 </button>
                                             ) : null}
                                             <button
-                                                className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
+                                                className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                                 aria-label="edit"
                                                 title={t('widgets:edit')}
                                                 onClick={(e) => {
@@ -305,7 +305,7 @@ export function GroupBlock({
                                                 <Cog className="h-4 w-4" />
                                             </button>
                                             <button
-                                                className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
+                                                className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                                 aria-label="delete"
                                                 title={t('common:delete')}
                                                 onClick={(e) => {
@@ -461,7 +461,7 @@ export function GroupBlock({
                                 {isAdmin ? (
                                     <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
                                         <button
-                                            className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
+                                            className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                             aria-label="edit"
                                             title={t('widgets:edit')}
                                             onClick={(e) => {
@@ -473,7 +473,7 @@ export function GroupBlock({
                                             <Cog className="h-4 w-4" />
                                         </button>
                                         <button
-                                            className="rounded-lg bg-black/40 p-1 text-white/90 shadow-sm shadow-black/30 hover:bg-black/60"
+                                            className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                             aria-label="delete"
                                             title={t('common:delete')}
                                             onClick={(e) => {
@@ -492,7 +492,7 @@ export function GroupBlock({
                                     target="_blank"
                                     rel="noreferrer"
                                     draggable={false}
-                                    className={`group block rounded-2xl border bg-black/40 p-3 transition-all duration-200 ease-out hover:bg-black/30 hover:shadow-lg hover:shadow-black/20 ${isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.02]' : 'border-white/10'}`}
+                                    className={`group block rounded-2xl bg-black/30 backdrop-blur-md p-3 transition-all duration-200 ease-out hover:bg-black/35 hover:shadow-lg hover:shadow-black/10 ${isDropTarget ? 'ring-2 ring-white/30 scale-[1.02]' : ''}`}
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className="relative">

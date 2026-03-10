@@ -102,6 +102,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
             return
         }
 
+        // Clear old data immediately so the loading skeleton shows the new
+        // city name from config while fresh weather data is being fetched.
+        setWeatherById({})
+        setWeatherErrById({})
+
         void (async () => {
             const next: Record<string, Weather | null> = {}
             const nextErr: Record<string, string | null> = {}

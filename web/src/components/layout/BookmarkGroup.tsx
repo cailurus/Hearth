@@ -196,8 +196,8 @@ export function BookmarkGroup({
                                     target="_blank"
                                     rel="noreferrer"
                                     draggable={false}
-                                    className={`flex items-center gap-2 rounded-full border bg-black/40 px-3 py-1.5 text-sm text-white/90 transition-all hover:bg-black/30 hover:shadow-md ${
-                                        isDropTarget ? 'border-white/50 ring-2 ring-white/30 scale-[1.03]' : 'border-white/10'
+                                    className={`flex items-center gap-2 rounded-full bg-black/30 backdrop-blur-md px-3 py-1.5 text-sm text-white/90 transition-all hover:bg-black/35 hover:shadow-md hover:shadow-black/10 ${
+                                        isDropTarget ? 'ring-2 ring-white/30 scale-[1.03]' : ''
                                     }`}
                                 >
                                     <div className="relative">
