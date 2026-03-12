@@ -10,6 +10,7 @@
     "languageEnglish": "英文",
     "showDateTime": "显示日期与时间",
     "showSeconds": "显示秒",
+    "showSolarTerm": "显示节气",
     "currentTimezone": "当前时区",
     "timezoneAutoHint": "自动从系统读取",
     "bgProvider": "背景来源",

@@ -5,7 +5,7 @@
 /**
  * Widget 类型
  */
-export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss'
+export type WidgetKind = 'weather' | 'metrics' | 'timezones' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | 'deals'
 
 /**
  * 设置对话框标签页
@@ -67,6 +67,14 @@ export interface TimezonesConfig {
 export interface RSSConfig {
     feeds: string[]
     size?: 'normal' | 'tall'
+}
+
+export interface CurrencyConfig {
+    pairs: string[]
+}
+
+export interface DealsConfig {
+    region: string
 }
 
 /**

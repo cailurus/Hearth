@@ -10,6 +10,7 @@
     "languageEnglish": "English",
     "showDateTime": "Show date & time",
     "showSeconds": "Show seconds",
+    "showSolarTerm": "Show solar terms",
     "currentTimezone": "Current timezone",
     "timezoneAutoHint": "Auto from system",
     "bgProvider": "Provider",

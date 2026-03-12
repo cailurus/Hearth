@@ -2,9 +2,10 @@ interface GreetingProps {
     now: number
     username?: string
     lang: 'zh' | 'en'
+    quote?: { text: string; author: string } | null
 }
 
-export function Greeting({ now, username, lang }: GreetingProps) {
+export function Greeting({ now, username, lang, quote }: GreetingProps) {
     const hour = new Date(now).getHours()
 
     let greeting: string
@@ -21,6 +22,13 @@ export function Greeting({ now, username, lang }: GreetingProps) {
     const display = username ? `${greeting}, ${username}` : greeting
 
     return (
-        <p className="mt-2 text-lg text-white/70 font-light">{display}</p>
+        <div className="mt-2">
+            <p className="text-lg text-white/70 font-light">{display}</p>
+            {quote?.text ? (
+                <p className="mt-1.5 mx-auto max-w-4xl text-sm text-white/40 font-light italic leading-relaxed line-clamp-2">
+                    &ldquo;{quote.text}&rdquo; &mdash; {quote.author}
+                </p>
+            ) : null}
+        </div>
     )
 }

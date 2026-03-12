@@ -78,5 +78,17 @@
     "rssNoItems": "No articles yet",
     "rssSize": "Widget height",
     "rssSizeNormal": "Normal",
-    "rssSizeTall": "Tall"
+    "rssSizeTall": "Tall",
+    "currency": "Currency",
+    "currencyPair": "Currency Pair",
+    "currencyAddPair": "+ Add Pair",
+    "currencyRemovePair": "Remove",
+    "currencyFrom": "From",
+    "currencyTo": "To",
+    "deals": "Game Deals",
+    "dealsRegion": "Region",
+    "dealsRegionUS": "United States",
+    "dealsRegionCN": "China",
+    "dealsNoItems": "No deals found",
+    "dealsOff": "off"
 }

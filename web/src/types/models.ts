@@ -31,6 +31,7 @@ export interface TimeSettings {
     enabled: boolean
     timezone: string
     showSeconds: boolean
+    showSolarTerm?: boolean
     mode: 'digital' | 'clock' | string
 }
 
@@ -203,6 +204,49 @@ export interface RSSItem {
 export interface RSSResponse {
     fetchedAt: number
     items: RSSItem[]
+}
+
+// ============ 每日一言 ============
+
+export interface QuoteResponse {
+    text: string
+    author: string
+    fetchedAt: number
+}
+
+// ============ 汇率 ============
+
+export interface CurrencyPair {
+    from: string
+    to: string
+    rate: number
+    change: number
+    series: number[]
+}
+
+export interface CurrencyResponse {
+    fetchedAt: number
+    items: CurrencyPair[]
+}
+
+// ============ 游戏折扣 ============
+
+export interface GameDeal {
+    title: string
+    thumbnail: string
+    normalPrice: string
+    salePrice: string
+    discountPct: number
+    rating: number
+    ratingCount: number
+    platform: 'pc' | 'ios'
+    storeUrl: string
+    storeName: string
+}
+
+export interface DealsResponse {
+    fetchedAt: number
+    items: GameDeal[]
 }
 
 // ============ 枚举类型 ============

@@ -78,5 +78,17 @@
     "rssNoItems": "暂无文章",
     "rssSize": "组件高度",
     "rssSizeNormal": "标准",
-    "rssSizeTall": "加高"
+    "rssSizeTall": "加高",
+    "currency": "汇率",
+    "currencyPair": "货币对",
+    "currencyAddPair": "+ 添加货币对",
+    "currencyRemovePair": "移除",
+    "currencyFrom": "源货币",
+    "currencyTo": "目标货币",
+    "deals": "游戏优惠",
+    "dealsRegion": "地区",
+    "dealsRegionUS": "美国",
+    "dealsRegionCN": "中国",
+    "dealsNoItems": "暂无优惠",
+    "dealsOff": "折"
 }

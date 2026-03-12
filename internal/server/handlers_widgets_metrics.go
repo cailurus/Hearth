@@ -567,3 +567,41 @@ func (s *Server) handleGetRSS(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (s *Server) handleGetDeals(w http.ResponseWriter, r *http.Request) {
+	region := strings.TrimSpace(r.URL.Query().Get("region"))
+	if region == "" {
+		region = "us"
+	}
+	res, err := widgets.FetchGameDeals(r.Context(), region)
+	if err != nil {
+		log.Printf("[deals] fetch: %v", err)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleGetCurrency(w http.ResponseWriter, r *http.Request) {
+	raw := strings.TrimSpace(r.URL.Query().Get("pairs"))
+	if raw == "" {
+		writeError(w, http.StatusBadRequest, "pairs required")
+		return
+	}
+	pairs := splitCSVish(raw)
+	if len(pairs) > 4 {
+		pairs = pairs[:4]
+	}
+	res, err := widgets.FetchCurrencyRates(r.Context(), pairs)
+	if err != nil {
+		log.Printf("[currency] fetch: %v", err)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (s *Server) handleGetQuote(w http.ResponseWriter, r *http.Request) {
+	res, err := widgets.FetchDailyQuote(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

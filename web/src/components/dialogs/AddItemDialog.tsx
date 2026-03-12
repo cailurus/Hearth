@@ -32,6 +32,8 @@ const WIDGET_TYPES: { kind: WidgetKind; labelKey: string }[] = [
     { kind: 'docker', labelKey: 'widgets:docker' },
     { kind: 'notes', labelKey: 'widgets:notes' },
     { kind: 'rss', labelKey: 'widgets:rss' },
+    { kind: 'currency', labelKey: 'widgets:currency' },
+    { kind: 'deals', labelKey: 'widgets:deals' },
 ]
 
 const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
@@ -43,6 +45,8 @@ const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
     docker: { refreshSec: 5 },
     notes: null,
     rss: { feeds: ['https://hnrss.org/frontpage', 'https://github.blog/feed/'] },
+    currency: { pairs: ['USD-CNY', 'EUR-JPY', 'GBP-USD', 'EUR-USD'] },
+    deals: { region: 'us' },
 }
 
 function isValidUrl(str: string): boolean {
@@ -164,7 +168,9 @@ export function AddItemDialog({
                                         : kind === 'docker' ? t('widgets:docker')
                                             : kind === 'notes' ? t('widgets:notes')
                                                 : kind === 'rss' ? t('widgets:rss')
-                                                    : kind
+                                                    : kind === 'currency' ? t('widgets:currency')
+                                                        : kind === 'deals' ? t('widgets:deals')
+                                                            : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
@@ -292,7 +298,10 @@ export function AddItemDialog({
                                                 : widget.kind === 'holidays' ? t('widgets:upcomingHolidays')
                                                     : widget.kind === 'docker' ? t('widgets:docker')
                                                         : widget.kind === 'notes' ? t('widgets:notes')
-                                                            : widget.kind}
+                                                            : widget.kind === 'rss' ? t('widgets:rss')
+                                                                : widget.kind === 'currency' ? t('widgets:currency')
+                                                                    : widget.kind === 'deals' ? t('widgets:deals')
+                                                                        : widget.kind}
                             </div>
                         </button>
                     ))}

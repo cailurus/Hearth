@@ -2,19 +2,55 @@
  * 时间显示组件
  */
 
+import { useMemo } from 'react'
 import { normalizeIanaTimeZone, ymdKey, formatTime } from '../../utils'
+import { getNearestSolarTerm } from '../../utils/solarTerms'
 
 interface TimeDisplayProps {
     now: number
     timezone: string
     showSeconds: boolean
     mode: string
+    lang?: 'zh' | 'en'
+    showSolarTerm?: boolean
 }
 
-export function TimeDisplay({ now, timezone, showSeconds, mode }: TimeDisplayProps) {
+function getWeekday(date: Date, timezone: string, lang: 'zh' | 'en'): string {
+    try {
+        return new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+            timeZone: timezone,
+            weekday: 'short',
+        }).format(date)
+    } catch {
+        return ''
+    }
+}
+
+function formatSolarTerm(term: { name: string; daysFromNow: number }, lang: 'zh' | 'en'): string {
+    if (term.daysFromNow === 0) return term.name
+    if (term.daysFromNow > 0) {
+        return lang === 'zh' ? `${term.name}(${term.daysFromNow}天后)` : `${term.name} in ${term.daysFromNow}d`
+    }
+    return lang === 'zh' ? `${term.name}(${Math.abs(term.daysFromNow)}天前)` : `${term.name} ${Math.abs(term.daysFromNow)}d ago`
+}
+
+export function TimeDisplay({ now, timezone, showSeconds, mode, lang = 'zh', showSolarTerm = false }: TimeDisplayProps) {
     const safeTz = normalizeIanaTimeZone(timezone, 'Asia/Shanghai')
     const d = new Date(now)
     const dateStr = ymdKey(d, safeTz)
+    const weekday = getWeekday(d, safeTz, lang)
+
+    const solarTerm = useMemo(() => {
+        if (!showSolarTerm) return null
+        return getNearestSolarTerm(d, lang)
+        // Re-compute only when date changes (not every second)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showSolarTerm, dateStr, lang])
+
+    const solarTermStr = solarTerm ? formatSolarTerm(solarTerm, lang) : null
+
+    // Extra info line: weekday + optional solar term
+    const extraInfo = [weekday, solarTermStr].filter(Boolean).join(' · ')
 
     if (mode === 'clock') {
         const parts = new Intl.DateTimeFormat('en-US', {
@@ -55,7 +91,7 @@ export function TimeDisplay({ now, timezone, showSeconds, mode }: TimeDisplayPro
                         {formatTime(now, safeTz, showSeconds)}
                     </span>
                 </div>
-                <div className="hidden text-sm text-white/60 sm:block">{timezone}</div>
+                {extraInfo && <span className="hidden text-sm font-normal text-white/60 sm:inline">{extraInfo}</span>}
             </div>
         )
     }
@@ -66,7 +102,7 @@ export function TimeDisplay({ now, timezone, showSeconds, mode }: TimeDisplayPro
             <span className={`ml-1.5 inline-block ${showSeconds ? 'w-[8ch]' : 'w-[5ch]'}`}>
                 {formatTime(now, safeTz, showSeconds)}
             </span>
-            <span className="ml-2 hidden text-sm font-normal text-white/60 sm:inline">{timezone}</span>
+            {extraInfo && <span className="ml-2 hidden text-sm font-normal text-white/60 sm:inline">{extraInfo}</span>}
         </div>
     )
 }

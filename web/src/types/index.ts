@@ -26,6 +26,11 @@ export type {
     MetricsHistoryResponse,
     RSSItem,
     RSSResponse,
+    QuoteResponse,
+    CurrencyPair,
+    CurrencyResponse,
+    GameDeal,
+    DealsResponse,
     Language,
     GroupKind,
     BackgroundProvider,
@@ -68,4 +73,6 @@ export type {
     NetRate,
     Position,
     RSSConfig,
+    CurrencyConfig,
+    DealsConfig,
 } from './ui'

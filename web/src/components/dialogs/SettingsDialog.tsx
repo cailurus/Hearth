@@ -217,6 +217,7 @@ export function SettingsDialog({
                                                 const next = {
                                                     ...prev,
                                                     time: {
+                                                        ...prev.time,
                                                         enabled: e.target.checked,
                                                         timezone: systemTimezone,
                                                         showSeconds: prev.time?.showSeconds ?? true,
@@ -242,6 +243,7 @@ export function SettingsDialog({
                                                 const next = {
                                                     ...prev,
                                                     time: {
+                                                        ...prev.time,
                                                         enabled: prev.time?.enabled ?? false,
                                                         timezone: systemTimezone,
                                                         showSeconds: e.target.checked,
@@ -254,6 +256,32 @@ export function SettingsDialog({
                                         }
                                     />
                                     {t('settings:showSeconds')}
+                                </label>
+
+                                <label className={`flex items-center gap-2 text-sm ${siteDraft?.time?.enabled ? 'text-white/80' : 'text-white/40'}`}>
+                                    <input
+                                        type="checkbox"
+                                        disabled={!siteDraft?.time?.enabled}
+                                        checked={!!siteDraft?.time?.showSolarTerm}
+                                        onChange={(e) =>
+                                            setSiteDraft((prev) => {
+                                                if (!prev) return prev
+                                                const next = {
+                                                    ...prev,
+                                                    time: {
+                                                        ...prev.time,
+                                                        enabled: prev.time?.enabled ?? false,
+                                                        timezone: systemTimezone,
+                                                        showSolarTerm: e.target.checked,
+                                                        mode: 'digital',
+                                                    },
+                                                }
+                                                schedulePersistSiteDraft(next, 'now')
+                                                return next
+                                            })
+                                        }
+                                    />
+                                    {t('settings:showSolarTerm')}
                                 </label>
                             </div>
 

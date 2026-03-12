@@ -16,7 +16,7 @@ import {
 } from '../utils'
 import { useCitySearch } from './useCitySearch'
 
-type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | null
+type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | 'deals' | null
 
 interface UseWidgetEditorOptions {
     isAdmin: boolean
@@ -103,6 +103,12 @@ export interface WidgetEditorResult {
     setRssFeeds: React.Dispatch<React.SetStateAction<string[]>>
     rssSize: 'normal' | 'tall'
     setRssSize: (v: 'normal' | 'tall') => void
+    // Currency
+    cPairs: string[]
+    setCPairs: React.Dispatch<React.SetStateAction<string[]>>
+    // Deals
+    dlRegion: string
+    setDlRegion: (v: string) => void
     // Opener
     openEditItem: (item: AppItem) => void
 }
@@ -157,6 +163,12 @@ export function useWidgetEditor({
     // RSS
     const [rssFeeds, setRssFeeds] = useState<string[]>([])
     const [rssSize, setRssSize] = useState<'normal' | 'tall'>('normal')
+
+    // Currency
+    const [cPairs, setCPairs] = useState<string[]>(['USD-CNY', 'EUR-JPY', 'GBP-USD', 'EUR-USD'])
+
+    // Deals
+    const [dlRegion, setDlRegion] = useState('us')
 
     // ── refs ───────────────────────────────────────────────────────
     const widgetLastSavedDescRef = useRef<string>('')
@@ -315,6 +327,13 @@ export function useWidgetEditor({
                 const rs = Number(cfg?.refreshSec)
                 setDRefreshSec(rs === 10 || rs === 30 ? rs as 10 | 30 : 5)
             }
+            if (widgetType === 'currency') {
+                const pairs = Array.isArray(cfg?.pairs) ? (cfg?.pairs as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean) : ['USD-CNY', 'EUR-CNY']
+                setCPairs(pairs)
+            }
+            if (widgetType === 'deals') {
+                setDlRegion(String(cfg?.region ?? 'us').trim())
+            }
             if (widgetType === 'rss') {
                 const feeds = Array.isArray(cfg?.feeds) ? (cfg?.feeds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean) : []
                 setRssFeeds(feeds)
@@ -420,7 +439,7 @@ export function useWidgetEditor({
         if (!editDialogOpen || !editItem || !editItem.url.startsWith('widget:') || !widgetKind) return
 
         // Skip auto-save for weather, timezones, markets, and rss - they use manual save button
-        if (widgetKind === 'weather' || widgetKind === 'timezones' || widgetKind === 'markets' || widgetKind === 'rss') return
+        if (widgetKind === 'weather' || widgetKind === 'timezones' || widgetKind === 'markets' || widgetKind === 'rss' || widgetKind === 'currency') return
 
         if (widgetAutoSaveTimerRef.current) window.clearTimeout(widgetAutoSaveTimerRef.current)
 
@@ -444,6 +463,8 @@ export function useWidgetEditor({
                         description = JSON.stringify({ countries })
                     } else if (widgetKind === 'docker') {
                         description = JSON.stringify({ refreshSec: dRefreshSec })
+                    } else if (widgetKind === 'deals') {
+                        description = JSON.stringify({ region: dlRegion })
                     }
 
                     if (description == null) return
@@ -488,19 +509,21 @@ export function useWidgetEditor({
         mRefreshSec,
         hCountryCodes,
         dRefreshSec,
+        dlRegion,
         reload,
     ])
 
     // ── handleSaveWidget (weather / timezones / markets) ──────────
     const handleSaveWidget = useCallback(async () => {
         if (!editItem || !widgetKind) return
-        if (widgetKind !== 'weather' && widgetKind !== 'timezones' && widgetKind !== 'markets' && widgetKind !== 'rss') return
+        if (widgetKind !== 'weather' && widgetKind !== 'timezones' && widgetKind !== 'markets' && widgetKind !== 'rss' && widgetKind !== 'currency') return
 
         const snapshot = { ...editItem }
         const kind = widgetKind
         const citySnapshot = wCity
         const symbolsSnapshot = [...mkSymbols]
         const clocksSnapshot = tzClocks.map((c) => ({ ...c }))
+        const cPairsSnapshot = [...cPairs]
         const rssFeedsSnapshot = [...rssFeeds]
         const rssSizeSnapshot = rssSize
         closeEditDialog()
@@ -542,6 +565,9 @@ export function useWidgetEditor({
                 )
 
                 description = JSON.stringify({ clocks: resolved })
+            } else if (kind === 'currency') {
+                const pairs = cPairsSnapshot.map((p) => p.trim().toUpperCase()).filter(Boolean)
+                description = JSON.stringify({ pairs })
             } else if (kind === 'rss') {
                 const feeds = rssFeedsSnapshot.map((f) => f.trim()).filter(Boolean)
                 description = JSON.stringify({ feeds, size: rssSizeSnapshot })
@@ -723,6 +749,10 @@ export function useWidgetEditor({
         setRssFeeds,
         rssSize,
         setRssSize,
+        cPairs,
+        setCPairs,
+        dlRegion,
+        setDlRegion,
         openEditItem,
     }
 }

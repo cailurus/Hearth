@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
-import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics, RSSResponse } from '../types'
+import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics, RSSResponse, CurrencyResponse, DealsResponse } from '../types'
 import type { DockerResponse } from '../types/models'
 import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
 
@@ -31,6 +31,12 @@ export interface UseWidgetsResult {
     refreshRss: () => void
     /** Whether RSS is currently refreshing */
     rssRefreshing: boolean
+    /** Currency data by widget ID */
+    currencyById: Record<string, CurrencyResponse | null>
+    currencyErrById: Record<string, string | null>
+    /** Deals data by widget ID */
+    dealsById: Record<string, DealsResponse | null>
+    dealsErrById: Record<string, string | null>
 }
 
 interface UseWidgetsOptions {
@@ -56,6 +62,12 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
 
     const [dockerById, setDockerById] = useState<Record<string, DockerResponse | null>>({})
     const [dockerErrById, setDockerErrById] = useState<Record<string, string | null>>({})
+
+    const [currencyById, setCurrencyById] = useState<Record<string, CurrencyResponse | null>>({})
+    const [currencyErrById, setCurrencyErrById] = useState<Record<string, string | null>>({})
+
+    const [dealsById, setDealsById] = useState<Record<string, DealsResponse | null>>({})
+    const [dealsErrById, setDealsErrById] = useState<Record<string, string | null>>({})
 
     const [rssById, setRssById] = useState<Record<string, RSSResponse | null>>({})
     const [rssErrById, setRssErrById] = useState<Record<string, string | null>>({})
@@ -348,6 +360,98 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
+    // Fetch currency data
+    useEffect(() => {
+        let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'currency')
+        if (ws.length === 0) {
+            setCurrencyById({})
+            setCurrencyErrById({})
+            return
+        }
+
+        const run = async () => {
+            const next: Record<string, CurrencyResponse | null> = {}
+            const nextErr: Record<string, string | null> = {}
+
+            await Promise.all(
+                ws.map(async (a) => {
+                    const cfg = safeParseJSON(a.description)
+                    const rawPairs = Array.isArray(cfg?.pairs) ? (cfg?.pairs as unknown[]) : []
+                    const pairs = rawPairs.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 4)
+                    if (pairs.length === 0) {
+                        next[a.id] = { fetchedAt: 0, items: [] }
+                        nextErr[a.id] = null
+                        return
+                    }
+                    try {
+                        const qs = new URLSearchParams({ pairs: pairs.join(',') })
+                        const res = await apiGet<CurrencyResponse>(`/api/widgets/currency?${qs.toString()}`)
+                        next[a.id] = res
+                        nextErr[a.id] = null
+                    } catch (e) {
+                        next[a.id] = null
+                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
+                    }
+                })
+            )
+
+            if (!cancelled) {
+                setCurrencyById(next)
+                setCurrencyErrById(nextErr)
+            }
+        }
+
+        void run()
+        const id = window.setInterval(run, 5 * 60 * 1000)
+        return () => { cancelled = true; window.clearInterval(id) }
+    }, [apps])
+
+    // Fetch deals data
+    useEffect(() => {
+        let cancelled = false
+        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'deals')
+        if (ws.length === 0) {
+            setDealsById({})
+            setDealsErrById({})
+            return
+        }
+
+        const run = async () => {
+            // Use region from the first deals widget config.
+            const cfg = safeParseJSON(ws[0].description)
+            const region = String(cfg?.region ?? 'us').trim()
+
+            try {
+                const qs = new URLSearchParams({ region })
+                const data = await apiGet<DealsResponse>(`/api/widgets/deals?${qs.toString()}`)
+                if (cancelled) return
+                const next: Record<string, DealsResponse | null> = {}
+                const nextErr: Record<string, string | null> = {}
+                for (const a of ws) {
+                    next[a.id] = data
+                    nextErr[a.id] = null
+                }
+                setDealsById(next)
+                setDealsErrById(nextErr)
+            } catch (e) {
+                if (cancelled) return
+                const next: Record<string, DealsResponse | null> = {}
+                const nextErr: Record<string, string | null> = {}
+                for (const a of ws) {
+                    next[a.id] = null
+                    nextErr[a.id] = e instanceof Error ? e.message : 'failed'
+                }
+                setDealsById(next)
+                setDealsErrById(nextErr)
+            }
+        }
+
+        void run()
+        const id = window.setInterval(run, 15 * 60 * 1000)
+        return () => { cancelled = true; window.clearInterval(id) }
+    }, [apps])
+
     // Fetch RSS data
     useEffect(() => {
         let cancelled = false
@@ -422,6 +526,10 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         rssErrById,
         refreshRss: () => setRssRefreshSeq((n) => n + 1),
         rssRefreshing,
+        currencyById,
+        currencyErrById,
+        dealsById,
+        dealsErrById,
     }
 }
 

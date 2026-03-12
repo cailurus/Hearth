@@ -39,7 +39,7 @@ interface EditItemDialogProps {
     onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
-    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | null
+    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | 'deals' | null
     // Widget save callback (for weather, timezones, markets)
     onSaveWidget?: () => Promise<void>
     widgetSaving?: boolean
@@ -82,6 +82,12 @@ interface EditItemDialogProps {
     setRssFeeds: React.Dispatch<React.SetStateAction<string[]>>
     rssSize: 'normal' | 'tall'
     setRssSize: (v: 'normal' | 'tall') => void
+    // Currency
+    cPairs: string[]
+    setCPairs: React.Dispatch<React.SetStateAction<string[]>>
+    // Deals
+    dlRegion: string
+    setDlRegion: (v: string) => void
 }
 
 export function EditItemDialog({
@@ -141,6 +147,10 @@ export function EditItemDialog({
     setRssFeeds,
     rssSize,
     setRssSize,
+    cPairs,
+    setCPairs,
+    dlRegion,
+    setDlRegion,
 }: EditItemDialogProps) {
     const { t } = useTranslation(['home', 'common', 'widgets', 'settings'])
 
@@ -386,6 +396,67 @@ export function EditItemDialog({
                                 >
                                     {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
                                 </button>
+                            </div>
+                        ) : widgetKind === 'currency' ? (
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                    <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:currency')}</div>
+                                    <div className="space-y-2">
+                                        {cPairs.map((pair, idx) => (
+                                            <div key={idx} className="flex gap-2">
+                                                <input
+                                                    value={pair}
+                                                    onChange={(e) => {
+                                                        const next = [...cPairs]
+                                                        next[idx] = e.target.value.toUpperCase()
+                                                        setCPairs(next)
+                                                    }}
+                                                    placeholder="USD-CNY"
+                                                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCPairs(cPairs.filter((_, i) => i !== idx))}
+                                                    className="shrink-0 rounded-lg bg-white/10 px-2 py-2 text-xs text-white/70 hover:bg-red-500/30 hover:text-white"
+                                                >
+                                                    {t('widgets:currencyRemovePair')}
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {cPairs.length < 4 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setCPairs([...cPairs, ''])}
+                                                className="rounded-lg bg-white/10 px-3 py-2 text-sm text-white/70 hover:bg-white/20 hover:text-white"
+                                            >
+                                                {t('widgets:currencyAddPair')}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={widgetSaving}
+                                    onClick={() => onSaveWidget?.()}
+                                    className="flex items-center justify-center rounded-lg bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 min-w-[64px]"
+                                >
+                                    {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
+                                </button>
+                            </div>
+                        ) : widgetKind === 'deals' ? (
+                            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:deals')}</div>
+                                <label className="block text-sm">
+                                    <div className="mb-1 text-white/70">{t('widgets:dealsRegion')}</div>
+                                    <select
+                                        value={dlRegion}
+                                        onChange={(e) => setDlRegion(e.target.value)}
+                                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
+                                    >
+                                        <option value="us">{t('widgets:dealsRegionUS')}</option>
+                                        <option value="cn">{t('widgets:dealsRegionCN')}</option>
+                                    </select>
+                                </label>
                             </div>
                         ) : widgetKind === 'notes' ? (
                             <div className="space-y-4">

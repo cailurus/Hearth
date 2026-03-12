@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { apiPost, apiPut } from '../api'
 import { Cog, Search } from 'lucide-react'
-import type { Group, IconResolve } from '../types'
+import type { Group, IconResolve, QuoteResponse } from '../types'
+import { apiGet } from '../api'
 import { useNow, useWidgets, useVideoBackground, useDialogState, useBackgroundRefresh, useSettingsDraft, useDashboard } from '../hooks'
 import { useWidgetEditor } from '../hooks/useWidgetEditor'
 import { useGroupDragSort } from '../hooks/useGroupDragSort'
@@ -76,6 +77,16 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     const [activeEffect, setActiveEffect] = useState<EffectType | null>(null)
 
+    // ── Daily quote ────────────────────────────────────────────
+    const [quote, setQuote] = useState<QuoteResponse | null>(null)
+    useEffect(() => {
+        let cancelled = false
+        apiGet<QuoteResponse>('/api/widgets/quote')
+            .then((q) => { if (!cancelled) setQuote(q) })
+            .catch(() => {})
+        return () => { cancelled = true }
+    }, [])
+
     const systemTimezone = useMemo(() => {
         try {
             const tz = String(Intl.DateTimeFormat().resolvedOptions().timeZone || '').trim()
@@ -126,6 +137,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         rssErrById,
         refreshRss,
         rssRefreshing,
+        currencyById,
+        currencyErrById,
+        dealsById,
+        dealsErrById,
     } = useWidgets({
         apps,
         lang,
@@ -365,7 +380,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                     >
                                         <h1 className="text-4xl font-semibold tracking-tight">{title}</h1>
                                         {settings?.greeting?.enabled !== false ? (
-                                            <Greeting now={now} username={me?.username} lang={lang} />
+                                            <Greeting now={now} username={me?.username} lang={lang} quote={quote} />
                                         ) : null}
                                         {settings?.time?.enabled ? (
                                             <div className="mt-3 flex items-center justify-center gap-3">
@@ -374,6 +389,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                                     timezone={systemTimezone}
                                                     showSeconds={!!settings.time?.showSeconds}
                                                     mode={settings.time?.mode || 'digital'}
+                                                    lang={lang}
+                                                    showSolarTerm={!!settings.time?.showSolarTerm}
                                                 />
                                                 <button
                                                     onClick={(e) => { e.stopPropagation(); quickLaunch.openOverlay() }}
@@ -429,6 +446,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         rssErrById={rssErrById}
                                         refreshRss={refreshRss}
                                         rssRefreshing={rssRefreshing}
+                                        currencyById={currencyById}
+                                        currencyErrById={currencyErrById}
+                                        dealsById={dealsById}
+                                        dealsErrById={dealsErrById}
                                         lang={lang}
                                     />
                                 )
@@ -494,6 +515,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         rssErrById={rssErrById}
                                         refreshRss={refreshRss}
                                         rssRefreshing={rssRefreshing}
+                                        currencyById={currencyById}
+                                        currencyErrById={currencyErrById}
+                                        dealsById={dealsById}
+                                        dealsErrById={dealsErrById}
                                         lang={lang}
                                     />
                                 </div>

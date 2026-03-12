@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, RefreshCw, Trash2, Upload } from 'lucide-react'
-import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather, RSSResponse } from '../../types'
+import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather, RSSResponse, CurrencyResponse, DealsResponse } from '../../types'
 import type { DockerResponse } from '../../types/models'
 import { AppIcon } from '../cards/AppIcon'
 import { StatusDot } from '../ui/StatusDot'
@@ -16,6 +16,8 @@ import { TimezonesWidget } from '../widgets/TimezonesWidget'
 import { DockerWidget } from '../widgets/DockerWidget'
 import { NotesWidget } from '../widgets/NotesWidget'
 import { RSSWidget } from '../widgets/RSSWidget'
+import { CurrencyWidget } from '../widgets/CurrencyWidget'
+import { DealsWidget } from '../widgets/DealsWidget'
 import { Spinner } from '../ui/Spinner'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -50,6 +52,10 @@ interface GroupBlockProps {
     rssErrById?: Record<string, string | null>
     refreshRss?: () => void
     rssRefreshing?: boolean
+    currencyById?: Record<string, CurrencyResponse | null>
+    currencyErrById?: Record<string, string | null>
+    dealsById?: Record<string, DealsResponse | null>
+    dealsErrById?: Record<string, string | null>
     lang?: 'zh' | 'en'
 }
 
@@ -83,6 +89,10 @@ export function GroupBlock({
     rssErrById,
     refreshRss,
     rssRefreshing,
+    currencyById,
+    currencyErrById,
+    dealsById,
+    dealsErrById,
     lang = 'en',
 }: GroupBlockProps) {
     const { t } = useTranslation(['widgets', 'common'])
@@ -332,7 +342,11 @@ export function GroupBlock({
                                                                 ? t('widgets:notes')
                                                                 : widget === 'rss'
                                                                     ? t('widgets:rss')
-                                                                    : t('widgets:worldClock')}
+                                                                    : widget === 'currency'
+                                                                        ? t('widgets:currency')
+                                                                        : widget === 'deals'
+                                                                            ? t('widgets:deals')
+                                                                            : t('widgets:worldClock')}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (
@@ -396,6 +410,10 @@ export function GroupBlock({
                                             <NotesWidget isAdmin={isAdmin} />
                                         ) : widget === 'rss' ? (
                                             <RSSWidget data={rssById?.[a.id] || null} error={rssErrById?.[a.id] || null} lang={lang} />
+                                        ) : widget === 'currency' ? (
+                                            <CurrencyWidget data={currencyById?.[a.id] || null} error={currencyErrById?.[a.id] || null} />
+                                        ) : widget === 'deals' ? (
+                                            <DealsWidget data={dealsById?.[a.id] || null} error={dealsErrById?.[a.id] || null} lang={lang} />
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}
