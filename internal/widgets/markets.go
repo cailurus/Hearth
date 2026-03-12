@@ -341,12 +341,19 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 		Chart struct {
 			Result []struct {
 				Meta struct {
-					Symbol             string  `json:"symbol"`
-					ShortName          string  `json:"shortName"`
-					LongName           string  `json:"longName"`
+					Symbol             string `json:"symbol"`
+					ShortName          string `json:"shortName"`
+					LongName           string `json:"longName"`
 					RegularMarketPrice float64 `json:"regularMarketPrice"`
 					ChartPreviousClose float64 `json:"chartPreviousClose"`
+					CurrentTradingPeriod struct {
+						Regular struct {
+							Start int64 `json:"start"`
+							End   int64 `json:"end"`
+						} `json:"regular"`
+					} `json:"currentTradingPeriod"`
 				} `json:"meta"`
+				Timestamp  []int64 `json:"timestamp"`
 				Indicators struct {
 					Quote []struct {
 						Close []*float64 `json:"close"`
@@ -392,17 +399,72 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 		}
 	}
 
-	var closes []float64
+	// Extract close prices, filtering by trading session for stocks.
+	// - During market hours: show today's data (in-progress, partial chart)
+	// - Pre-market or post-market: show last complete trading day
+	// - Crypto trades 24/7: use all data points
+	timestamps := result.Timestamp
+	var allCloses []*float64
 	if len(result.Indicators.Quote) > 0 {
-		for _, v := range result.Indicators.Quote[0].Close {
+		allCloses = result.Indicators.Quote[0].Close
+	}
+
+	var closes []float64
+	if isCrypto || len(timestamps) == 0 {
+		// Crypto: use all data points.
+		for _, v := range allCloses {
+			if v != nil && *v > 0 {
+				closes = append(closes, *v)
+			}
+		}
+	} else {
+		regStart := meta.CurrentTradingPeriod.Regular.Start
+		regEnd := meta.CurrentTradingPeriod.Regular.End
+		now := time.Now().Unix()
+		isMarketOpen := now >= regStart && now <= regEnd
+
+		if isMarketOpen {
+			// During market hours: show only today's regular session data.
+			for i, ts := range timestamps {
+				if ts >= regStart && i < len(allCloses) {
+					if allCloses[i] != nil && *allCloses[i] > 0 {
+						closes = append(closes, *allCloses[i])
+					}
+				}
+			}
+		} else {
+			// Pre-market or post-market: show the last complete trading day.
+			// Find the last regular session day by looking at timestamps
+			// that fall before today's regular session start.
+			var lastDayCloses []float64
+			var currentDayStart int64
+			for i, ts := range timestamps {
+				if i >= len(allCloses) || allCloses[i] == nil || *allCloses[i] <= 0 {
+					continue
+				}
+				if ts >= regStart {
+					break // Today's session data, skip for pre/post-market
+				}
+				// Detect day boundary: gap of >12 hours means new day.
+				if currentDayStart == 0 || ts-currentDayStart > 12*3600 {
+					lastDayCloses = nil
+					currentDayStart = ts
+				}
+				lastDayCloses = append(lastDayCloses, *allCloses[i])
+			}
+			closes = lastDayCloses
+		}
+	}
+
+	// Fallback: if session filtering produced no data, use all valid closes.
+	if len(closes) == 0 {
+		for _, v := range allCloses {
 			if v != nil && *v > 0 {
 				closes = append(closes, *v)
 			}
 		}
 	}
 
-	// With range=1d, chartPreviousClose is the previous trading day's close.
-	// This gives us the standard daily change percentage.
 	changePct := 0.0
 	prevClose := meta.ChartPreviousClose
 	if prevClose > 0 && price > 0 {
