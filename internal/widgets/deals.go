@@ -52,7 +52,7 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	}
 
 	// Fetch both sources concurrently.
-	var pcDeals, iosDeals []GameDeal
+	var pcDeals, epicDeals, iosDeals []GameDeal
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -69,6 +69,16 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	go func() {
 		defer wg.Done()
 		var err error
+		epicDeals, err = fetchEpicFreeGames(ctx)
+		if err != nil {
+			log.Printf("[deals] epic: %v", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var err error
 		iosDeals, err = fetchIOSDeals(ctx, region)
 		if err != nil {
 			log.Printf("[deals] ios: %v", err)
@@ -77,8 +87,8 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 
 	wg.Wait()
 
-	// Interleave PC and iOS deals.
-	var merged []GameDeal
+	// Epic free games first (most valuable — 100% off), then interleave PC and iOS.
+	merged := append([]GameDeal{}, epicDeals...)
 	pi, ii := 0, 0
 	for pi < len(pcDeals) || ii < len(iosDeals) {
 		if pi < len(pcDeals) {
@@ -97,6 +107,144 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	out := DealsResponse{FetchedAt: time.Now().Unix(), Items: merged}
 	dealsTTLCache.Set(region, out)
 	return out, nil
+}
+
+// --- Epic Games Free Games ---
+
+func fetchEpicFreeGames(ctx context.Context) ([]GameDeal, error) {
+	reqURL := "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=US&allowCountries=US"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Hearth/1.0")
+
+	resp, err := DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("epic: status " + resp.Status)
+	}
+
+	var payload struct {
+		Data struct {
+			Catalog struct {
+				SearchStore struct {
+					Elements []struct {
+						Title      string `json:"title"`
+						KeyImages  []struct {
+							Type string `json:"type"`
+							URL  string `json:"url"`
+						} `json:"keyImages"`
+						Price struct {
+							TotalPrice struct {
+								OriginalPrice int `json:"originalPrice"`
+								DiscountPrice int `json:"discountPrice"`
+							} `json:"totalPrice"`
+						} `json:"price"`
+						CatalogNs struct {
+							Mappings []struct {
+								PageSlug string `json:"pageSlug"`
+							} `json:"mappings"`
+						} `json:"catalogNs"`
+						Promotions *struct {
+							PromotionalOffers []struct {
+								Offers []struct {
+									StartDate       string `json:"startDate"`
+									EndDate         string `json:"endDate"`
+									DiscountSetting struct {
+										DiscountPct int `json:"discountPercentage"`
+									} `json:"discountSetting"`
+								} `json:"promotionalOffers"`
+							} `json:"promotionalOffers"`
+							UpcomingOffers []struct {
+								Offers []struct {
+									StartDate       string `json:"startDate"`
+									EndDate         string `json:"endDate"`
+									DiscountSetting struct {
+										DiscountPct int `json:"discountPercentage"`
+									} `json:"discountSetting"`
+								} `json:"promotionalOffers"`
+							} `json:"upcomingPromotionalOffers"`
+						} `json:"promotions"`
+					} `json:"elements"`
+				} `json:"searchStore"`
+			} `json:"Catalog"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	var deals []GameDeal
+
+	for _, game := range payload.Data.Catalog.SearchStore.Elements {
+		if game.Promotions == nil {
+			continue
+		}
+		original := game.Price.TotalPrice.OriginalPrice
+		discount := game.Price.TotalPrice.DiscountPrice
+
+		// Check current free promotions (100% off, discount price = 0, original > 0).
+		isFreeNow := false
+		for _, group := range game.Promotions.PromotionalOffers {
+			for _, offer := range group.Offers {
+				if offer.DiscountSetting.DiscountPct == 0 && discount == 0 && original > 0 {
+					endTime, _ := time.Parse(time.RFC3339, offer.EndDate)
+					if endTime.After(now) {
+						isFreeNow = true
+					}
+				}
+			}
+		}
+		if !isFreeNow {
+			continue
+		}
+
+		// Pick best thumbnail.
+		thumb := ""
+		for _, pref := range []string{"OfferImageWide", "DieselStoreFrontWide", "Thumbnail"} {
+			for _, img := range game.KeyImages {
+				if img.Type == pref {
+					thumb = img.URL
+					break
+				}
+			}
+			if thumb != "" {
+				break
+			}
+		}
+
+		// Build store URL.
+		slug := ""
+		if len(game.CatalogNs.Mappings) > 0 {
+			slug = game.CatalogNs.Mappings[0].PageSlug
+		}
+		storeURL := "https://store.epicgames.com/en-US/free-games"
+		if slug != "" {
+			storeURL = "https://store.epicgames.com/en-US/p/" + slug
+		}
+
+		deals = append(deals, GameDeal{
+			Title:       game.Title,
+			Thumbnail:   thumb,
+			NormalPrice: fmt.Sprintf("$%.2f", float64(original)/100),
+			SalePrice:   "FREE",
+			DiscountPct: 100,
+			Platform:    "pc",
+			StoreURL:    storeURL,
+			StoreName:   "Epic Games",
+		})
+	}
+	return deals, nil
 }
 
 // --- CheapShark ---
@@ -124,15 +272,16 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 	}
 
 	var raw []struct {
-		Title             string `json:"title"`
-		DealID            string `json:"dealID"`
-		NormalPrice       string `json:"normalPrice"`
-		SalePrice         string `json:"salePrice"`
-		Savings           string `json:"savings"`
+		Title              string `json:"title"`
+		DealID             string `json:"dealID"`
+		StoreID            string `json:"storeID"`
+		NormalPrice        string `json:"normalPrice"`
+		SalePrice          string `json:"salePrice"`
+		Savings            string `json:"savings"`
 		SteamRatingPercent string `json:"steamRatingPercent"`
-		SteamRatingCount  string `json:"steamRatingCount"`
-		Thumb             string `json:"thumb"`
-		SteamAppID        string `json:"steamAppID"`
+		SteamRatingCount   string `json:"steamRatingCount"`
+		Thumb              string `json:"thumb"`
+		SteamAppID         string `json:"steamAppID"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err
@@ -140,24 +289,17 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 
 	var deals []GameDeal
 	for _, d := range raw {
+		// Skip Epic deals from CheapShark — we fetch them directly via fetchEpicFreeGames.
+		if d.StoreID == "25" {
+			continue
+		}
+
 		savings, _ := strconv.ParseFloat(d.Savings, 64)
 		rating, _ := strconv.ParseFloat(d.SteamRatingPercent, 64)
 		ratingCount, _ := strconv.Atoi(d.SteamRatingCount)
 
-		// Always use direct Steam store link.
-		steamID := d.SteamAppID
-		if steamID == "" || steamID == "0" {
-			// Search Steam for the game to get the app ID.
-			steamID = searchSteamAppID(ctx, d.Title)
-		}
-		storeURL := ""
-		storeName := "Steam"
-		if steamID != "" {
-			storeURL = fmt.Sprintf("https://store.steampowered.com/app/%s/", steamID)
-		} else {
-			// Last resort: search URL on Steam.
-			storeURL = fmt.Sprintf("https://store.steampowered.com/search/?term=%s", url.QueryEscape(d.Title))
-		}
+		// Determine store name and URL based on storeID.
+		storeName, storeURL := cheapSharkStoreLink(d.StoreID, d.SteamAppID, d.DealID, d.Title)
 
 		deals = append(deals, GameDeal{
 			Title:       d.Title,
@@ -173,6 +315,33 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 		})
 	}
 	return deals, nil
+}
+
+// cheapSharkStoreLink maps a CheapShark storeID to the correct store name and direct URL.
+func cheapSharkStoreLink(storeID, steamAppID, dealID, title string) (storeName, storeURL string) {
+	switch storeID {
+	case "1": // Steam
+		storeName = "Steam"
+		if steamAppID != "" && steamAppID != "0" {
+			storeURL = fmt.Sprintf("https://store.steampowered.com/app/%s/", steamAppID)
+		} else {
+			storeURL = fmt.Sprintf("https://store.steampowered.com/search/?term=%s", url.QueryEscape(title))
+		}
+	case "25": // Epic Games Store
+		storeName = "Epic Games"
+		storeURL = fmt.Sprintf("https://store.epicgames.com/en-US/browse?q=%s&sortBy=relevancy", url.QueryEscape(title))
+	case "7": // GOG
+		storeName = "GOG"
+		storeURL = fmt.Sprintf("https://www.gog.com/games?query=%s", url.QueryEscape(title))
+	case "11": // Humble Store
+		storeName = "Humble"
+		storeURL = fmt.Sprintf("https://www.humblebundle.com/store/search?search=%s", url.QueryEscape(title))
+	default:
+		// For other stores, use CheapShark redirect which goes to the correct store.
+		storeName = "PC"
+		storeURL = fmt.Sprintf("https://www.cheapshark.com/redirect?dealID=%s", url.QueryEscape(dealID))
+	}
+	return
 }
 
 // searchSteamAppID searches the Steam store for a game by title and returns its app ID.
@@ -313,13 +482,35 @@ func fetchIOSDeals(ctx context.Context, region string) ([]GameDeal, error) {
 		if title == "" {
 			continue
 		}
+
+		// Filter: only include games.
+		genre := strings.ToLower(meta.genre)
+		if genre != "" && genre != "games" && !strings.Contains(genre, "game") {
+			continue
+		}
+
+		// Verify the deal is still active by comparing RSS sale price with current iTunes price.
+		// If current price is higher than the RSS sale price, the deal has ended.
+		if e.salePrice != "" {
+			rssSale, _ := strconv.ParseFloat(strings.TrimPrefix(e.salePrice, "$"), 64)
+			if meta.price > rssSale+0.01 {
+				continue // Deal ended, current price is back to normal.
+			}
+		}
+
 		rating := meta.rating * 20 // convert 0-5 to 0-100 scale
+
+		// Use current iTunes price as the actual sale price.
+		salePrice := fmt.Sprintf("$%.2f", meta.price)
+		if meta.price == 0 {
+			salePrice = "FREE"
+		}
 
 		deals = append(deals, GameDeal{
 			Title:       title,
 			Thumbnail:   meta.artwork,
 			NormalPrice: e.normalPrice,
-			SalePrice:   e.salePrice,
+			SalePrice:   salePrice,
 			DiscountPct: e.discountPct,
 			Rating:      rating,
 			RatingCount: meta.ratingCount,
@@ -336,6 +527,8 @@ type itunesMeta struct {
 	artwork     string
 	rating      float64
 	ratingCount int
+	price       float64
+	genre       string
 }
 
 func fetchITunesMetadata(ctx context.Context, appIDs []string, country string) map[string]itunesMeta {
@@ -371,6 +564,8 @@ func fetchITunesMetadata(ctx context.Context, appIDs []string, country string) m
 			ArtworkURL100     string  `json:"artworkUrl100"`
 			AverageUserRating float64 `json:"averageUserRating"`
 			UserRatingCount   int     `json:"userRatingCount"`
+			Price             float64 `json:"price"`
+			PrimaryGenreName  string  `json:"primaryGenreName"`
 		} `json:"results"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -384,6 +579,8 @@ func fetchITunesMetadata(ctx context.Context, appIDs []string, country string) m
 			artwork:     r.ArtworkURL100,
 			rating:      r.AverageUserRating,
 			ratingCount: r.UserRatingCount,
+			price:       r.Price,
+			genre:       r.PrimaryGenreName,
 		}
 	}
 	return result

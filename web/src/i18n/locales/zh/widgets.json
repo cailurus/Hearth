@@ -89,6 +89,10 @@
     "dealsRegion": "地区",
     "dealsRegionUS": "美国",
     "dealsRegionCN": "中国",
+    "dealsRegionHK": "香港",
+    "dealsRegionTW": "台湾",
+    "dealsRegionJP": "日本",
+    "dealsRegionGB": "英国",
     "dealsNoItems": "暂无优惠",
     "dealsOff": "折"
 }

@@ -455,6 +455,10 @@ export function EditItemDialog({
                                     >
                                         <option value="us">{t('widgets:dealsRegionUS')}</option>
                                         <option value="cn">{t('widgets:dealsRegionCN')}</option>
+                                        <option value="hk">{t('widgets:dealsRegionHK')}</option>
+                                        <option value="tw">{t('widgets:dealsRegionTW')}</option>
+                                        <option value="jp">{t('widgets:dealsRegionJP')}</option>
+                                        <option value="gb">{t('widgets:dealsRegionGB')}</option>
                                     </select>
                                 </label>
                             </div>

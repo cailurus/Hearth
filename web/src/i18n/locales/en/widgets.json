@@ -89,6 +89,10 @@
     "dealsRegion": "Region",
     "dealsRegionUS": "United States",
     "dealsRegionCN": "China",
+    "dealsRegionHK": "Hong Kong",
+    "dealsRegionTW": "Taiwan",
+    "dealsRegionJP": "Japan",
+    "dealsRegionGB": "United Kingdom",
     "dealsNoItems": "No deals found",
     "dealsOff": "off"
 }
