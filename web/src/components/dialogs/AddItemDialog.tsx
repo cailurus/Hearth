@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui'
 import { apiPost } from '../../api'
 import type { WidgetKind, IconResolve } from '../../types'
+import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 import { Loader2, Image as ImageIcon } from 'lucide-react'
 import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
 
@@ -159,18 +160,7 @@ export function AddItemDialog({
             setError(null)
             setLoading(true)
             try {
-                const widgetName =
-                    kind === 'weather' ? t('widgets:weather')
-                        : kind === 'timezones' ? t('widgets:worldClock')
-                            : kind === 'metrics' ? t('widgets:systemStatus')
-                                : kind === 'markets' ? t('widgets:markets')
-                                    : kind === 'holidays' ? t('widgets:upcomingHolidays')
-                                        : kind === 'docker' ? t('widgets:docker')
-                                            : kind === 'notes' ? t('widgets:notes')
-                                                : kind === 'rss' ? t('widgets:rss')
-                                                    : kind === 'currency' ? t('widgets:currency')
-                                                        : kind === 'deals' ? t('widgets:deals')
-                                                            : kind
+                const widgetName = WIDGET_LABEL_KEYS[kind] ? t(WIDGET_LABEL_KEYS[kind] as never) : kind
                 const config = DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
@@ -291,17 +281,7 @@ export function AddItemDialog({
                             className="h-10 rounded-lg border border-white/10 bg-black/40 px-2 text-xs hover:bg-black/30 disabled:opacity-50"
                         >
                             <div className="flex h-full w-full items-center justify-center text-center leading-tight">
-                                {widget.kind === 'weather' ? t('widgets:weather')
-                                    : widget.kind === 'timezones' ? t('widgets:worldClock')
-                                        : widget.kind === 'metrics' ? t('widgets:systemStatus')
-                                            : widget.kind === 'markets' ? t('widgets:markets')
-                                                : widget.kind === 'holidays' ? t('widgets:upcomingHolidays')
-                                                    : widget.kind === 'docker' ? t('widgets:docker')
-                                                        : widget.kind === 'notes' ? t('widgets:notes')
-                                                            : widget.kind === 'rss' ? t('widgets:rss')
-                                                                : widget.kind === 'currency' ? t('widgets:currency')
-                                                                    : widget.kind === 'deals' ? t('widgets:deals')
-                                                                        : widget.kind}
+                                {WIDGET_LABEL_KEYS[widget.kind] ? t(WIDGET_LABEL_KEYS[widget.kind] as never) : widget.kind}
                             </div>
                         </button>
                     ))}

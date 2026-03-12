@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 )
 
@@ -114,8 +113,7 @@ func fetchGeo(ctx context.Context, q string, count int, language string) (geoPay
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return geoPayload{}, err
 	}

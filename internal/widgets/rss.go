@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
 type RSSItem struct {
@@ -25,12 +27,7 @@ type RSSResponse struct {
 	Items     []RSSItem `json:"items"`
 }
 
-var rssCache = struct {
-	mu    sync.Mutex
-	items map[string]RSSResponse
-}{
-	items: map[string]RSSResponse{},
-}
+var rssTTLCache = cache.New[RSSResponse](15 * time.Minute)
 
 func rssCacheKey(feeds []string) string {
 	sorted := make([]string, len(feeds))
@@ -62,20 +59,13 @@ func FetchRSSFeeds(ctx context.Context, feedURLs []string, limit int, noCache ..
 		limit = 8
 	}
 
-	const ttl = 15 * time.Minute
 	key := rssCacheKey(feeds)
 	skipCache := len(noCache) > 0 && noCache[0]
 
 	if !skipCache {
-		rssCache.mu.Lock()
-		if cached, ok := rssCache.items[key]; ok {
-			age := time.Since(time.Unix(cached.FetchedAt, 0))
-			if cached.FetchedAt > 0 && age >= 0 && age < ttl {
-				rssCache.mu.Unlock()
-				return cached, nil
-			}
+		if cached, ok := rssTTLCache.Get(key); ok {
+			return cached, nil
 		}
-		rssCache.mu.Unlock()
 	}
 
 	// Fetch all feeds concurrently.
@@ -106,13 +96,9 @@ func FetchRSSFeeds(ctx context.Context, feedURLs []string, limit int, noCache ..
 	}
 
 	if !anyOK {
-		// Return stale cache if all feeds failed.
-		rssCache.mu.Lock()
-		if cached, ok := rssCache.items[key]; ok && cached.FetchedAt > 0 {
-			rssCache.mu.Unlock()
+		if cached, ok := rssTTLCache.GetStale(key); ok {
 			return cached, nil
 		}
-		rssCache.mu.Unlock()
 		return RSSResponse{FetchedAt: time.Now().Unix(), Items: []RSSItem{}}, errors.New("all RSS feeds failed")
 	}
 
@@ -125,11 +111,7 @@ func FetchRSSFeeds(ctx context.Context, feedURLs []string, limit int, noCache ..
 	}
 
 	out := RSSResponse{FetchedAt: time.Now().Unix(), Items: all}
-
-	rssCache.mu.Lock()
-	rssCache.items[key] = out
-	rssCache.mu.Unlock()
-
+	rssTTLCache.Set(key, out)
 	return out, nil
 }
 
@@ -144,7 +126,7 @@ func fetchSingleFeed(ctx context.Context, feedURL string) ([]RSSItem, error) {
 	req.Header.Set("User-Agent", "Hearth/1.0")
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

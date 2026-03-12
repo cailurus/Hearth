@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
 type CurrencyPair struct {
@@ -26,12 +28,7 @@ type CurrencyResponse struct {
 	Items     []CurrencyPair `json:"items"`
 }
 
-var currencyCache = struct {
-	mu    sync.Mutex
-	items map[string]CurrencyResponse
-}{
-	items: map[string]CurrencyResponse{},
-}
+var currencyTTLCache = cache.New[CurrencyResponse](30 * time.Minute)
 
 func currencyCacheKey(pairs []string) string {
 	sorted := make([]string, len(pairs))
@@ -50,18 +47,11 @@ func FetchCurrencyRates(ctx context.Context, pairs []string) (CurrencyResponse, 
 		pairs = pairs[:4]
 	}
 
-	const ttl = 30 * time.Minute
 	key := currencyCacheKey(pairs)
 
-	currencyCache.mu.Lock()
-	if cached, ok := currencyCache.items[key]; ok {
-		age := time.Since(time.Unix(cached.FetchedAt, 0))
-		if cached.FetchedAt > 0 && age >= 0 && age < ttl {
-			currencyCache.mu.Unlock()
-			return cached, nil
-		}
+	if cached, ok := currencyTTLCache.Get(key); ok {
+		return cached, nil
 	}
-	currencyCache.mu.Unlock()
 
 	// Parse pairs and group by "from" currency.
 	type pairSpec struct {
@@ -79,7 +69,6 @@ func FetchCurrencyRates(ctx context.Context, pairs []string) (CurrencyResponse, 
 		return CurrencyResponse{FetchedAt: time.Now().Unix(), Items: []CurrencyPair{}}, nil
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	results := make([]CurrencyPair, len(specs))
 
 	var wg sync.WaitGroup
@@ -87,7 +76,7 @@ func FetchCurrencyRates(ctx context.Context, pairs []string) (CurrencyResponse, 
 		wg.Add(1)
 		go func(idx int, from, to string) {
 			defer wg.Done()
-			rate, series, change := fetchFrankfurterPair(ctx, client, from, to)
+			rate, series, change := fetchFrankfurterPair(ctx, from, to)
 			results[idx] = CurrencyPair{
 				From:   from,
 				To:     to,
@@ -100,18 +89,14 @@ func FetchCurrencyRates(ctx context.Context, pairs []string) (CurrencyResponse, 
 	wg.Wait()
 
 	out := CurrencyResponse{FetchedAt: time.Now().Unix(), Items: results}
-
-	currencyCache.mu.Lock()
-	currencyCache.items[key] = out
-	currencyCache.mu.Unlock()
-
+	currencyTTLCache.Set(key, out)
 	return out, nil
 }
 
-func fetchFrankfurterPair(ctx context.Context, client *http.Client, from, to string) (rate float64, series []float64, change float64) {
+func fetchFrankfurterPair(ctx context.Context, from, to string) (rate float64, series []float64, change float64) {
 	// Fetch latest rate.
 	latestURL := fmt.Sprintf("https://api.frankfurter.app/latest?from=%s&to=%s", from, to)
-	if r, err := frankfurterGet(ctx, client, latestURL); err == nil {
+	if r, err := frankfurterGet(ctx, latestURL); err == nil {
 		if rates, ok := r["rates"].(map[string]any); ok {
 			if v, ok := rates[to].(float64); ok {
 				rate = v
@@ -125,7 +110,7 @@ func fetchFrankfurterPair(ctx context.Context, client *http.Client, from, to str
 	endDate := now.Format("2006-01-02")
 	histURL := fmt.Sprintf("https://api.frankfurter.app/%s..%s?from=%s&to=%s", startDate, endDate, from, to)
 
-	if r, err := frankfurterGet(ctx, client, histURL); err == nil {
+	if r, err := frankfurterGet(ctx, histURL); err == nil {
 		if ratesMap, ok := r["rates"].(map[string]any); ok {
 			// Sort dates and extract values.
 			dates := make([]string, 0, len(ratesMap))
@@ -155,14 +140,14 @@ func fetchFrankfurterPair(ctx context.Context, client *http.Client, from, to str
 	return
 }
 
-func frankfurterGet(ctx context.Context, client *http.Client, url string) (map[string]any, error) {
+func frankfurterGet(ctx context.Context, url string) (map[string]any, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

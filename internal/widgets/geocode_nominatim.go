@@ -189,8 +189,7 @@ func fetchNominatim(ctx context.Context, query string, limit int, language strin
 		// Nominatim requires a valid User-Agent
 		req.Header.Set("User-Agent", "Hearth/1.0 (https://github.com/morezhou/hearth)")
 
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
+		resp, err := DefaultClient.Do(req)
 		if err != nil {
 			lastErr = err
 			continue

@@ -19,6 +19,7 @@ import { RSSWidget } from '../widgets/RSSWidget'
 import { CurrencyWidget } from '../widgets/CurrencyWidget'
 import { DealsWidget } from '../widgets/DealsWidget'
 import { Spinner } from '../ui/Spinner'
+import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
 
@@ -328,25 +329,7 @@ export function GroupBlock({
                                         </div>
                                     ) : null}
                                     <div className="mb-3 truncate whitespace-nowrap text-sm font-semibold leading-tight text-white/90">
-                                        {widget === 'weather'
-                                            ? t('widgets:weather')
-                                            : widget === 'metrics'
-                                                ? t('widgets:systemStatus')
-                                                : widget === 'markets'
-                                                    ? t('widgets:markets')
-                                                    : widget === 'holidays'
-                                                        ? t('widgets:upcomingHolidays')
-                                                        : widget === 'docker'
-                                                            ? t('widgets:docker')
-                                                            : widget === 'notes'
-                                                                ? t('widgets:notes')
-                                                                : widget === 'rss'
-                                                                    ? t('widgets:rss')
-                                                                    : widget === 'currency'
-                                                                        ? t('widgets:currency')
-                                                                        : widget === 'deals'
-                                                                            ? t('widgets:deals')
-                                                                            : t('widgets:worldClock')}
+                                        {WIDGET_LABEL_KEYS[widget] ? t(WIDGET_LABEL_KEYS[widget] as never) : widget}
                                     </div>
                                     <div className="min-h-0 flex-1">
                                         {widget === 'weather' ? (

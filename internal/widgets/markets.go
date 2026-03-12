@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
 type MarketQuote struct {
@@ -37,27 +39,14 @@ type MarketSymbol struct {
 
 var defaultMarketSymbols = []string{"BTC", "ETH", "AAPL", "MSFT"}
 
-var marketsCache = struct {
-	mu    sync.Mutex
-	items map[string]MarketsResponse
-}{
-	items: map[string]MarketsResponse{},
+var marketsTTLCache = cache.New[MarketsResponse](5 * time.Minute)
+
+type coinGeckoSymbolEntry struct {
+	ID   string
+	Name string
 }
 
-var coinGeckoSymbolCache = struct {
-	mu    sync.Mutex
-	items map[string]struct {
-		ID      string
-		Name    string
-		Fetched int64
-	}
-}{
-	items: map[string]struct {
-		ID      string
-		Name    string
-		Fetched int64
-	}{},
-}
+var coinGeckoSymbolTTLCache = cache.New[coinGeckoSymbolEntry](7 * 24 * time.Hour)
 
 func normalizeSymbols(in []string) []string {
 	out := make([]string, 0, len(in))
@@ -162,8 +151,7 @@ func yahooFinanceSearch(ctx context.Context, query string, limit int) ([]MarketS
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -328,8 +316,7 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return MarketQuote{}, err
 	}
@@ -437,23 +424,13 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 func FetchMarkets(ctx context.Context, symbols []string) (MarketsResponse, error) {
 	symbols = normalizeSymbols(symbols)
 
-	const ttl = 5 * time.Minute
 	key := marketsCacheKey(symbols)
-	marketsCache.mu.Lock()
-	if cached, ok := marketsCache.items[key]; ok {
-		age := time.Since(time.Unix(cached.FetchedAt, 0))
-		if cached.FetchedAt > 0 && age >= 0 && age < ttl {
-			marketsCache.mu.Unlock()
-			return cached, nil
-		}
+	if cached, ok := marketsTTLCache.Get(key); ok {
+		return cached, nil
 	}
-	marketsCache.mu.Unlock()
 
 	getAnyCached := func() (MarketsResponse, bool) {
-		marketsCache.mu.Lock()
-		defer marketsCache.mu.Unlock()
-		c, ok := marketsCache.items[key]
-		return c, ok && c.FetchedAt > 0
+		return marketsTTLCache.GetStale(key)
 	}
 
 	items := make([]MarketQuote, len(symbols))
@@ -507,9 +484,7 @@ func FetchMarkets(ctx context.Context, symbols []string) (MarketsResponse, error
 
 	out := MarketsResponse{FetchedAt: time.Now().Unix(), Items: items}
 
-	marketsCache.mu.Lock()
-	marketsCache.items[key] = out
-	marketsCache.mu.Unlock()
+	marketsTTLCache.Set(key, out)
 
 	return out, nil
 }
@@ -620,8 +595,7 @@ func coinGeckoSearch(ctx context.Context, query string, limit int) ([]coinGeckoS
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -690,8 +664,7 @@ func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, 
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -746,16 +719,9 @@ func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string) (id string,
 		return "", "", errors.New("symbol required")
 	}
 
-	const ttl = 7 * 24 * time.Hour
-	coinGeckoSymbolCache.mu.Lock()
-	if v, ok := coinGeckoSymbolCache.items[sym]; ok {
-		age := time.Since(time.Unix(v.Fetched, 0))
-		if v.Fetched > 0 && age >= 0 && age < ttl && strings.TrimSpace(v.ID) != "" {
-			coinGeckoSymbolCache.mu.Unlock()
-			return v.ID, v.Name, nil
-		}
+	if v, ok := coinGeckoSymbolTTLCache.Get(sym); ok && v.ID != "" {
+		return v.ID, v.Name, nil
 	}
-	coinGeckoSymbolCache.mu.Unlock()
 
 	q := url.Values{}
 	q.Set("query", sym)
@@ -766,8 +732,7 @@ func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string) (id string,
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return "", "", err
 	}
@@ -806,17 +771,7 @@ func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string) (id string,
 		return "", "", fmt.Errorf("coingecko: no match for %s", sym)
 	}
 
-	coinGeckoSymbolCache.mu.Lock()
-	coinGeckoSymbolCache.items[sym] = struct {
-		ID      string
-		Name    string
-		Fetched int64
-	}{
-		ID:      pickedID,
-		Name:    pickedName,
-		Fetched: time.Now().Unix(),
-	}
-	coinGeckoSymbolCache.mu.Unlock()
+	coinGeckoSymbolTTLCache.Set(sym, coinGeckoSymbolEntry{ID: pickedID, Name: pickedName})
 
 	return pickedID, pickedName, nil
 }

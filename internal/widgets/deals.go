@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"log"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
 type GameDeal struct {
@@ -35,12 +38,7 @@ type DealsResponse struct {
 	Items     []GameDeal `json:"items"`
 }
 
-var dealsCache = struct {
-	mu    sync.Mutex
-	items map[string]DealsResponse
-}{
-	items: map[string]DealsResponse{},
-}
+var dealsTTLCache = cache.New[DealsResponse](30 * time.Minute)
 
 // FetchGameDeals fetches PC deals from CheapShark and iOS deals from appstore-discounts.
 func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
@@ -49,16 +47,9 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	}
 	region = strings.ToLower(strings.TrimSpace(region))
 
-	const ttl = 30 * time.Minute
-	dealsCache.mu.Lock()
-	if cached, ok := dealsCache.items[region]; ok {
-		age := time.Since(time.Unix(cached.FetchedAt, 0))
-		if cached.FetchedAt > 0 && age >= 0 && age < ttl {
-			dealsCache.mu.Unlock()
-			return cached, nil
-		}
+	if cached, ok := dealsTTLCache.Get(region); ok {
+		return cached, nil
 	}
-	dealsCache.mu.Unlock()
 
 	// Fetch both sources concurrently.
 	var pcDeals, iosDeals []GameDeal
@@ -67,13 +58,21 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		pcDeals, _ = fetchCheapSharkDeals(ctx)
+		var err error
+		pcDeals, err = fetchCheapSharkDeals(ctx)
+		if err != nil {
+			log.Printf("[deals] cheapshark: %v", err)
+		}
 	}()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		iosDeals, _ = fetchIOSDeals(ctx, region)
+		var err error
+		iosDeals, err = fetchIOSDeals(ctx, region)
+		if err != nil {
+			log.Printf("[deals] ios: %v", err)
+		}
 	}()
 
 	wg.Wait()
@@ -96,10 +95,7 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 	}
 
 	out := DealsResponse{FetchedAt: time.Now().Unix(), Items: merged}
-	dealsCache.mu.Lock()
-	dealsCache.items[region] = out
-	dealsCache.mu.Unlock()
-
+	dealsTTLCache.Set(region, out)
 	return out, nil
 }
 
@@ -113,7 +109,7 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +188,7 @@ func searchSteamAppID(ctx context.Context, title string) string {
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return ""
 	}
@@ -230,7 +226,7 @@ func fetchIOSDeals(ctx context.Context, region string) ([]GameDeal, error) {
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +353,7 @@ func fetchITunesMetadata(ctx context.Context, appIDs []string, country string) m
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return result
 	}

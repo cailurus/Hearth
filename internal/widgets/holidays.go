@@ -9,8 +9,9 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
 type NextHoliday struct {
@@ -46,24 +47,9 @@ type nagerHoliday struct {
 	Name      string `json:"name"`
 }
 
-var holidaysCache = struct {
-	mu    sync.Mutex
-	items map[string]struct {
-		FetchedAt int64
-		List      []nagerHoliday
-	}
-}{
-	items: map[string]struct {
-		FetchedAt int64
-		List      []nagerHoliday
-	}{},
-}
+var holidaysTTLCache = cache.New[[]nagerHoliday](12 * time.Hour)
 
-var holidayCountriesCache = struct {
-	mu        sync.Mutex
-	fetchedAt int64
-	items     []HolidayCountry
-}{}
+var holidayCountriesTTLCache = cache.New[[]HolidayCountry](7 * 24 * time.Hour)
 
 func normalizeCountryCodes(codes []string) []string {
 	out := make([]string, 0, len(codes))
@@ -122,18 +108,7 @@ type holidayCandidate struct {
 	Day       time.Time
 }
 
-var chinaOffDaysCache = struct {
-	mu    sync.Mutex
-	items map[int]struct {
-		FetchedAt int64
-		Days      []nagerHoliday
-	}
-}{
-	items: map[int]struct {
-		FetchedAt int64
-		Days      []nagerHoliday
-	}{},
-}
+var chinaOffDaysTTLCache = cache.New[[]nagerHoliday](30 * 24 * time.Hour)
 
 func chinaHolidayEnglishName(local string) string {
 	switch strings.TrimSpace(local) {
@@ -161,18 +136,10 @@ func fetchChinaOffDays(ctx context.Context, year int) ([]nagerHoliday, error) {
 		return nil, errors.New("invalid year")
 	}
 
-	const ttl = 30 * 24 * time.Hour
-	chinaOffDaysCache.mu.Lock()
-	if v, ok := chinaOffDaysCache.items[year]; ok {
-		age := time.Since(time.Unix(v.FetchedAt, 0))
-		if v.FetchedAt > 0 && age >= 0 && age < ttl && len(v.Days) > 0 {
-			out := make([]nagerHoliday, len(v.Days))
-			copy(out, v.Days)
-			chinaOffDaysCache.mu.Unlock()
-			return out, nil
-		}
+	key := fmt.Sprintf("%d", year)
+	if cached, ok := chinaOffDaysTTLCache.Get(key); ok && len(cached) > 0 {
+		return cached, nil
 	}
-	chinaOffDaysCache.mu.Unlock()
 
 	endpoint := fmt.Sprintf("https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/%d.json", year)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -181,8 +148,7 @@ func fetchChinaOffDays(ctx context.Context, year int) ([]nagerHoliday, error) {
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -211,12 +177,7 @@ func fetchChinaOffDays(ctx context.Context, year int) ([]nagerHoliday, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
 
-	chinaOffDaysCache.mu.Lock()
-	chinaOffDaysCache.items[year] = struct {
-		FetchedAt int64
-		Days      []nagerHoliday
-	}{FetchedAt: time.Now().Unix(), Days: out}
-	chinaOffDaysCache.mu.Unlock()
+	chinaOffDaysTTLCache.Set(key, out)
 
 	return out, nil
 }
@@ -317,19 +278,10 @@ func UpcomingPublicHolidays(ctx context.Context, countryCodes []string, now time
 
 // ListHolidayCountries returns available country codes (cached).
 func ListHolidayCountries(ctx context.Context) ([]HolidayCountry, error) {
-	const ttl = 7 * 24 * time.Hour
-
-	holidayCountriesCache.mu.Lock()
-	if holidayCountriesCache.fetchedAt > 0 {
-		age := time.Since(time.Unix(holidayCountriesCache.fetchedAt, 0))
-		if age >= 0 && age < ttl && len(holidayCountriesCache.items) > 0 {
-			out := make([]HolidayCountry, len(holidayCountriesCache.items))
-			copy(out, holidayCountriesCache.items)
-			holidayCountriesCache.mu.Unlock()
-			return out, nil
-		}
+	const cacheKey = "countries"
+	if cached, ok := holidayCountriesTTLCache.Get(cacheKey); ok && len(cached) > 0 {
+		return cached, nil
 	}
-	holidayCountriesCache.mu.Unlock()
 
 	endpoint := "https://date.nager.at/api/v3/AvailableCountries"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -338,8 +290,7 @@ func ListHolidayCountries(ctx context.Context) ([]HolidayCountry, error) {
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -373,10 +324,7 @@ func ListHolidayCountries(ctx context.Context) ([]HolidayCountry, error) {
 		return out[i].Code < out[j].Code
 	})
 
-	holidayCountriesCache.mu.Lock()
-	holidayCountriesCache.fetchedAt = time.Now().Unix()
-	holidayCountriesCache.items = out
-	holidayCountriesCache.mu.Unlock()
+	holidayCountriesTTLCache.Set(cacheKey, out)
 
 	return out, nil
 }
@@ -455,19 +403,9 @@ func fetchNagerPublicHolidays(ctx context.Context, year int, country string) ([]
 	}
 	key := fmt.Sprintf("%s|%d", country, year)
 
-	const ttl = 12 * time.Hour
-
-	holidaysCache.mu.Lock()
-	if v, ok := holidaysCache.items[key]; ok {
-		age := time.Since(time.Unix(v.FetchedAt, 0))
-		if v.FetchedAt > 0 && age >= 0 && age < ttl && len(v.List) > 0 {
-			list := make([]nagerHoliday, len(v.List))
-			copy(list, v.List)
-			holidaysCache.mu.Unlock()
-			return list, nil
-		}
+	if cached, ok := holidaysTTLCache.Get(key); ok && len(cached) > 0 {
+		return cached, nil
 	}
-	holidaysCache.mu.Unlock()
 
 	endpoint := fmt.Sprintf("https://date.nager.at/api/v3/PublicHolidays/%d/%s", year, country)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -476,8 +414,7 @@ func fetchNagerPublicHolidays(ctx context.Context, year int, country string) ([]
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -493,12 +430,7 @@ func fetchNagerPublicHolidays(ctx context.Context, year int, country string) ([]
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Date < list[j].Date })
 
-	holidaysCache.mu.Lock()
-	holidaysCache.items[key] = struct {
-		FetchedAt int64
-		List      []nagerHoliday
-	}{FetchedAt: time.Now().Unix(), List: list}
-	holidaysCache.mu.Unlock()
+	holidaysTTLCache.Set(key, list)
 
 	return list, nil
 }

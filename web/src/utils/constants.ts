@@ -21,3 +21,19 @@ export const WIDGET_URL_PREFIX = 'widget:'
  * 支持的 Widget 类型
  */
 export const WIDGET_KINDS = ['weather', 'metrics', 'timezones', 'markets', 'holidays', 'docker', 'notes', 'rss', 'currency', 'deals'] as const
+
+/**
+ * Widget i18n label keys — single source of truth for all widget display names.
+ */
+export const WIDGET_LABEL_KEYS: Record<string, string> = {
+    weather: 'widgets:weather',
+    metrics: 'widgets:systemStatus',
+    timezones: 'widgets:worldClock',
+    markets: 'widgets:markets',
+    holidays: 'widgets:upcomingHolidays',
+    docker: 'widgets:docker',
+    notes: 'widgets:notes',
+    rss: 'widgets:rss',
+    currency: 'widgets:currency',
+    deals: 'widgets:deals',
+}

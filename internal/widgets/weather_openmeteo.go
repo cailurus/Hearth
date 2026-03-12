@@ -6,19 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/morezhou/hearth/internal/cache"
 )
 
-var weatherCache = struct {
-	mu    sync.Mutex
-	items map[string]Weather
-}{
-	items: map[string]Weather{},
-}
+var weatherTTLCache = cache.New[Weather](5 * time.Minute)
 
 func weatherCacheKey(lat, lon string) string {
 	return strings.TrimSpace(lat) + "," + strings.TrimSpace(lon)
@@ -41,33 +38,66 @@ type DailyForecast struct {
 }
 
 // FetchOpenMeteo uses Open-Meteo current weather (no API key).
+// Uses stale-while-revalidate: if cache is expired but stale data exists,
+// returns stale data immediately and refreshes in the background.
 func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error) {
 	if lat == "" || lon == "" {
 		return Weather{}, errors.New("weather lat/lon not configured")
 	}
 
-	// Reduce repeated calls (frontend may request the same location multiple times).
-	// If we get rate-limited by Open-Meteo, fall back to a cached value when available.
-	const freshTTL = 5 * time.Minute
-	const maxStale = 2 * time.Hour
 	key := weatherCacheKey(lat, lon)
-	if key != "," {
-		weatherCache.mu.Lock()
-		if cached, ok := weatherCache.items[key]; ok {
-			age := time.Since(time.Unix(cached.FetchedAt, 0))
-			if cached.FetchedAt > 0 && age >= 0 && age < freshTTL {
-				// Copy before unlocking to avoid data race on shared struct.
-				result := cached
-				weatherCache.mu.Unlock()
-				if strings.TrimSpace(city) != "" {
-					result.City = city
-				}
-				return result, nil
-			}
-		}
-		weatherCache.mu.Unlock()
+	if key == "," {
+		return Weather{}, errors.New("weather lat/lon invalid")
 	}
 
+	// Fresh cache hit — return immediately.
+	if cached, ok := weatherTTLCache.Get(key); ok {
+		result := cached
+		if strings.TrimSpace(city) != "" {
+			result.City = city
+		}
+		return result, nil
+	}
+
+	// Stale-while-revalidate: if stale data exists, return it and refresh async.
+	if stale, ok := weatherTTLCache.GetStale(key); ok {
+		result := stale
+		if strings.TrimSpace(city) != "" {
+			result.City = city
+		}
+		go fetchAndCacheWeather(key, lat, lon, city)
+		return result, nil
+	}
+
+	// No cached data at all — must fetch synchronously.
+	return fetchWeatherSync(ctx, key, lat, lon, city)
+}
+
+func fetchAndCacheWeather(key, lat, lon, city string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	w, err := fetchWeatherFromAPI(ctx, lat, lon, city)
+	if err != nil {
+		slog.Warn("weather background refresh failed", "error", err)
+		return
+	}
+	weatherTTLCache.Set(key, w)
+}
+
+func fetchWeatherSync(ctx context.Context, key, lat, lon, city string) (Weather, error) {
+	// Use a longer timeout for the synchronous first-load case.
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	w, err := fetchWeatherFromAPI(ctx, lat, lon, city)
+	if err != nil {
+		return Weather{}, err
+	}
+	weatherTTLCache.Set(key, w)
+	return w, nil
+}
+
+func fetchWeatherFromAPI(ctx context.Context, lat, lon, city string) (Weather, error) {
 	q := url.Values{}
 	q.Set("latitude", lat)
 	q.Set("longitude", lon)
@@ -81,26 +111,10 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 	if err != nil {
 		return Weather{}, err
 	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
+	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
-		if key != "," {
-			weatherCache.mu.Lock()
-			cached, ok := weatherCache.items[key]
-			weatherCache.mu.Unlock()
-			if ok {
-				age := time.Since(time.Unix(cached.FetchedAt, 0))
-				if cached.FetchedAt > 0 && age >= 0 && age < maxStale {
-					result := cached
-					if strings.TrimSpace(city) != "" {
-						result.City = city
-					}
-					return result, nil
-				}
-			}
-		}
 		return Weather{}, err
 	}
 	defer resp.Body.Close()
@@ -118,23 +132,7 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 		if reason == "" {
 			reason = resp.Status
 		}
-		upstreamErr := fmt.Errorf("open-meteo forecast: status=%d reason=%s", resp.StatusCode, reason)
-		if key != "," {
-			weatherCache.mu.Lock()
-			cached, ok := weatherCache.items[key]
-			weatherCache.mu.Unlock()
-			if ok {
-				age := time.Since(time.Unix(cached.FetchedAt, 0))
-				if cached.FetchedAt > 0 && age >= 0 && age < maxStale {
-					result := cached
-					if strings.TrimSpace(city) != "" {
-						result.City = city
-					}
-					return result, nil
-				}
-			}
-		}
-		return Weather{}, upstreamErr
+		return Weather{}, fmt.Errorf("open-meteo forecast: status=%d reason=%s", resp.StatusCode, reason)
 	}
 
 	var payload struct {
@@ -176,18 +174,12 @@ func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error)
 		}
 	}
 
-	w := Weather{
+	return Weather{
 		City:        city,
 		Temperature: payload.Current.Temperature,
 		WeatherCode: payload.Current.WeatherCode,
 		WindSpeed:   payload.Current.WindSpeed,
 		FetchedAt:   time.Now().Unix(),
 		Daily:       daily,
-	}
-	if key != "," {
-		weatherCache.mu.Lock()
-		weatherCache.items[key] = w
-		weatherCache.mu.Unlock()
-	}
-	return w, nil
+	}, nil
 }

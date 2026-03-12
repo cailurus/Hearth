@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // ResolveTimezone resolves an IANA timezone name for a given lat/lon using Open-Meteo.
@@ -33,8 +32,7 @@ func ResolveTimezone(ctx context.Context, lat, lon string) (string, error) {
 	}
 	req.Header.Set("User-Agent", "Hearth/0.1")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
