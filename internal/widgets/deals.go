@@ -287,7 +287,8 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 		return nil, err
 	}
 
-	var deals []GameDeal
+	// Deduplicate: keep only the cheapest deal per game title.
+	bestByTitle := map[string]GameDeal{}
 	for _, d := range raw {
 		// Skip Epic deals from CheapShark — we fetch them directly via fetchEpicFreeGames.
 		if d.StoreID == "25" {
@@ -297,11 +298,11 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 		savings, _ := strconv.ParseFloat(d.Savings, 64)
 		rating, _ := strconv.ParseFloat(d.SteamRatingPercent, 64)
 		ratingCount, _ := strconv.Atoi(d.SteamRatingCount)
+		salePrice, _ := strconv.ParseFloat(d.SalePrice, 64)
 
-		// Determine store name and URL based on storeID.
 		storeName, storeURL := cheapSharkStoreLink(d.StoreID, d.SteamAppID, d.DealID, d.Title)
 
-		deals = append(deals, GameDeal{
+		deal := GameDeal{
 			Title:       d.Title,
 			Thumbnail:   d.Thumb,
 			NormalPrice: "$" + d.NormalPrice,
@@ -312,7 +313,32 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 			Platform:    "pc",
 			StoreURL:    storeURL,
 			StoreName:   storeName,
-		})
+		}
+
+		titleKey := strings.ToUpper(d.Title)
+		if existing, ok := bestByTitle[titleKey]; ok {
+			// Keep the cheaper one.
+			existingPrice, _ := strconv.ParseFloat(strings.TrimPrefix(existing.SalePrice, "$"), 64)
+			if salePrice < existingPrice {
+				bestByTitle[titleKey] = deal
+			}
+		} else {
+			bestByTitle[titleKey] = deal
+		}
+	}
+
+	// Preserve deal rating order from the original API response.
+	var deals []GameDeal
+	seen := map[string]bool{}
+	for _, d := range raw {
+		titleKey := strings.ToUpper(d.Title)
+		if seen[titleKey] {
+			continue
+		}
+		if deal, ok := bestByTitle[titleKey]; ok {
+			deals = append(deals, deal)
+			seen[titleKey] = true
+		}
 	}
 	return deals, nil
 }
