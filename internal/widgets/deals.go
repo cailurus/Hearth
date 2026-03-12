@@ -319,26 +319,34 @@ func fetchCheapSharkDeals(ctx context.Context) ([]GameDeal, error) {
 
 // cheapSharkStoreLink maps a CheapShark storeID to the correct store name and direct URL.
 func cheapSharkStoreLink(storeID, steamAppID, dealID, title string) (storeName, storeURL string) {
+	// Map CheapShark storeID → store name + direct URL.
+	storeNames := map[string]string{
+		"1": "Steam", "2": "GamersGate", "3": "GreenManGaming",
+		"7": "GOG", "11": "Humble", "13": "Ubisoft", "15": "Fanatical",
+		"21": "WinGameStore", "23": "GameBillet", "25": "Epic Games",
+		"27": "Gamesplanet", "28": "Gamesload", "29": "2Game",
+		"30": "IndieGala", "35": "DreamGame",
+	}
+	storeName = storeNames[storeID]
+	if storeName == "" {
+		storeName = "Store"
+	}
+
 	switch storeID {
-	case "1": // Steam
-		storeName = "Steam"
+	case "1": // Steam — direct app link
 		if steamAppID != "" && steamAppID != "0" {
 			storeURL = fmt.Sprintf("https://store.steampowered.com/app/%s/", steamAppID)
 		} else {
 			storeURL = fmt.Sprintf("https://store.steampowered.com/search/?term=%s", url.QueryEscape(title))
 		}
-	case "25": // Epic Games Store
-		storeName = "Epic Games"
+	case "25": // Epic — search link
 		storeURL = fmt.Sprintf("https://store.epicgames.com/en-US/browse?q=%s&sortBy=relevancy", url.QueryEscape(title))
-	case "7": // GOG
-		storeName = "GOG"
+	case "7": // GOG — search link
 		storeURL = fmt.Sprintf("https://www.gog.com/games?query=%s", url.QueryEscape(title))
-	case "11": // Humble Store
-		storeName = "Humble"
+	case "11": // Humble — search link
 		storeURL = fmt.Sprintf("https://www.humblebundle.com/store/search?search=%s", url.QueryEscape(title))
 	default:
-		// For other stores, use CheapShark redirect which goes to the correct store.
-		storeName = "PC"
+		// All other stores — CheapShark redirect goes to the correct store page.
 		storeURL = fmt.Sprintf("https://www.cheapshark.com/redirect?dealID=%s", url.QueryEscape(dealID))
 	}
 	return
