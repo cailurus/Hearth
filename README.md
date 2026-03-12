@@ -27,21 +27,33 @@
 
 ## ✨ Features
 
+### Navigation & Layout
 - 🏠 **Grouped App Links** - Organize your services into custom groups
 - 🔖 **Bookmarks** - Compact pill-style link groups for quick access
 - 🔍 **Quick Launch** - `Cmd/Ctrl+K` to search apps instantly, with pinyin support
-- 🟢 **Service Status** - Live health-check indicators on every app card
-- 👋 **Greeting** - Time-based personalized greeting message
-- 🌤️ **Weather Widget** - Current weather with 5-day forecast
+- 🟢 **Service Status** - Live health-check indicators (supports HTTPS with self-signed certs)
+- 🖱️ **Drag & Drop** - Reorder groups and items freely
+- 🎨 **Frosted Glass UI** - Borderless glassmorphism card design with backdrop blur
+
+### Widgets
+- 🌤️ **Weather** - Current weather with 7-day forecast (Open-Meteo, no API key needed)
+- 📈 **Market Ticker** - US stocks, HK stocks, and crypto prices with intraday sparkline charts (Yahoo Finance)
+- 💱 **Currency Exchange** - Up to 4 currency pairs with 30-day history sparklines and flag emojis (Frankfurter API)
+- 📰 **RSS Feed** - Aggregate up to 10 RSS/Atom feeds with manual refresh, resizable height
+- 🎮 **Game Deals** - PC (CheapShark/Steam) and iOS (App Store) deals with prices, ratings, and direct store links
 - 🕐 **World Clock** - Up to 4 configurable timezone clocks
-- 📊 **System Metrics** - CPU, memory, disk, and network monitoring
-- 📈 **Market Ticker** - US stocks, HK stocks, and crypto price tracking
+- 📊 **System Metrics** - CPU, memory, disk, and network monitoring with historical charts (7-day retention)
+- 🐳 **Docker Monitoring** - Container status, resource usage, start/stop/restart actions
 - 🗓️ **Holidays** - Upcoming holidays for selected countries
-- 🎨 **Dynamic Backgrounds** - Bing daily, random, or video backgrounds
+- 📝 **Notes** - Quick notes and memos
+
+### Personalization
+- 👋 **Greeting & Daily Quote** - Time-based greeting with a daily inspirational quote (ZenQuotes)
+- 🗓️ **Solar Terms** - Optional Chinese 24 solar terms display next to date (toggleable)
+- 🎨 **Dynamic Backgrounds** - Bing daily, random, Unsplash, Picsum, or video backgrounds
 - 🌓 **Bilingual UI** - Chinese and English with full i18n
 - 📱 **Mobile Friendly** - Responsive design for all devices
-- 🐳 **Docker Monitoring** - Container status, CPU, memory, and network I/O
-- 🖱️ **Drag & Drop** - Reorder groups and items with drag and drop
+- ✨ **Easter Eggs** - 5 hidden particle effects (snow, rain, sakura, firefly, shooting stars)
 
 ## 🚀 Quick Start
 
@@ -127,7 +139,7 @@ Then mount `/vol2/1000/ServiceStore/docker-sock` → `/host-run` instead.
 ## 🛠️ Development
 
 ```bash
-# Prerequisites: Go 1.24+, Node.js 20+
+# Prerequisites: Go 1.25+, Node.js 20+
 
 git clone https://github.com/cailurus/Hearth
 cd Hearth
