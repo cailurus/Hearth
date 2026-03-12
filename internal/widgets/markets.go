@@ -299,9 +299,12 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	yahooRateWait()
 
 	yahooSym := toYahooSymbol(symbol, isCrypto)
-	// Use 1-day range with 15-minute intervals for both stocks and crypto.
-	// This ensures the sparkline chart and change % both reflect the same trading day.
-	chartRange := "1d"
+	// Use 5-day range with 15-minute intervals. During off-market hours,
+	// range=1d returns very few data points (3-5), making the sparkline
+	// a flat line. 5d always has 100+ points for a smooth chart.
+	// chartPreviousClose still reflects the previous trading day close,
+	// so the daily change % remains correct.
+	chartRange := "5d"
 	interval := "15m"
 
 	q := url.Values{}
