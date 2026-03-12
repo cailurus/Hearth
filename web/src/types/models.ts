@@ -120,6 +120,7 @@ export interface MarketQuote {
     priceUsd: number
     changePct24h: number
     series: number[]
+    totalSlots?: number
 }
 
 export interface MarketsResponse {

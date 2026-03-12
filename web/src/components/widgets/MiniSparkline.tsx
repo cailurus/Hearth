@@ -1,14 +1,19 @@
 /**
  * 迷你走势图组件
+ *
+ * totalSlots: if provided, the X axis represents this many slots total,
+ * but only series.length points are drawn. The line occupies a portion
+ * of the chart width, with the rest empty (for in-progress trading days).
  */
 
 interface MiniSparklineProps {
     series: number[]
+    totalSlots?: number
 }
 
-export function MiniSparkline({ series }: MiniSparklineProps) {
+export function MiniSparkline({ series, totalSlots }: MiniSparklineProps) {
     const pts = Array.isArray(series) ? series.filter((n) => Number.isFinite(n)) : []
-    
+
     if (pts.length < 2) {
         return <div className="h-6 w-full rounded bg-white/5" />
     }
@@ -18,16 +23,18 @@ export function MiniSparkline({ series }: MiniSparklineProps) {
     const min = Math.min(...pts)
     const max = Math.max(...pts)
     const span = max - min
-    
+
     const yOf = (v: number) => {
         if (!Number.isFinite(v)) return height / 2
         if (span <= 0) return height / 2
         const t = (v - min) / span
-        // Keep a bit of room for the x-axis.
         return (1 - t) * (height - 6) + 2
     }
 
-    const step = width / (pts.length - 1)
+    // If totalSlots is set and larger than pts.length, the line only
+    // occupies a portion of the chart width (partial trading day).
+    const slots = totalSlots && totalSlots > pts.length ? totalSlots : pts.length
+    const step = width / Math.max(slots - 1, 1)
     const d = pts.map((v, i) => `${(i * step).toFixed(2)},${yOf(v).toFixed(2)}`).join(' ')
 
     return (

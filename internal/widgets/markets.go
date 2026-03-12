@@ -23,6 +23,7 @@ type MarketQuote struct {
 	PriceUSD     float64   `json:"priceUsd"`
 	ChangePct24h float64   `json:"changePct24h"`
 	Series       []float64 `json:"series"`
+	TotalSlots   int       `json:"totalSlots,omitempty"` // full trading day slot count (for partial charts)
 }
 
 type MarketsResponse struct {
@@ -410,8 +411,10 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	}
 
 	var closes []float64
+	var totalSlots int // 0 = chart fills full width (default)
+
 	if isCrypto || len(timestamps) == 0 {
-		// Crypto: use all data points.
+		// Crypto: use all data points (24/7 trading).
 		for _, v := range allCloses {
 			if v != nil && *v > 0 {
 				closes = append(closes, *v)
@@ -420,39 +423,53 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	} else {
 		regStart := meta.CurrentTradingPeriod.Regular.Start
 		regEnd := meta.CurrentTradingPeriod.Regular.End
+
+		// Extract the last complete trading day's data (before today's session).
+		var lastCompleteDay []float64
+		var lastDayStartIdx int
+		for i, ts := range timestamps {
+			if i >= len(allCloses) || allCloses[i] == nil || *allCloses[i] <= 0 {
+				continue
+			}
+			if ts >= regStart {
+				break
+			}
+			// Detect day boundary (gap > 12 hours).
+			if len(lastCompleteDay) > 0 && ts-timestamps[lastDayStartIdx] > 12*3600 {
+				lastCompleteDay = nil
+			}
+			if len(lastCompleteDay) == 0 {
+				lastDayStartIdx = i
+			}
+			lastCompleteDay = append(lastCompleteDay, *allCloses[i])
+		}
+
+		// Extract today's regular session data.
+		var todaySession []float64
+		for i, ts := range timestamps {
+			if ts >= regStart && i < len(allCloses) {
+				if allCloses[i] != nil && *allCloses[i] > 0 {
+					todaySession = append(todaySession, *allCloses[i])
+				}
+			}
+		}
+
 		now := time.Now().Unix()
 		isMarketOpen := now >= regStart && now <= regEnd
 
 		if isMarketOpen {
-			// During market hours: show only today's regular session data.
-			for i, ts := range timestamps {
-				if ts >= regStart && i < len(allCloses) {
-					if allCloses[i] != nil && *allCloses[i] > 0 {
-						closes = append(closes, *allCloses[i])
-					}
-				}
+			// During market hours: show only today's data.
+			// Set totalSlots to the full day's expected point count so the
+			// chart occupies only a portion of the width, growing over time.
+			closes = todaySession
+			fullDaySlots := int((regEnd - regStart) / 900) // 15-min intervals
+			if fullDaySlots < 1 {
+				fullDaySlots = 26
 			}
+			totalSlots = fullDaySlots
 		} else {
-			// Pre-market or post-market: show the last complete trading day.
-			// Find the last regular session day by looking at timestamps
-			// that fall before today's regular session start.
-			var lastDayCloses []float64
-			var currentDayStart int64
-			for i, ts := range timestamps {
-				if i >= len(allCloses) || allCloses[i] == nil || *allCloses[i] <= 0 {
-					continue
-				}
-				if ts >= regStart {
-					break // Today's session data, skip for pre/post-market
-				}
-				// Detect day boundary: gap of >12 hours means new day.
-				if currentDayStart == 0 || ts-currentDayStart > 12*3600 {
-					lastDayCloses = nil
-					currentDayStart = ts
-				}
-				lastDayCloses = append(lastDayCloses, *allCloses[i])
-			}
-			closes = lastDayCloses
+			// Pre-market or post-market: show last complete trading day.
+			closes = lastCompleteDay
 		}
 	}
 
@@ -463,6 +480,7 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 				closes = append(closes, *v)
 			}
 		}
+		totalSlots = 0
 	}
 
 	changePct := 0.0
@@ -473,6 +491,13 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 
 	maxPoints := 30
 	series := downsampleTail(closes, maxPoints)
+	if totalSlots > 0 && maxPoints > 0 && totalSlots > len(series) {
+		// Scale totalSlots down proportionally if series was downsampled.
+		totalSlots = int(float64(totalSlots) * float64(len(series)) / float64(len(closes)))
+		if totalSlots < len(series) {
+			totalSlots = len(series)
+		}
+	}
 
 	return MarketQuote{
 		Symbol:       displaySym,
@@ -481,6 +506,7 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 		PriceUSD:     price,
 		ChangePct24h: changePct,
 		Series:       series,
+		TotalSlots:   totalSlots,
 	}, nil
 }
 

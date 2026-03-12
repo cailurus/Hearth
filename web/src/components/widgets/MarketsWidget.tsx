@@ -24,6 +24,7 @@ function MarketRow({ sym, item }: { sym: string; item?: MarketQuote }) {
     const series = hasData && Array.isArray(item.series)
         ? (item.series as unknown[]).map((x) => Number(x)).filter((n) => Number.isFinite(n))
         : []
+    const totalSlots = hasData && typeof item.totalSlots === 'number' && item.totalSlots > 0 ? item.totalSlots : undefined
 
     return (
         <div className="flex items-center gap-2 text-[10px] sm:text-[11px]">
@@ -42,7 +43,7 @@ function MarketRow({ sym, item }: { sym: string; item?: MarketQuote }) {
             {/* Sparkline */}
             <div className="min-w-[40px] flex-1">
                 {hasData ? (
-                    <MiniSparkline series={series} />
+                    <MiniSparkline series={series} totalSlots={totalSlots} />
                 ) : (
                     <div className="h-4 rounded bg-white/5 animate-pulse" />
                 )}
