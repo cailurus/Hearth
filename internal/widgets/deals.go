@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"log"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -61,7 +61,7 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 		var err error
 		pcDeals, err = fetchCheapSharkDeals(ctx)
 		if err != nil {
-			log.Printf("[deals] cheapshark: %v", err)
+			slog.Warn("game deals fetch failed", "source", "cheapshark", "error", err)
 		}
 	}()
 
@@ -71,7 +71,7 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 		var err error
 		epicDeals, err = fetchEpicFreeGames(ctx)
 		if err != nil {
-			log.Printf("[deals] epic: %v", err)
+			slog.Warn("game deals fetch failed", "source", "epic", "error", err)
 		}
 	}()
 
@@ -81,7 +81,7 @@ func FetchGameDeals(ctx context.Context, region string) (DealsResponse, error) {
 		var err error
 		iosDeals, err = fetchIOSDeals(ctx, region)
 		if err != nil {
-			log.Printf("[deals] ios: %v", err)
+			slog.Warn("game deals fetch failed", "source", "ios", "region", region, "error", err)
 		}
 	}()
 

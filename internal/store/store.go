@@ -3,11 +3,58 @@ package store
 import (
 	"database/sql"
 	"errors"
-	"strings"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// hasColumn reports whether `column` exists on `table`. Backed by SQLite's
+// PRAGMA table_info, which is always cheap (in-memory metadata read).
+func (s *Store) hasColumn(table, column string) (bool, error) {
+	// PRAGMA arguments cannot be parameterized; the table name is hard-coded
+	// at every call site so injection is not a concern.
+	rows, err := s.db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notnull    int
+			dfltValue  sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// addColumnIfMissing is a no-op if `column` already exists on `table`,
+// otherwise it runs ALTER TABLE ADD COLUMN. Used for best-effort schema
+// evolution between releases.
+func (s *Store) addColumnIfMissing(table, column, columnDef string) error {
+	exists, err := s.hasColumn(table, column)
+	if err != nil {
+		return fmt.Errorf("inspect %s.%s: %w", table, column, err)
+	}
+	if exists {
+		return nil
+	}
+	stmt := fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, columnDef)
+	if _, err := s.db.Exec(stmt); err != nil {
+		return fmt.Errorf("add column %s.%s: %w", table, column, err)
+	}
+	return nil
+}
 
 type Store struct {
 	db *sql.DB
@@ -126,26 +173,18 @@ func (s *Store) Migrate() error {
 		}
 	}
 
-	// Best-effort schema evolution.
-	if _, err := s.db.Exec(`ALTER TABLE apps ADD COLUMN description TEXT`); err != nil {
-		// Ignore if column already exists.
-		if !strings.Contains(strings.ToLower(err.Error()), "duplicate") {
-			return err
-		}
+	// Schema evolution. We check column existence via PRAGMA table_info before
+	// ALTER, rather than running ALTER and matching on the error string —
+	// SQLite's "duplicate column name" wording is implementation-detail and
+	// can shift between driver versions.
+	if err := s.addColumnIfMissing("apps", "description", `TEXT`); err != nil {
+		return err
 	}
-	if _, err := s.db.Exec(`ALTER TABLE groups ADD COLUMN kind TEXT NOT NULL DEFAULT 'app'`); err != nil {
-		// Ignore if column already exists.
-		errLower := strings.ToLower(err.Error())
-		if !strings.Contains(errLower, "duplicate") && !strings.Contains(errLower, "already exists") {
-			return err
-		}
+	if err := s.addColumnIfMissing("groups", "kind", `TEXT NOT NULL DEFAULT 'app'`); err != nil {
+		return err
 	}
-	if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); err != nil {
-		// Ignore if column already exists.
-		errLower := strings.ToLower(err.Error())
-		if !strings.Contains(errLower, "duplicate") && !strings.Contains(errLower, "already exists") {
-			return err
-		}
+	if err := s.addColumnIfMissing("users", "must_change_password", `INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
 	}
 	// Migrate legacy default system group names.
 	_, _ = s.db.Exec(`UPDATE groups SET kind = 'system' WHERE name IN ('系统组件', 'System Tools', 'System Widgets')`)

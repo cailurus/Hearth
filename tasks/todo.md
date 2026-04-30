@@ -336,3 +336,18 @@
   - 测试 `TestRateLimitPersistence` 显式验证:5 次 wrong → 第 6 次 ErrTooManyAttempts → 重启 Service → 仍然 ErrTooManyAttempts(in-memory 实现做不到)
 
 - README 同步:`HEARTH_DOCKER_ALLOW_PATTERNS` 加入 Configuration 表(en + zh)
+
+### Batch 2b — 2026-05-01
+
+完成项:**A6 · A7 · B1 · B2 · B3 · B4**。`go build ./...` / `go test ./...` / 前端 build 全部通过。
+
+- **B4** SQLite 单连接模式扩展注释:解释 WAL 单写者语义 + 链接 SQLite 文档,防止后续 PR 误改成连接池
+- **B2** Schema-evolution helper:`Store.hasColumn(table, column)` 用 `PRAGMA table_info` 查询;`addColumnIfMissing(table, column, def)` 替代 3 处 `strings.Contains(err.Error(), "duplicate")` 字符串匹配
+- **B1** 路由超时分级:删全局 `r.Use(middleware.Timeout(30s))`(`context.WithTimeout` 只能缩短不能延长,所以全局短上限会让慢路由卡住)。改成两个 chi.Router.Group:fast=10s(SQLite CRUD、缓存读、Docker socket、metrics history),slow=60s(所有 widgets/* + icon/resolve + background/refresh)
+- **B3** 外部 API 参数白名单:新建 `internal/server/validation.go` 提供 `validLang`(`^[a-z]{2}(-[A-Z]{2})?$`)和 `validRegion`(`^[a-z]{2}$`)。weather 三个 handler 的 `lang`、deals `region` 走白名单,非法值返回到 fallback 而非透传给上游
+- **A7** 全局 slog 统一:`internal/server/handlers_background.go`(15+ 处)、`handlers_metrics.go`、`handlers_feeds.go`、`internal/widgets/deals.go` 的 `log.Printf` 全部替换为 `slog.Warn/Debug/Info`,且都带结构化字段(provider、source、url、error)。可被 Loki/ELK 按级别过滤
+- **A6** 背景图 stale-cache 兜底:重写 `handleGetBackgroundImage`,缓存到期时把过期文件路径记到 `staleFile`,后续 `resolveBackgroundURL`/`FetchToFile` 任一失败即调 `serveStaleOrDefault`(优先 stale,再退到 bundled default)。Bing/Unsplash 抖动时用户看到的是昨天的照片而不是占位图
+
+### 已知偏离/待跟进 (更新)
+- 前端 build 仍报 `web/src/api/index.ts` 动静混合 import 警告(未引入,Phase 7 历史)
+- B3 只覆盖了最常见的 lang/region 参数。markets `symbols`、currency `pairs`、weather `lat/lon` 等数值/列表参数未做格式校验 — 如果发现真实问题再加

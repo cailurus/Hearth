@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -41,7 +41,6 @@ func (s *Server) handleGetBackground(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[bg] image request remote=%s ua=%q", r.RemoteAddr, r.UserAgent())
 	// Backgrounds are large and can be aggressively cached by browsers/proxies.
 	// Manual refresh should always take effect immediately.
 	w.Header().Set("Cache-Control", "no-store")
@@ -49,7 +48,6 @@ func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request
 	provider := s.getStringSetting(kvBackgroundProvider, "default")
 	intervalStr := s.getStringSetting(kvBackgroundInterval, "0")
 	interval, _ := time.ParseDuration(intervalStr)
-	log.Printf("[bg] provider=%s interval=%q parsed=%s", provider, intervalStr, interval)
 
 	// Backward compatibility: "bing" behaves like daily.
 	if provider == string(background.ProviderBing) {
@@ -68,7 +66,12 @@ func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request
 	if provider == string(background.ProviderUnsplash) {
 		cacheKey = cacheKey + ":" + s.getStringSetting(kvBackgroundUnsplashQuery, "")
 	}
-	log.Printf("[bg] cacheKey=%q", cacheKey)
+
+	// staleFile tracks the path to a previously-cached image whose freshness
+	// window has elapsed. If the upstream fetch below fails, we'd rather
+	// serve yesterday's photo than the bundled fallback.
+	var staleFile string
+
 	if entry, ok, err := s.store.GetBackgroundCache(cacheKey); err == nil && ok {
 		full := filepath.Join(s.cfg.DataDir, "cache", entry.FilePath)
 		if st, err := os.Stat(full); err == nil {
@@ -77,48 +80,60 @@ func (s *Server) handleGetBackgroundImage(w http.ResponseWriter, r *http.Request
 				// Bing daily: always daily (ignore interval selection).
 				fresh = time.Since(st.ModTime()) < 24*time.Hour
 			}
-			log.Printf("[bg] cacheHit file=%q mod=%s age=%s fresh=%v", full, st.ModTime().Format(time.RFC3339), time.Since(st.ModTime()), fresh)
 			if fresh {
 				http.ServeFile(w, r, full)
 				return
 			}
-			log.Printf("[bg] cacheStale; will refetch")
+			staleFile = full
+			slog.Debug("background cache stale; will refetch", "provider", provider, "age", time.Since(st.ModTime()))
 		} else {
-			log.Printf("[bg] cacheEntry exists but file missing/stat err=%v; will refetch", err)
-			// No usable cached file: fall through to resolve & fetch.
+			slog.Debug("background cache entry exists but file is missing", "provider", provider, "error", err)
 		}
 	} else if err != nil {
-		log.Printf("[bg] cache lookup error: %v", err)
-	} else {
-		log.Printf("[bg] cache miss")
-		// Cache miss: fall through to resolve & fetch.
+		slog.Warn("background cache lookup failed", "provider", provider, "error", err)
 	}
 
-	log.Printf("[bg] resolving background url")
 	imgURL, err := s.resolveBackgroundURL(r.Context(), provider)
 	if err != nil {
-		log.Printf("[bg] resolveBackgroundURL error: %v", err)
-		if serveDefaultBackground(w, r) {
+		slog.Warn("background URL resolution failed", "provider", provider, "error", err)
+		if s.serveStaleOrDefault(w, r, staleFile, provider) {
 			return
 		}
 		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
-	log.Printf("[bg] resolved url=%q", imgURL)
 	res, err := s.bgSvc.FetchToFile(r.Context(), imgURL)
 	if err != nil {
-		log.Printf("[bg] FetchToFile error: %v", err)
-		if serveDefaultBackground(w, r) {
+		slog.Warn("background fetch failed", "provider", provider, "url", imgURL, "error", err)
+		if s.serveStaleOrDefault(w, r, staleFile, provider) {
 			return
 		}
 		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
-	log.Printf("[bg] fetched ok file=%q mime=%q", res.FileName, res.MimeType)
 	_ = s.store.SetBackgroundCache(cacheKey, res.FileName)
 
 	full := filepath.Join(s.cfg.DataDir, "cache", res.FileName)
 	http.ServeFile(w, r, full)
+}
+
+// serveStaleOrDefault preferentially serves a previously-cached background
+// (even if past its freshness window), falling back to the bundled default
+// only if no usable stale file is on disk. Returns true if a response was
+// written to w.
+func (s *Server) serveStaleOrDefault(w http.ResponseWriter, r *http.Request, staleFile, provider string) bool {
+	if staleFile != "" {
+		if _, err := os.Stat(staleFile); err == nil {
+			slog.Info("serving stale background cache after upstream failure", "provider", provider, "file", staleFile)
+			http.ServeFile(w, r, staleFile)
+			return true
+		}
+	}
+	if serveDefaultBackground(w, r) {
+		slog.Info("serving bundled default background after upstream failure", "provider", provider)
+		return true
+	}
+	return false
 }
 
 func (s *Server) prefetchBackground(cacheKey string, provider string) {
@@ -135,12 +150,12 @@ func (s *Server) prefetchBackground(cacheKey string, provider string) {
 
 	imgURL, err := s.resolveBackgroundURL(ctx, provider)
 	if err != nil {
-		log.Printf("[bg] prefetch resolve error: %v", err)
+		slog.Warn("background prefetch URL resolution failed", "provider", provider, "error", err)
 		return
 	}
 	res, err := s.bgSvc.FetchToFile(ctx, imgURL)
 	if err != nil {
-		log.Printf("[bg] prefetch fetch error: %v", err)
+		slog.Warn("background prefetch failed", "provider", provider, "error", err)
 		return
 	}
 	_ = s.store.SetBackgroundCache(cacheKey, res.FileName)
@@ -174,7 +189,6 @@ func (s *Server) handleRefreshBackground(w http.ResponseWriter, r *http.Request)
 	if provider == string(background.ProviderUnsplash) {
 		cacheKey = cacheKey + ":" + s.getStringSetting(kvBackgroundUnsplashQuery, "")
 	}
-	log.Printf("[bg] refresh requested provider=%s cacheKey=%q", provider, cacheKey)
 
 	// Default provider: nothing remote to fetch.
 	if provider == "default" {
@@ -189,18 +203,18 @@ func (s *Server) handleRefreshBackground(w http.ResponseWriter, r *http.Request)
 
 	imgURL, err := s.resolveBackgroundURL(ctx, provider)
 	if err != nil {
-		log.Printf("[bg] refresh resolve error: %v", err)
+		slog.Warn("background refresh URL resolution failed", "provider", provider, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	res, err := s.bgSvc.FetchToFile(ctx, imgURL)
 	if err != nil {
-		log.Printf("[bg] refresh fetch error: %v", err)
+		slog.Warn("background refresh fetch failed", "provider", provider, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch background")
 		return
 	}
 	if err := s.store.SetBackgroundCache(cacheKey, res.FileName); err != nil {
-		log.Printf("[bg] refresh set cache error: %v", err)
+		slog.Warn("background refresh cache write failed", "provider", provider, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to update background cache")
 		return
 	}

@@ -13,7 +13,7 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 	lat := strings.TrimSpace(r.URL.Query().Get("lat"))
 	lon := strings.TrimSpace(r.URL.Query().Get("lon"))
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
-	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	lang := validLang(strings.TrimSpace(r.URL.Query().Get("lang")), "")
 	if city == "" {
 		city = s.getStringSetting(kvWeatherCity, "")
 	}
@@ -50,7 +50,7 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSearchCity(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("query"))
-	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	lang := validLang(strings.TrimSpace(r.URL.Query().Get("lang")), "")
 	if q == "" {
 		q = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
@@ -83,7 +83,7 @@ func (s *Server) handleSearchCity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetCityTimezone(w http.ResponseWriter, r *http.Request) {
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
-	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
+	lang := validLang(strings.TrimSpace(r.URL.Query().Get("lang")), "")
 	if city == "" {
 		city = strings.TrimSpace(r.URL.Query().Get("q"))
 	}

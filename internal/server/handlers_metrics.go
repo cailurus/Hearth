@@ -1,7 +1,7 @@
 package server
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +12,10 @@ import (
 func (s *Server) handleGetHostMetrics(w http.ResponseWriter, r *http.Request) {
 	m, err := metrics.Collect(r.Context())
 	if err != nil {
-		log.Printf("[metrics] Collect partial: %v", err)
+		// gopsutil's Collect can return partial data with an error indicating
+		// which sub-collector (cpu/disk/net) failed; the caller still gets a
+		// useful response, so we log and continue.
+		slog.Warn("metrics collect partial", "error", err)
 	}
 	writeJSON(w, http.StatusOK, m)
 }

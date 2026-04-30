@@ -69,7 +69,12 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	// SQLite works best with a single writer connection.
+	// SQLite (with WAL) supports concurrent readers but only ONE writer at a
+	// time. Letting database/sql open a real pool causes "database is locked"
+	// errors under any write contention, so we pin to a single connection.
+	// Combined with PRAGMA busy_timeout below, write requests serialize
+	// safely without surfacing transient errors to the caller.
+	// See https://www.sqlite.org/wal.html and https://github.com/mattn/go-sqlite3/issues/274.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
@@ -173,7 +178,12 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+
+	// Timeouts are applied per-route group below rather than globally:
+	// middleware.Timeout shortens via context.WithTimeout, so a global cap
+	// would prevent slow widget proxies from ever using their longer budget.
+	fast := middleware.Timeout(10 * time.Second) // local CRUD against SQLite, in-memory caches
+	slow := middleware.Timeout(60 * time.Second) // anything that proxies to external HTTP
 
 	corsOpts := cors.Options{
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -202,7 +212,7 @@ func (s *Server) buildRouter() chi.Router {
 	iconsDir := http.Dir(filepath.Join(s.cfg.DataDir, "icons"))
 	r.Handle("/assets/icons/*", http.StripPrefix("/assets/icons/", withNoCache(http.FileServer(iconsDir))))
 
-	r.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
+	r.With(fast).Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		dbOK := s.store.Ping() == nil
 		status := http.StatusOK
 		if !dbOK {
@@ -215,80 +225,74 @@ func (s *Server) buildRouter() chi.Router {
 		})
 	})
 
+	// ── Fast group: SQLite CRUD, in-memory caches, local Docker socket ──
 	r.Group(func(r chi.Router) {
-		r.Use(s.optionalUser)
-		r.Get("/api/auth/me", s.handleMe)
+		r.Use(fast)
+
+		r.With(s.optionalUser).Get("/api/auth/me", s.handleMe)
+		r.Post("/api/auth/login", s.handleLogin)
+		r.Post("/api/auth/logout", s.handleLogout)
+		r.With(s.requireAdmin).Post("/api/auth/password", s.handleChangePassword)
+
+		r.Get("/api/settings", s.handleGetSettings)
+		r.With(s.requireAdmin).Put("/api/settings", s.handlePutSettings)
+
+		r.Get("/api/groups", s.handleListGroups)
+		r.With(s.requireAdmin).Post("/api/groups", s.handleCreateGroup)
+		r.With(s.requireAdmin).Put("/api/groups/{id}", s.handleUpdateGroup)
+		r.With(s.requireAdmin).Delete("/api/groups/{id}", s.handleDeleteGroup)
+		r.With(s.requireAdmin).Post("/api/groups/reorder", s.handleReorderGroups)
+
+		r.Get("/api/apps", s.handleListApps)
+		r.Get("/api/apps/status", s.handleGetAppsStatus)
+		r.With(s.requireAdmin).Post("/api/apps", s.handleCreateApp)
+		r.With(s.requireAdmin).Put("/api/apps/{id}", s.handleUpdateApp)
+		r.With(s.requireAdmin).Delete("/api/apps/{id}", s.handleDeleteApp)
+		r.With(s.requireAdmin).Post("/api/apps/reorder", s.handleReorderApps)
+
+		r.Get("/api/icons/lucide/search", s.handleSearchLucideIcons)
+		r.Get("/api/icons/lucide/all", s.handleListAllLucideIcons)
+
+		r.Get("/api/background", s.handleGetBackground)
+		r.Get("/api/background/image", s.handleGetBackgroundImage)
+
+		r.Get("/api/metrics/host", s.handleGetHostMetrics)
+		r.Get("/api/metrics/history", s.handleGetMetricsHistory)
+		r.Get("/api/widgets/docker", s.handleGetDocker)
+		r.With(s.requireAdmin).Post("/api/widgets/docker/{id}/{action}", s.handleDockerAction)
+
+		r.With(s.requireAdmin).Get("/api/notes", s.handleListNotes)
+		r.With(s.requireAdmin).Post("/api/notes", s.handleCreateNote)
+		r.With(s.requireAdmin).Put("/api/notes/{id}", s.handleUpdateNote)
+		r.With(s.requireAdmin).Delete("/api/notes/{id}", s.handleDeleteNote)
+
+		r.With(s.requireAdmin).Get("/api/export", s.handleExport)
+		r.With(s.requireAdmin).Post("/api/import", s.handleImport)
+		r.With(s.requireAdmin).Post("/api/admin/reset", s.handleAdminReset)
 	})
-	// Auth endpoints are public
-	r.Post("/api/auth/login", s.handleLogin)
-	r.Post("/api/auth/logout", s.handleLogout)
-	// Password change requires admin
-	r.With(s.requireAdmin).Post("/api/auth/password", s.handleChangePassword)
 
-	// Settings: GET is public; PUT requires admin.
-	r.Get("/api/settings", s.handleGetSettings)
-	r.With(s.requireAdmin).Put("/api/settings", s.handlePutSettings)
+	// ── Slow group: anything that proxies to a third-party HTTP service ──
+	r.Group(func(r chi.Router) {
+		r.Use(slow)
 
-	// Groups/Apps: list is public; mutations require admin.
-	r.Get("/api/groups", s.handleListGroups)
-	r.With(s.requireAdmin).Post("/api/groups", s.handleCreateGroup)
-	r.With(s.requireAdmin).Put("/api/groups/{id}", s.handleUpdateGroup)
-	r.With(s.requireAdmin).Delete("/api/groups/{id}", s.handleDeleteGroup)
-	r.With(s.requireAdmin).Post("/api/groups/reorder", s.handleReorderGroups)
+		r.With(s.requireAdmin).Post("/api/icon/resolve", s.handleResolveIcon)
+		r.With(s.requireAdmin).Post("/api/background/refresh", s.handleRefreshBackground)
 
-	r.Get("/api/apps", s.handleListApps)
-	r.Get("/api/apps/status", s.handleGetAppsStatus)
-	r.With(s.requireAdmin).Post("/api/apps", s.handleCreateApp)
-	r.With(s.requireAdmin).Put("/api/apps/{id}", s.handleUpdateApp)
-	r.With(s.requireAdmin).Delete("/api/apps/{id}", s.handleDeleteApp)
-	r.With(s.requireAdmin).Post("/api/apps/reorder", s.handleReorderApps)
-
-	// Icon resolving requires admin (it performs server-side fetching and caching).
-	r.With(s.requireAdmin).Post("/api/icon/resolve", s.handleResolveIcon)
-
-	// Lucide icon search (public, cached on server).
-	r.Get("/api/icons/lucide/search", s.handleSearchLucideIcons)
-	r.Get("/api/icons/lucide/all", s.handleListAllLucideIcons)
-
-	// Background is public.
-	r.Get("/api/background", s.handleGetBackground)
-	r.Get("/api/background/image", s.handleGetBackgroundImage)
-	r.With(s.requireAdmin).Post("/api/background/refresh", s.handleRefreshBackground)
-
-	// Widgets are public.
-	r.Get("/api/widgets/weather", s.handleGetWeather)
-	r.Get("/api/widgets/geocode", s.handleSearchCity)
-	r.Get("/api/widgets/timezone", s.handleGetCityTimezone)
-	r.Get("/api/widgets/timezones", s.handleGetTimezones)
-	r.Get("/api/widgets/markets", s.handleGetMarkets)
-	r.Get("/api/widgets/markets/search", s.handleSearchMarkets)
-	r.Get("/api/widgets/markets/icon", s.handleGetMarketIcon)
-	r.Head("/api/widgets/markets/icon", s.handleGetMarketIcon)
-	r.Get("/api/widgets/holidays", s.handleGetHolidays)
-	r.Get("/api/widgets/holidays/countries", s.handleListHolidayCountries)
-	r.Get("/api/widgets/rss", s.handleGetRSS)
-	r.Get("/api/widgets/quote", s.handleGetQuote)
-	r.Get("/api/widgets/currency", s.handleGetCurrency)
-	r.Get("/api/widgets/deals", s.handleGetDeals)
-
-	// Host metrics are public (visitor dashboard).
-	r.Get("/api/metrics/host", s.handleGetHostMetrics)
-	r.Get("/api/metrics/history", s.handleGetMetricsHistory)
-	r.Get("/api/widgets/docker", s.handleGetDocker)
-	r.With(s.requireAdmin).Post("/api/widgets/docker/{id}/{action}", s.handleDockerAction)
-
-	// Notes require admin.
-	r.With(s.requireAdmin).Get("/api/notes", s.handleListNotes)
-	r.With(s.requireAdmin).Post("/api/notes", s.handleCreateNote)
-	r.With(s.requireAdmin).Put("/api/notes/{id}", s.handleUpdateNote)
-	r.With(s.requireAdmin).Delete("/api/notes/{id}", s.handleDeleteNote)
-
-	// Import/export requires admin.
-	r.With(s.requireAdmin).Get("/api/export", s.handleExport)
-	r.With(s.requireAdmin).Post("/api/import", s.handleImport)
-
-	// Admin maintenance.
-	r.With(s.requireAdmin).Post("/api/admin/reset", s.handleAdminReset)
+		r.Get("/api/widgets/weather", s.handleGetWeather)
+		r.Get("/api/widgets/geocode", s.handleSearchCity)
+		r.Get("/api/widgets/timezone", s.handleGetCityTimezone)
+		r.Get("/api/widgets/timezones", s.handleGetTimezones)
+		r.Get("/api/widgets/markets", s.handleGetMarkets)
+		r.Get("/api/widgets/markets/search", s.handleSearchMarkets)
+		r.Get("/api/widgets/markets/icon", s.handleGetMarketIcon)
+		r.Head("/api/widgets/markets/icon", s.handleGetMarketIcon)
+		r.Get("/api/widgets/holidays", s.handleGetHolidays)
+		r.Get("/api/widgets/holidays/countries", s.handleListHolidayCountries)
+		r.Get("/api/widgets/rss", s.handleGetRSS)
+		r.Get("/api/widgets/quote", s.handleGetQuote)
+		r.Get("/api/widgets/currency", s.handleGetCurrency)
+		r.Get("/api/widgets/deals", s.handleGetDeals)
+	})
 
 	// Serve built frontend (if present).
 	if h, ok := tryFrontendHandler(filepath.Join("web", "dist")); ok {
