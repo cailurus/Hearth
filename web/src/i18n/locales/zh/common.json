@@ -76,5 +76,6 @@
     "onboardingWeatherTitle": "默认天气城市",
     "onboardingWeatherHint": "用于仪表盘顶部的天气小组件。",
     "onboardingWeatherCity": "城市",
-    "onboardingWeatherPlaceholder": "北京、上海、旧金山……"
+    "onboardingWeatherPlaceholder": "北京、上海、旧金山……",
+    "atmosphereHint": "点击切换季节氛围 ✨"
 }

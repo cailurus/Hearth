@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { usePrefersReducedMotion } from '../../hooks'
 
 interface Petal {
     x: number
@@ -130,6 +131,8 @@ function SakuraCanvas() {
 }
 
 export function SakuraEffect() {
+    const reduce = usePrefersReducedMotion()
     if (typeof document === 'undefined') return null
+    if (reduce) return null
     return createPortal(<SakuraCanvas />, document.body)
 }

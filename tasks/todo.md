@@ -351,3 +351,21 @@
 ### 已知偏离/待跟进 (更新)
 - 前端 build 仍报 `web/src/api/index.ts` 动静混合 import 警告(未引入,Phase 7 历史)
 - B3 只覆盖了最常见的 lang/region 参数。markets `symbols`、currency `pairs`、weather `lat/lon` 等数值/列表参数未做格式校验 — 如果发现真实问题再加
+
+### Batch 3 — 2026-05-01
+
+完成项:**D1 · D4 · E1 · E2 · E3 · E6 · E7 · E8 · F6**(11 项中 9 项,D2/D3 见下)。`npm run build` / `npm run lint:i18n` 通过。
+
+- **D1** 删 `react-icons`:`MarketLogo` 删掉中间那层 `FaApple/FaMicrosoft/FaBitcoin/FaEthereum` fallback,只保留 [缓存图 → 字母圈] 两层。`npm uninstall react-icons` 把依赖也卸了。bundle 主 chunk -2.26 KB gzipped(预期之内,4 个 SVG 图标 tree-shake 之后本来就不大)。
+- **D4** `backdrop-filter` `@supports` 兜底:`index.css` 加规则,在不支持 backdrop-filter 的旧 Android WebView / Linux Firefox 上,所有 `.backdrop-blur-*` 元素自动改用 `rgba(0,0,0,0.85)` 不透明背景,保证文字可读。
+- **E1** Quick Launch ARIA combobox 模式:input `role=combobox` + `aria-expanded` + `aria-controls` + `aria-autocomplete=list` + `aria-activedescendant`;list 容器 `role=listbox`;每个结果 `role=option` + `aria-selected`。Modal 容器 `role=dialog aria-modal=true`。
+- **E2** Modal focus trap:`useRef<HTMLDivElement>` 拿到 panel,挂载时 `requestAnimationFrame` 把焦点移到第一个非"close"按钮的 focusable;`Tab`/`Shift+Tab` 在边界 wrap;关闭时 `setTimeout(0)` 把焦点还给原触发元素。
+- **E3** `usePrefersReducedMotion` hook + 5 个 Effect 组件早退 + `index.css` 全局 `@media (prefers-reduced-motion: reduce)` 把 animation/transition duration 压到 0.001ms。神经过敏 / 前庭敏感的用户访问 Hearth 不再头晕。
+- **E6** i18n parity CI 脚本:新建 `web/scripts/check-i18n-parity.mjs`,递归对比所有 locale 之间的 namespace key 集合,有 drift 退出码 1 + 详细 diff。`package.json` 加 `lint:i18n` script,首次运行通过(2 语言 × 5 namespace 全 OK)。
+- **E7** iOS 安全区:`index.html` viewport meta 加 `viewport-fit=cover`(否则 `env(safe-area-inset-*)` 在 iPhone 上恒为 0);Quick Launch 改 flex 居中 + 顶部 padding `max(12vh, env(safe-area-inset-top) + 1.5rem)`,不再用 `mt-[15vh]`(被软键盘遮挡 / 刘海推下来都有救)。
+- **E8** 动态背景对比度蒙层:`bg-black/25` → `bg-gradient-to-b from-black/40 via-black/20 to-black/30`,顶部加深保护无 glass 背景的标题/问候,中部稍亮,底部微暗。WCAG AA 文字对比度兜底。
+- **F6** 季节氛围彩蛋:`seasonalEffect()` 按当前月份(北半球)返回对应 effect — 春樱/夏萤/秋星/冬雪。footer © 按钮点击不再随机,固定开当前季节;hover 显示 i18n tooltip "点击切换季节氛围 ✨" / "Click for seasonal atmosphere ✨"。
+
+### 偏离/未做
+- **D2** lucide-react tree-shake 验证:**确认不需要做**。实际 build 输出 `lucide-icons-CKQy0cg3.js 12.79 KB → 4.97 KB gzipped`,Vite 已经 tree-shake 到位,Round 2 评审里"全量 1.5MB"是误判。
+- **D3** `pinyin-pro` (~138 KB gzipped)替换 / lazy-load:**未做**。是 D 段唯一真正能省体积的项,但要么切 `tiny-pinyin`(损失 `pattern: first` API,需自实现初首字母)、要么 lazy-load(改 useQuickLaunch 同步 → 异步)— 都需要单独决策与验证。建议作为独立小批次(可叫 batch 3.5 / 3a)。

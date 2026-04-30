@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { usePrefersReducedMotion } from '../../hooks'
 
 interface Drop {
     x: number
@@ -133,6 +134,8 @@ function RainCanvas() {
 }
 
 export function RainEffect() {
+    const reduce = usePrefersReducedMotion()
     if (typeof document === 'undefined') return null
+    if (reduce) return null
     return createPortal(<RainCanvas />, document.body)
 }

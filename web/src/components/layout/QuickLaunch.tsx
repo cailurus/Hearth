@@ -73,18 +73,34 @@ export function QuickLaunch({
         }
     }
 
+    const listboxId = 'quicklaunch-results'
+    const activeId = results.length > 0 ? `quicklaunch-option-${selectedIndex}` : undefined
+
     return (
-        <div className="fixed inset-0 z-50" onClick={onClose}>
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+        <div
+            className="fixed inset-0 z-50 flex items-start justify-center px-4"
+            // pt accounts for iOS notch via safe-area-inset-top, but never less
+            // than 8vh on tall phones / 12vh on desktop. Avoids the input
+            // sitting flush against the status bar on iPhone.
+            style={{
+                paddingTop: 'max(12vh, env(safe-area-inset-top, 0px) + 1.5rem)',
+                paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            }}
+            onClick={onClose}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('quickLaunchPlaceholder')}
+        >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
 
             <div
-                className="relative mx-auto mt-[15vh] w-full max-w-xl px-4"
+                className="relative w-full max-w-xl"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="overflow-hidden rounded-xl border border-white/15 bg-black/70 shadow-2xl backdrop-blur-xl">
                     {/* Search input */}
                     <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-                        <Search className="h-5 w-5 text-white/50" />
+                        <Search className="h-5 w-5 text-white/50" aria-hidden="true" />
                         <input
                             ref={inputRef}
                             type="text"
@@ -93,6 +109,13 @@ export function QuickLaunch({
                             onKeyDown={handleKeyDown}
                             placeholder={t('quickLaunchPlaceholder')}
                             className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/40"
+                            role="combobox"
+                            aria-expanded={results.length > 0}
+                            aria-controls={listboxId}
+                            aria-autocomplete="list"
+                            aria-activedescendant={activeId}
+                            autoComplete="off"
+                            spellCheck={false}
                         />
                         <kbd className="hidden sm:inline-block rounded border border-white/20 px-1.5 py-0.5 text-[10px] text-white/40">
                             ESC
@@ -100,7 +123,12 @@ export function QuickLaunch({
                     </div>
 
                     {/* Results list */}
-                    <div ref={listRef} className="max-h-[50vh] overflow-auto scrollbar-thin py-1">
+                    <div
+                        ref={listRef}
+                        id={listboxId}
+                        role="listbox"
+                        className="max-h-[50vh] overflow-auto scrollbar-thin py-1"
+                    >
                         {results.length === 0 && query.trim() ? (
                             <div className="px-4 py-6 text-center text-sm text-white/50">
                                 {t('quickLaunchNoResults')}
@@ -112,6 +140,9 @@ export function QuickLaunch({
                             results.map((item, i) => (
                                 <button
                                     key={item.id}
+                                    id={`quicklaunch-option-${i}`}
+                                    role="option"
+                                    aria-selected={i === selectedIndex}
                                     className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                                         i === selectedIndex
                                             ? 'bg-white/10'
@@ -137,7 +168,7 @@ export function QuickLaunch({
                                         </div>
                                     </div>
                                     {i === selectedIndex ? (
-                                        <kbd className="hidden sm:inline-block rounded border border-white/20 px-1 py-0.5 text-[10px] text-white/40">
+                                        <kbd className="hidden sm:inline-block rounded border border-white/20 px-1 py-0.5 text-[10px] text-white/40" aria-hidden="true">
                                             ↵
                                         </kbd>
                                     ) : null}

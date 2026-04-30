@@ -8,6 +8,37 @@ body,
   height: 100%;
 }
 
+/* Glassmorphism fallback for browsers without backdrop-filter support
+   (older Android WebView, some Linux/Firefox builds). Tailwind compiles
+   `backdrop-blur-*` to a `backdrop-filter: blur(...)` rule which is a no-op
+   there; combined with `bg-black/60` you'd see the dynamic background
+   bleed straight through and text would lose contrast. We bump the panel
+   opacity to ~0.85 in that fallback path. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .backdrop-blur-sm,
+  .backdrop-blur,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl,
+  .backdrop-blur-2xl,
+  .backdrop-blur-3xl {
+    background-color: rgba(0, 0, 0, 0.85) !important;
+  }
+}
+
+/* Honor system motion preferences. Effect canvases (snow/rain/sakura/...)
+   short-circuit in JavaScript via the usePrefersReducedMotion hook so we
+   don't burn CPU; this rule additionally squashes any CSS-driven anims
+   (modal fade-ins, hover transitions, etc.). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @keyframes statusBreath {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(0.8); }

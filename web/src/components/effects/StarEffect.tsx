@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { usePrefersReducedMotion } from '../../hooks'
 
 interface Star {
     x: number
@@ -170,6 +171,8 @@ function StarCanvas() {
 }
 
 export function StarEffect() {
+    const reduce = usePrefersReducedMotion()
     if (typeof document === 'undefined') return null
+    if (reduce) return null
     return createPortal(<StarCanvas />, document.body)
 }

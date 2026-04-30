@@ -56,7 +56,6 @@ export type { WeatherKind } from './weather'
 // 市场相关
 export {
     normalizeMarketSymbol,
-    iconForMarketSymbol,
 } from './markets'
 
 export type { KnownMarketSymbol } from './markets'

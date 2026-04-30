@@ -29,6 +29,18 @@ import { StarEffect } from '../components/effects/StarEffect'
 
 const EFFECTS = ['snow', 'rain', 'sakura', 'firefly', 'star'] as const
 type EffectType = typeof EFFECTS[number]
+
+// seasonalEffect returns the atmosphere effect that matches the current
+// (Northern Hemisphere) season. Used as the deterministic first pick when
+// the user toggles the footer Easter egg, so a December visit always sees
+// snow rather than a random firefly. Months are 1-indexed.
+function seasonalEffect(): EffectType {
+    const m = new Date().getMonth() + 1
+    if (m >= 3 && m <= 5) return 'sakura'  // 春
+    if (m >= 6 && m <= 8) return 'firefly' // 夏
+    if (m >= 9 && m <= 11) return 'star'   // 秋
+    return 'snow'                           // 冬
+}
 import { normalizeIanaTimeZone, displayGroupName, isSystemGroup } from '../utils'
 
 export default function HomePage({ initialDialog }: { initialDialog?: 'login' } = {}) {
@@ -326,7 +338,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         style={{ filter: bgBlur > 0 ? `blur(${bgBlur}px)` : undefined }}
                     />
                 )}
-                <div className="absolute inset-0 bg-black/25" />
+                {/* Readability overlay: stronger at the top where the title /
+                    greeting sit (no glass backdrop) and softer in the middle
+                    where cards already provide their own contrast. */}
+                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/30" />
             </div>
 
             <div className="fixed right-4 top-4 z-20 flex items-center gap-2">
@@ -556,12 +571,15 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             <footer className="py-6 text-center text-xs text-white/40">
                 <span>
                     <button
-                        onClick={() => setActiveEffect((prev) => {
-                            if (prev) return null
-                            return EFFECTS[Math.floor(Math.random() * EFFECTS.length)]
-                        })}
+                        onClick={() =>
+                            setActiveEffect((prev) => {
+                                if (prev) return null
+                                return seasonalEffect()
+                            })
+                        }
                         className="cursor-pointer transition-colors hover:text-white/60"
-                        title="✨"
+                        title={tr('common:atmosphereHint')}
+                        aria-label={tr('common:atmosphereHint')}
                     >
                         &copy;
                     </button>

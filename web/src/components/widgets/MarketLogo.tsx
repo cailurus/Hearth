@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react'
-import { normalizeMarketSymbol, iconForMarketSymbol } from '../../utils'
+import { normalizeMarketSymbol } from '../../utils'
 
 interface MarketLogoProps {
     symbol: string
@@ -11,7 +11,6 @@ interface MarketLogoProps {
 
 export function MarketLogo({ symbol }: MarketLogoProps) {
     const norm = useMemo(() => normalizeMarketSymbol(symbol), [symbol])
-    const Icon = useMemo(() => iconForMarketSymbol(symbol), [symbol])
     const cachedUrl = useMemo(() => {
         if (!symbol) return ''
         const qs = new URLSearchParams({ symbol: String(symbol) })
@@ -44,11 +43,10 @@ export function MarketLogo({ symbol }: MarketLogoProps) {
         )
     }
 
-    if (Icon) {
-        return <Icon aria-hidden="true" className="h-3 w-3 shrink-0 self-center text-white/70" />
-    }
-
-    // Letter fallback
+    // Letter fallback — used when the server-side icon proxy fails to deliver
+    // a cached image. Previously a small middle layer used react-icons brand
+    // logos for AAPL/MSFT/BTC/ETH, but that pulled in the entire react-icons
+    // package for four glyphs that only show when the proxy errors anyway.
     const letter = (norm || symbol || '?').charAt(0).toUpperCase()
     return (
         <span

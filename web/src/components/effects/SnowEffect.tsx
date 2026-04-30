@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { usePrefersReducedMotion } from '../../hooks'
 
 interface SnowEffectProps {
     onClose?: () => void
@@ -148,7 +149,9 @@ function SnowCanvas() {
 }
 
 export function SnowEffect(_props: SnowEffectProps) {
+    const reduce = usePrefersReducedMotion()
     if (typeof document === 'undefined') return null
+    if (reduce) return null
     return createPortal(<SnowCanvas />, document.body)
 }
 

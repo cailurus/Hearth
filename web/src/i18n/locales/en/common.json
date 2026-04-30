@@ -76,5 +76,6 @@
     "onboardingWeatherTitle": "Default weather city",
     "onboardingWeatherHint": "Used by the Weather widget at the top of your dashboard.",
     "onboardingWeatherCity": "City",
-    "onboardingWeatherPlaceholder": "Beijing, San Francisco, …"
+    "onboardingWeatherPlaceholder": "Beijing, San Francisco, …",
+    "atmosphereHint": "Click for seasonal atmosphere ✨"
 }

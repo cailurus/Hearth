@@ -5,6 +5,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { usePrefersReducedMotion } from '../../hooks'
 
 interface Firefly {
     x: number
@@ -130,6 +131,8 @@ function FireflyCanvas() {
 }
 
 export function FireflyEffect() {
+    const reduce = usePrefersReducedMotion()
     if (typeof document === 'undefined') return null
+    if (reduce) return null
     return createPortal(<FireflyCanvas />, document.body)
 }
