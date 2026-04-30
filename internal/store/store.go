@@ -90,6 +90,34 @@ func (s *Store) Migrate() error {
 			net_bytes_recv INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_metrics_history_ts ON metrics_history(ts);`,
+		// audit_log: append-only record of admin actions. Currently only Docker
+		// container actions are audited; the schema is generic enough to absorb
+		// future events (settings changes, user mgmt, etc.) without migration.
+		`CREATE TABLE IF NOT EXISTS audit_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			username TEXT NOT NULL DEFAULT '',
+			action TEXT NOT NULL,
+			target_type TEXT NOT NULL DEFAULT '',
+			target_id TEXT NOT NULL DEFAULT '',
+			target_name TEXT NOT NULL DEFAULT '',
+			remote_ip TEXT NOT NULL DEFAULT '',
+			result TEXT NOT NULL DEFAULT '',
+			error_msg TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);`,
+		// login_attempts: rate-limit state, persisted to survive restarts. Each
+		// failed login appends a row; the row that pushes the count over the
+		// threshold within attemptWindow has blocked_at set to the trigger time.
+		`CREATE TABLE IF NOT EXISTS login_attempts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL,
+			remote_ip TEXT NOT NULL DEFAULT '',
+			attempt_at INTEGER NOT NULL,
+			blocked_at INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_login_attempts_username_time ON login_attempts(username, attempt_at);`,
 	}
 
 	for _, stmt := range stmts {

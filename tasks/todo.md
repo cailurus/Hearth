@@ -310,3 +310,29 @@
 
 新加入的稳定机制:
 - 后端 `auth.Config.PasswordOutput` / `server.Config.PasswordOutput` 提供干净的依赖注入,production 默认 stdout、测试注入 buffer。
+
+### Batch 2a — 2026-05-01
+
+完成项:**A3 · A4 · A5**。`go build ./...` / `go test ./...` 全部通过(含新增 `TestRateLimitPersistence`)。
+
+- **A3** TLS InsecureClient 仅私网降级
+  - `internal/icon/resolver.go` 新增 `allowInsecureRetry(rawURL)`,只对 `isPrivateHost`(私网 IP / `localhost` / `.local` / `.lan`)放行 TLS 失败重试
+  - 三处自动降级点(`tryManifestIcons`、`fetchHTML`、`downloadIconForPage`)统一接入
+  - 公网域名遇 TLS 错误现在直接失败,不再被 MITM 投毒成 icon
+
+- **A4** Docker 操作审计 + 容器白名单
+  - 新增 `audit_log` 表(generic schema:user/action/target_type/target_id/target_name/result/error_msg)
+  - `internal/store/audit.go` `WriteAudit(AuditEntry)` 方法
+  - `internal/docker/client.go` 新增 `ContainerName(ctx, id)` (best-effort 名称解析)
+  - `internal/server/handlers_docker.go` 重写:每次 start/stop/restart 写一行 audit;若设置 `HEARTH_DOCKER_ALLOW_PATTERNS`,容器名必须匹配至少一条正则,否则 403 + audit "denied"
+  - 启动时 `compileDockerAllowPatterns` 编译正则,语法错误 fail-fast(不能让 typo 静默封锁面板)
+
+- **A5** 登录限流落 SQLite
+  - 新增 `login_attempts` 表(`username/remote_ip/attempt_at/blocked_at`)
+  - `auth.Service` 移除 in-memory `loginAttempts map` 与 `sync.Mutex`
+  - `Login(username, password, remoteIP)` 签名加 `remoteIP`(handler 透传 `r.RemoteAddr`)
+  - `checkRateLimit` / `recordFailedLogin` / `clearLoginAttempts` 全部走 DB;`cleanupExpiredLoginAttempts` 删 `attempt_at < now - max(window, blockDuration)`
+  - 失败时 fail-open(DB 错误不锁所有人),attempt 写失败仅 slog.Warn
+  - 测试 `TestRateLimitPersistence` 显式验证:5 次 wrong → 第 6 次 ErrTooManyAttempts → 重启 Service → 仍然 ErrTooManyAttempts(in-memory 实现做不到)
+
+- README 同步:`HEARTH_DOCKER_ALLOW_PATTERNS` 加入 Configuration 表(en + zh)

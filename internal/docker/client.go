@@ -279,6 +279,43 @@ func (s *statsResponse) network() (rx, tx uint64) {
 	return
 }
 
+// ContainerName looks up a container's primary name. The lookup is best-effort:
+// it returns an empty string and nil error if the container can't be found
+// (the caller can still proceed with the requested action and record the ID
+// alone in audit). It returns a non-nil error only on transport-level failure.
+func (c *Client) ContainerName(ctx context.Context, containerID string) (string, error) {
+	if !c.Available() {
+		return "", nil
+	}
+	endpoint := fmt.Sprintf("http://localhost/containers/%s/json", containerID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("docker inspect: status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return "", err
+	}
+	var info struct {
+		Name string `json:"Name"`
+	}
+	if err := json.Unmarshal(body, &info); err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(info.Name, "/"), nil
+}
+
 // ContainerAction sends a start/stop/restart command to a container.
 func (c *Client) ContainerAction(ctx context.Context, containerID, action string) error {
 	if !c.Available() {

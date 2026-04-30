@@ -3,10 +3,12 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,6 +41,10 @@ type Server struct {
 	bgSvc            *background.Service
 	dockerClient     *docker.Client
 	metricsCollector *metrics.Collector
+
+	// dockerAllowPatterns is the compiled allow-list of container name regexes
+	// (HEARTH_DOCKER_ALLOW_PATTERNS). nil/empty means "no restriction".
+	dockerAllowPatterns []*regexp.Regexp
 }
 
 func New(cfg Config) (*Server, error) {
@@ -103,12 +109,53 @@ func New(cfg Config) (*Server, error) {
 	dockerClient := docker.New(cfg.DockerSocket)
 	mc := metrics.NewCollector(db)
 	mc.Start()
-	s := &Server{cfg: cfg, db: db, store: st, auth: authSvc, iconResolver: iconResolver, bgSvc: bgSvc, dockerClient: dockerClient, metricsCollector: mc}
+
+	allowPatterns, err := compileDockerAllowPatterns(cfg.DockerAllowPatterns)
+	if err != nil {
+		return nil, fmt.Errorf("HEARTH_DOCKER_ALLOW_PATTERNS: %w", err)
+	}
+
+	s := &Server{
+		cfg:                 cfg,
+		db:                  db,
+		store:               st,
+		auth:                authSvc,
+		iconResolver:        iconResolver,
+		bgSvc:               bgSvc,
+		dockerClient:        dockerClient,
+		metricsCollector:    mc,
+		dockerAllowPatterns: allowPatterns,
+	}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
 	}
 	s.router = s.buildRouter()
 	return s, nil
+}
+
+// compileDockerAllowPatterns parses HEARTH_DOCKER_ALLOW_PATTERNS (comma-separated
+// regexes against the full container name). Empty input means "no restriction".
+// Invalid regexes fail fast at startup so an operator with a typo doesn't end up
+// with a silently locked-down dashboard.
+func compileDockerAllowPatterns(raw string) ([]*regexp.Regexp, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]*regexp.Regexp, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid pattern %q: %w", p, err)
+		}
+		out = append(out, re)
+	}
+	return out, nil
 }
 
 func (s *Server) Router() http.Handler { return s.router }

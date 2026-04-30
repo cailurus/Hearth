@@ -13,6 +13,7 @@ type Config struct {
 	CORSOrigins       string // comma-separated allowed origins; empty = dev defaults
 	CookieSecure      string // "auto" | "true" | "false"; default "auto"
 	DockerSocket      string // Docker socket path; default "/var/run/docker.sock"
+	DockerAllowPatterns string // comma-separated container-name regex allowlist for start/stop/restart; empty = allow all
 	InitialPassword   string // first-run admin password; if empty, a random password is generated and printed to PasswordOutput
 
 	// PasswordOutput receives the generated initial password banner. Production
@@ -29,17 +30,19 @@ func LoadConfigFromEnv() Config {
 	corsOrigins := getEnv("HEARTH_CORS_ORIGINS", "")
 	cookieSecure := getEnv("HEARTH_COOKIE_SECURE", "auto")
 	dockerSocket := getEnv("HEARTH_DOCKER_SOCKET", "/var/run/docker.sock")
+	dockerAllowPatterns := getEnv("HEARTH_DOCKER_ALLOW_PATTERNS", "")
 	initialPassword := getEnv("HEARTH_INITIAL_PASSWORD", "")
 
 	return Config{
-		Addr:              addr,
-		DataDir:           dataDir,
-		DatabaseDSN:       dsn,
-		SessionTTL:        sessionTTL,
-		CORSOrigins:       corsOrigins,
-		CookieSecure:      cookieSecure,
-		DockerSocket:      dockerSocket,
-		InitialPassword:   initialPassword,
+		Addr:                addr,
+		DataDir:             dataDir,
+		DatabaseDSN:         dsn,
+		SessionTTL:          sessionTTL,
+		CORSOrigins:         corsOrigins,
+		CookieSecure:        cookieSecure,
+		DockerSocket:        dockerSocket,
+		DockerAllowPatterns: dockerAllowPatterns,
+		InitialPassword:     initialPassword,
 	}
 }
 

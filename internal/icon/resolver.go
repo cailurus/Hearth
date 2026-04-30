@@ -146,7 +146,7 @@ func (r *Resolver) tryManifestIcons(ctx context.Context, manifestURL string, pag
 
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		if isTLSError(err) {
+		if isTLSError(err) && allowInsecureRetry(manifestURL) {
 			resp, err = r.InsecureClient.Do(req)
 		}
 		if err != nil {
@@ -324,6 +324,19 @@ func isPrivateHost(host string) bool {
 	return false
 }
 
+// allowInsecureRetry decides whether a TLS-error fallback to InsecureClient is
+// safe for the given URL. We only allow it when the host resolves into a
+// private / loopback network (or uses homelab-style suffixes) — for any public
+// hostname, an attacker that can break the TLS handshake could otherwise
+// poison the icon cache, which is then served back to browsers under our origin.
+func allowInsecureRetry(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return isPrivateHost(u.Host)
+}
+
 // ---------------------------------------------------------------------------
 // HTML fetching (with automatic TLS-error retry using insecure client)
 // ---------------------------------------------------------------------------
@@ -331,8 +344,8 @@ func isPrivateHost(host string) bool {
 func (r *Resolver) fetchHTML(ctx context.Context, pageURL string) ([]byte, string, error) {
 	htmlBytes, finalURL, err := r.fetchHTMLWithClient(ctx, pageURL, r.Client)
 	if err != nil {
-		if isTLSError(err) {
-			slog.Debug("retrying with insecure client due to TLS error", "url", pageURL)
+		if isTLSError(err) && allowInsecureRetry(pageURL) {
+			slog.Debug("retrying with insecure client due to TLS error (private host)", "url", pageURL)
 			return r.fetchHTMLWithClient(ctx, pageURL, r.InsecureClient)
 		}
 		return nil, pageURL, err
@@ -564,8 +577,8 @@ func (r *Resolver) downloadIcon(ctx context.Context, iconURL string) (string, er
 func (r *Resolver) downloadIconForPage(ctx context.Context, iconURL string, pageKey string) (string, error) {
 	iconFile, err := r.downloadIconWithClient(ctx, iconURL, pageKey, r.Client)
 	if err != nil {
-		if isTLSError(err) {
-			slog.Debug("retrying icon download with insecure client", "url", iconURL)
+		if isTLSError(err) && allowInsecureRetry(iconURL) {
+			slog.Debug("retrying icon download with insecure client (private host)", "url", iconURL)
 			return r.downloadIconWithClient(ctx, iconURL, pageKey, r.InsecureClient)
 		}
 		return "", err

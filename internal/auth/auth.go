@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math/big"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,20 +31,9 @@ type Config struct {
 	PasswordOutput io.Writer
 }
 
-// loginAttempt tracks failed login attempts for rate limiting.
-type loginAttempt struct {
-	count     int
-	lastTry   time.Time
-	blockedAt time.Time
-}
-
 type Service struct {
 	db         *sql.DB
 	sessionTTL time.Duration
-
-	// Rate limiting for login attempts (in-memory, resets on restart).
-	rateMu        sync.Mutex
-	loginAttempts map[string]*loginAttempt
 
 	stopCh chan struct{} // signals background goroutines to stop
 }
@@ -59,10 +47,9 @@ func New(cfg Config) (*Service, error) {
 		return nil, err
 	}
 	s := &Service{
-		db:            cfg.DB,
-		sessionTTL:    ttl,
-		loginAttempts: make(map[string]*loginAttempt),
-		stopCh:        make(chan struct{}),
+		db:         cfg.DB,
+		sessionTTL: ttl,
+		stopCh:     make(chan struct{}),
 	}
 	output := cfg.PasswordOutput
 	if output == nil {
@@ -111,20 +98,16 @@ func (s *Service) cleanupExpiredSessions() {
 	}
 }
 
+// cleanupExpiredLoginAttempts removes rows older than the longest window we
+// care about. Run hourly from sessionCleanupLoop.
 func (s *Service) cleanupExpiredLoginAttempts() {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
-	now := time.Now()
-	for username, attempt := range s.loginAttempts {
-		expired := false
-		if !attempt.blockedAt.IsZero() && now.After(attempt.blockedAt.Add(loginBlockDuration)) {
-			expired = true
-		} else if attempt.blockedAt.IsZero() && now.After(attempt.lastTry.Add(attemptWindow)) {
-			expired = true
-		}
-		if expired {
-			delete(s.loginAttempts, username)
-		}
+	keep := attemptWindow
+	if loginBlockDuration > keep {
+		keep = loginBlockDuration
+	}
+	cutoff := time.Now().Add(-keep).Unix()
+	if _, err := s.db.Exec(`DELETE FROM login_attempts WHERE attempt_at < ?`, cutoff); err != nil {
+		slog.Warn("failed to cleanup expired login attempts", "error", err)
 	}
 }
 
@@ -243,77 +226,81 @@ const (
 // ErrTooManyAttempts is returned when login rate limit is exceeded.
 var ErrTooManyAttempts = errors.New("too many login attempts, please try again later")
 
-// checkRateLimit checks if the username is rate-limited.
-// Returns error if blocked, nil otherwise.
+// checkRateLimit returns ErrTooManyAttempts if the username is currently
+// blocked. Block status is derived from the most recent row whose blocked_at
+// is non-zero; the block expires loginBlockDuration after that timestamp.
+// When a block has fully expired, prior attempt rows for the username are
+// cleared so the counter starts fresh on the next failed login.
 func (s *Service) checkRateLimit(username string) error {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
+	now := time.Now().Unix()
 
-	attempt, exists := s.loginAttempts[username]
-	if !exists {
+	var blockedAt int64
+	err := s.db.QueryRow(
+		`SELECT COALESCE(MAX(blocked_at), 0) FROM login_attempts WHERE username = ?`,
+		username,
+	).Scan(&blockedAt)
+	if err != nil {
+		// Fail open on database error: locking everyone out because of an
+		// infra glitch would be worse than the (already protected by bcrypt)
+		// brute-force window.
 		return nil
 	}
-
-	now := time.Now()
-
-	// If blocked and block duration hasn't passed.
-	if !attempt.blockedAt.IsZero() && now.Before(attempt.blockedAt.Add(loginBlockDuration)) {
+	if blockedAt == 0 {
+		return nil
+	}
+	if now < blockedAt+int64(loginBlockDuration.Seconds()) {
 		return ErrTooManyAttempts
 	}
-
-	// If block expired, reset.
-	if !attempt.blockedAt.IsZero() && now.After(attempt.blockedAt.Add(loginBlockDuration)) {
-		delete(s.loginAttempts, username)
-		return nil
-	}
-
-	// If last attempt was outside the window, reset.
-	if now.After(attempt.lastTry.Add(attemptWindow)) {
-		delete(s.loginAttempts, username)
-		return nil
-	}
-
+	// Block expired; reset history so the counter starts fresh.
+	_, _ = s.db.Exec(`DELETE FROM login_attempts WHERE username = ?`, username)
 	return nil
 }
 
-// recordFailedLogin records a failed login attempt.
-func (s *Service) recordFailedLogin(username string) {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
+// recordFailedLogin appends a row to login_attempts. If this attempt pushes
+// the running count within attemptWindow over maxLoginAttempts, blocked_at is
+// stamped so subsequent checkRateLimit calls see the block.
+func (s *Service) recordFailedLogin(username, remoteIP string) {
+	now := time.Now().Unix()
+	cutoff := now - int64(attemptWindow.Seconds())
 
-	now := time.Now()
-	attempt, exists := s.loginAttempts[username]
-	if !exists {
-		s.loginAttempts[username] = &loginAttempt{count: 1, lastTry: now}
+	var prior int
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM login_attempts WHERE username = ? AND attempt_at >= ?`,
+		username, cutoff,
+	).Scan(&prior); err != nil {
+		slog.Warn("failed to read login attempt count", "username", username, "error", err)
 		return
 	}
 
-	// If last attempt was outside the window, reset counter.
-	if now.After(attempt.lastTry.Add(attemptWindow)) {
-		attempt.count = 1
-		attempt.lastTry = now
-		attempt.blockedAt = time.Time{}
+	blocked := int64(0)
+	if prior+1 >= maxLoginAttempts {
+		blocked = now
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO login_attempts (username, remote_ip, attempt_at, blocked_at) VALUES (?, ?, ?, ?)`,
+		username, remoteIP, now, blocked,
+	); err != nil {
+		slog.Warn("failed to record login attempt", "username", username, "error", err)
 		return
 	}
-
-	attempt.count++
-	attempt.lastTry = now
-
-	// Block if exceeded max attempts.
-	if attempt.count >= maxLoginAttempts {
-		attempt.blockedAt = now
-		slog.Warn("login rate limit exceeded", "username", username, "attempts", attempt.count)
+	if blocked != 0 {
+		slog.Warn("login rate limit exceeded", "username", username, "remote_ip", remoteIP, "attempts", prior+1)
 	}
 }
 
-// clearLoginAttempts clears failed attempts after successful login.
+// clearLoginAttempts wipes attempt history for a username after a successful
+// login. Best-effort: a failure here is logged but not propagated, since a
+// successful authentication has already happened.
 func (s *Service) clearLoginAttempts(username string) {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
-	delete(s.loginAttempts, username)
+	if _, err := s.db.Exec(`DELETE FROM login_attempts WHERE username = ?`, username); err != nil {
+		slog.Warn("failed to clear login attempts", "username", username, "error", err)
+	}
 }
 
-func (s *Service) Login(username, password string) (string, error) {
+// Login authenticates a username/password pair, applies rate limiting, and
+// issues a session token on success. remoteIP is recorded for the rate-limit
+// audit trail; pass r.RemoteAddr from the HTTP handler.
+func (s *Service) Login(username, password, remoteIP string) (string, error) {
 	// Check rate limit first.
 	if err := s.checkRateLimit(username); err != nil {
 		return "", err
@@ -323,13 +310,13 @@ func (s *Service) Login(username, password string) (string, error) {
 	var passwordHash string
 	if err := s.db.QueryRow(`SELECT id, password_hash FROM users WHERE username = ?`, username).Scan(&userID, &passwordHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			s.recordFailedLogin(username)
+			s.recordFailedLogin(username, remoteIP)
 			return "", errors.New("invalid credentials")
 		}
 		return "", err
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
-		s.recordFailedLogin(username)
+		s.recordFailedLogin(username, remoteIP)
 		return "", errors.New("invalid credentials")
 	}
 
@@ -348,7 +335,7 @@ func (s *Service) Login(username, password string) (string, error) {
 		return "", err
 	}
 
-	slog.Info("user logged in", "username", username)
+	slog.Info("user logged in", "username", username, "remote_ip", remoteIP)
 	return token, nil
 }
 

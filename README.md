@@ -116,6 +116,7 @@ docker logs hearth | head -20
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 | `HEARTH_INITIAL_PASSWORD` | _(unset)_ | Initial admin password. If unset, a 16-char random password is generated and printed to stdout (visible via `docker logs`). |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed cross-origin URLs. The default permits the bundled Vite dev server only; production deployments serve the frontend from the same origin and need no override unless using a separate domain. |
+| `HEARTH_DOCKER_ALLOW_PATTERNS` | _(unset)_ | Comma-separated regex allowlist for container names that may receive `start`/`stop`/`restart` actions. Empty = allow any container the daemon exposes. Example: `^(jellyfin|sonarr|radarr)$`. Mismatches are denied with 403 and recorded to the audit log. |
 
 <details>
 <summary><b>NAS Docker Monitoring Setup</b> (fnOS, Synology, etc.)</summary>

@@ -40,7 +40,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.auth.Login(req.Username, req.Password)
+	token, err := s.auth.Login(req.Username, req.Password, r.RemoteAddr)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return

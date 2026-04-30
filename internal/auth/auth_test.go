@@ -42,14 +42,14 @@ func TestDefaultAdmin(t *testing.T) {
 func TestLoginLogout(t *testing.T) {
 	svc := newTestService(t)
 
-	_, err := svc.Login("admin", "wrong")
+	_, err := svc.Login("admin", "wrong", "127.0.0.1")
 	if err == nil {
 		t.Error("login with wrong password should fail")
 	}
 
 	svc.clearLoginAttempts("admin")
 
-	token, err := svc.Login("admin", "admin")
+	token, err := svc.Login("admin", "admin", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestLoginLogout(t *testing.T) {
 func TestChangePassword(t *testing.T) {
 	svc := newTestService(t)
 
-	token, err := svc.Login("admin", "admin")
+	token, err := svc.Login("admin", "admin", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}
@@ -96,16 +96,53 @@ func TestChangePassword(t *testing.T) {
 
 	svc.clearLoginAttempts("admin")
 
-	_, err = svc.Login("admin", "admin")
+	_, err = svc.Login("admin", "admin", "127.0.0.1")
 	if err == nil {
 		t.Error("old password should not work")
 	}
 
 	svc.clearLoginAttempts("admin")
 
-	_, err = svc.Login("admin", "newpassword")
+	_, err = svc.Login("admin", "newpassword", "127.0.0.1")
 	if err != nil {
 		t.Fatalf("login with new password failed: %v", err)
+	}
+}
+
+// TestRateLimitPersistence verifies that rate limiting survives restarts
+// because we now store attempt history in SQLite rather than in-memory.
+func TestRateLimitPersistence(t *testing.T) {
+	db := newTestDB(t)
+	setupSchema(t, db)
+
+	svc1, err := New(Config{DB: db, SessionTTL: "1h", InitialPassword: "admin"})
+	if err != nil {
+		t.Fatalf("New 1: %v", err)
+	}
+
+	// Burn the rate limit on svc1 (5 failed attempts).
+	for i := 0; i < 5; i++ {
+		if _, err := svc1.Login("admin", "wrong", "10.0.0.5"); err == nil {
+			t.Fatalf("attempt %d: expected error", i)
+		}
+	}
+	// 6th attempt — should be ErrTooManyAttempts even with the correct password.
+	if _, err := svc1.Login("admin", "admin", "10.0.0.5"); err != ErrTooManyAttempts {
+		t.Fatalf("expected ErrTooManyAttempts, got %v", err)
+	}
+
+	// Simulate a restart: brand-new Service against the same DB.
+	svc1.Stop()
+	svc2, err := New(Config{DB: db, SessionTTL: "1h", InitialPassword: "admin"})
+	if err != nil {
+		t.Fatalf("New 2: %v", err)
+	}
+	defer svc2.Stop()
+
+	// The block must persist across the restart. Previously this was an
+	// in-memory map and a restart trivially bypassed the limit.
+	if _, err := svc2.Login("admin", "admin", "10.0.0.5"); err != ErrTooManyAttempts {
+		t.Fatalf("after restart: expected ErrTooManyAttempts (persisted), got %v", err)
 	}
 }
 
@@ -124,6 +161,7 @@ func setupSchema(t *testing.T, db *sql.DB) {
 	stmts := []string{
 		"CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)",
+		"CREATE TABLE IF NOT EXISTS login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, remote_ip TEXT NOT NULL DEFAULT '', attempt_at INTEGER NOT NULL, blocked_at INTEGER NOT NULL DEFAULT 0)",
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
