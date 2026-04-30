@@ -6,7 +6,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"math/big"
+	"os"
 	"sync"
 	"time"
 
@@ -17,6 +20,16 @@ import (
 type Config struct {
 	DB         *sql.DB
 	SessionTTL string
+
+	// InitialPassword is the password used for the first-run admin user.
+	// If empty, a 16-char random password is generated and printed to PasswordOutput.
+	// Tests typically pass a fixed value (e.g. "admin") to make assertions deterministic.
+	InitialPassword string
+
+	// PasswordOutput receives the generated initial password when InitialPassword
+	// is empty. Defaults to os.Stdout (operators read it from `docker logs hearth`).
+	// Tests inject an *bytes.Buffer to capture and assert the value.
+	PasswordOutput io.Writer
 }
 
 // loginAttempt tracks failed login attempts for rate limiting.
@@ -51,7 +64,11 @@ func New(cfg Config) (*Service, error) {
 		loginAttempts: make(map[string]*loginAttempt),
 		stopCh:        make(chan struct{}),
 	}
-	if err := s.ensureDefaultAdmin(); err != nil {
+	output := cfg.PasswordOutput
+	if output == nil {
+		output = os.Stdout
+	}
+	if err := s.ensureDefaultAdmin(cfg.InitialPassword, output); err != nil {
 		return nil, err
 	}
 	go s.sessionCleanupLoop()
@@ -111,11 +128,20 @@ func (s *Service) cleanupExpiredLoginAttempts() {
 	}
 }
 
-// Default admin credentials:
-// username: admin
-// password: admin
-// (You should change it after first login.)
-func (s *Service) ensureDefaultAdmin() error {
+// ensureDefaultAdmin creates the initial "admin" user when no users exist yet.
+//
+// Password sourcing:
+//   - If initialPassword is non-empty (e.g. set via HEARTH_INITIAL_PASSWORD or
+//     supplied by tests), that value is used and the user is NOT flagged for
+//     forced change.
+//   - Otherwise a 16-char random password is generated and printed to output as
+//     a banner. Operators reach it via `docker logs hearth` (no file ever
+//     touches disk). The user is flagged with must_change_password=1; the
+//     server enforces a password change before any other admin action.
+//
+// The generated password is intentionally never sent through the slog pipeline
+// (which may be aggregated into Loki/ELK). It only goes to the dedicated writer.
+func (s *Service) ensureDefaultAdmin(initialPassword string, output io.Writer) error {
 	var cnt int
 	if err := s.db.QueryRow(`SELECT COUNT(1) FROM users`).Scan(&cnt); err != nil {
 		return err
@@ -124,17 +150,87 @@ func (s *Service) ensureDefaultAdmin() error {
 		return nil
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	password := initialPassword
+	mustChange := 0
+	source := "HEARTH_INITIAL_PASSWORD"
+
+	if password == "" {
+		generated, err := generateRandomPassword(16)
+		if err != nil {
+			return fmt.Errorf("generate initial password: %w", err)
+		}
+		password = generated
+		mustChange = 1
+		source = "generated"
+		printGeneratedPassword(output, generated)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 
 	now := time.Now().Unix()
-	_, err = s.db.Exec(`INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`,
-		uuid.NewString(), "admin", string(hash), now,
+	_, err = s.db.Exec(
+		`INSERT INTO users (id, username, password_hash, must_change_password, created_at) VALUES (?, ?, ?, ?, ?)`,
+		uuid.NewString(), "admin", string(hash), mustChange, now,
 	)
-	slog.Info("created default admin user", "username", "admin")
-	return err
+	if err != nil {
+		return err
+	}
+	slog.Info("created default admin user", "username", "admin", "password_source", source, "must_change", mustChange == 1)
+	return nil
+}
+
+// printGeneratedPassword renders a deliberately loud banner so it's hard to miss
+// when scrolling `docker logs hearth`. Format is human-oriented; tests parse the
+// `password:` line.
+func printGeneratedPassword(w io.Writer, pw string) {
+	const bar = "════════════════════════════════════════════════════════════"
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w, "  HEARTH — initial admin credentials (record this now)")
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w, "    username: admin")
+	fmt.Fprintln(w, "    password:", pw)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  Use this password for first login. You will be required")
+	fmt.Fprintln(w, "  to change it before any other action. It is NOT logged")
+	fmt.Fprintln(w, "  again and is NOT written to disk.")
+	fmt.Fprintln(w, bar)
+	fmt.Fprintln(w)
+}
+
+// passwordAlphabet excludes look-alike characters (0/O, 1/l/I) so an operator
+// can transcribe the generated password from a NAS console without errors.
+const passwordAlphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+func generateRandomPassword(n int) (string, error) {
+	max := big.NewInt(int64(len(passwordAlphabet)))
+	out := make([]byte, n)
+	for i := range out {
+		idx, err := rand.Int(rand.Reader, max)
+		if err != nil {
+			return "", err
+		}
+		out[i] = passwordAlphabet[idx.Int64()]
+	}
+	return string(out), nil
+}
+
+// MustChangePassword reports whether the user is required to change their password
+// before performing any other admin action. Returns false (and nil) for unknown users
+// to avoid leaking existence; the caller is expected to have already validated the session.
+func (s *Service) MustChangePassword(userID string) (bool, error) {
+	var v int
+	err := s.db.QueryRow(`SELECT must_change_password FROM users WHERE id = ?`, userID).Scan(&v)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return v == 1, nil
 }
 
 // Rate limiting constants.
@@ -325,7 +421,7 @@ func (s *Service) ChangePassword(userID string, oldPassword, newPassword string)
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	_, err = s.db.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, string(newHash), userID)
+	_, err = s.db.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`, string(newHash), userID)
 	if err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}
@@ -350,7 +446,7 @@ func (s *Service) ResetPassword(username, newPassword string) error {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	result, err := s.db.Exec(`UPDATE users SET password_hash = ? WHERE username = ?`, string(newHash), username)
+	result, err := s.db.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0 WHERE username = ?`, string(newHash), username)
 	if err != nil {
 		return fmt.Errorf("failed to update password: %w", err)
 	}

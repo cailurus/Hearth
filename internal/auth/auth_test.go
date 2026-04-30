@@ -11,7 +11,7 @@ func TestNewService(t *testing.T) {
 	db := newTestDB(t)
 	setupSchema(t, db)
 
-	svc, err := New(Config{DB: db, SessionTTL: "1h"})
+	svc, err := New(Config{DB: db, SessionTTL: "1h", InitialPassword: "admin"})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestDefaultAdmin(t *testing.T) {
 	db := newTestDB(t)
 	setupSchema(t, db)
 
-	_, err := New(Config{DB: db, SessionTTL: "1h"})
+	_, err := New(Config{DB: db, SessionTTL: "1h", InitialPassword: "admin"})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func newTestDB(t *testing.T) *sql.DB {
 func setupSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	stmts := []string{
-		"CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, must_change_password INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)",
 	}
 	for _, stmt := range stmts {
@@ -136,7 +136,7 @@ func newTestService(t *testing.T) *Service {
 	t.Helper()
 	db := newTestDB(t)
 	setupSchema(t, db)
-	svc, err := New(Config{DB: db, SessionTTL: "1h"})
+	svc, err := New(Config{DB: db, SessionTTL: "1h", InitialPassword: "admin"})
 	if err != nil {
 		t.Fatalf("failed to create service: %v", err)
 	}

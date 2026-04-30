@@ -11,3 +11,19 @@
 ## General: Verify Before Claiming Done
 - Never say "this should work" without actually running the code against the real input.
 - For icon resolution bugs, curl every candidate URL and check dimensions/content.
+
+## When auditing previously "fixed" security items, check the default branch
+- During Round 2 review (2026-05-01), `tasks/todo.md` listed Phase 1.1 ("CORS configuration fix") and Phase 1.3 ("Remove TLS auto-downgrade") as completed. Both turned out to be only partially fixed:
+  - Phase 1.1 added `HEARTH_CORS_ORIGINS` support but left the unset-default as `AllowedOrigins=["*"]` — i.e. the documented "fix" only protects users who actively configure it.
+  - Phase 1.3 didn't remove the `InsecureSkipVerify` client; it just delayed it to a "TLS-error retry" path that's still triggered automatically.
+- **Lesson**: when a past commit claims "fixed X via env var Y", read the *unset-Y* code path before trusting it. The dangerous default is the one most users will run.
+- **How to apply**: for any "[x] Phase N.M security fix", grep for the env var, then read the `else` branch / fallback. Don't rely on the todo description.
+
+## NAS / docker-self-host first-run secrets: print to stdout, don't write a file
+- Initial design (2026-05-01) wrote the auto-generated admin password to `<data>/initial-admin.txt`. User pushed back: "directly print to terminal, no file."
+- **Why**: NAS UIs (fnOS / Synology / 极空间) often *don't* expose a shell, but they always show container logs. `docker logs hearth` is one click; `docker exec cat /data/initial-admin.txt` is two layers of friction. Files also linger after rotation/restore and become a stale credential leak.
+- **How to apply**: for any first-run / break-glass / generated-secret in a self-host product, default to "print once to stdout as a loud banner". Provide a file fallback only if the user explicitly opts in. Never both. The banner should:
+  1. Be visually distinct (full-width separator bars) so it survives `docker logs | tail`.
+  2. Print **outside** the slog/structured pipeline, so it can't accidentally end up in Loki/ELK aggregators.
+  3. Self-document its impermanence ("not logged again, not written to disk").
+- **Process lesson**: when offering options to the user, sample the *non-obvious* good answer too. I gave them a/b/c all involving file persistence, missed "stdout-only". They had to add the option themselves.

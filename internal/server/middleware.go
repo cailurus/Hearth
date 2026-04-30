@@ -34,6 +34,14 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// While the operator hasn't replaced the generated initial password, all
+		// admin endpoints are blocked except the password-change endpoint itself.
+		if r.URL.Path != "/api/auth/password" {
+			if must, _ := s.auth.MustChangePassword(userID); must {
+				writeError(w, http.StatusForbidden, "must_change_password")
+				return
+			}
+		}
 		next.ServeHTTP(w, withUserID(r, userID))
 	})
 }

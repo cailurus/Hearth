@@ -84,7 +84,12 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	authSvc, err := auth.New(auth.Config{DB: db, SessionTTL: cfg.SessionTTL})
+	authSvc, err := auth.New(auth.Config{
+		DB:              db,
+		SessionTTL:      cfg.SessionTTL,
+		InitialPassword: cfg.InitialPassword,
+		PasswordOutput:  cfg.PasswordOutput,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +141,13 @@ func (s *Server) buildRouter() chi.Router {
 		}
 		corsOpts.AllowedOrigins = origins
 	} else {
-		// Dev mode: allow all origins.
-		corsOpts.AllowedOrigins = []string{"*"}
+		// Default: only the local Vite dev server. Production deployments serve the
+		// built frontend from the same origin as the API and need no CORS allowance;
+		// any other deployment must opt in explicitly via HEARTH_CORS_ORIGINS.
+		corsOpts.AllowedOrigins = []string{
+			"http://localhost:5173",
+			"http://127.0.0.1:5173",
+		}
 	}
 	r.Use(cors.Handler(corsOpts))
 

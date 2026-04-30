@@ -12,8 +12,9 @@ type loginRequest struct {
 }
 
 type meResponse struct {
-	Admin    bool   `json:"admin"`
-	Username string `json:"username,omitempty"`
+	Admin              bool   `json:"admin"`
+	Username           string `json:"username,omitempty"`
+	MustChangePassword bool   `json:"mustChangePassword"`
 }
 
 func (s *Server) shouldSecureCookie(r *http.Request) bool {
@@ -80,6 +81,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if uid, ok := userIDFromContext(r); ok {
 		if name, err := s.auth.UsernameByID(uid); err == nil {
 			resp.Username = name
+		}
+		if must, err := s.auth.MustChangePassword(uid); err == nil {
+			resp.MustChangePassword = must
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

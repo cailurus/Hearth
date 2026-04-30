@@ -94,11 +94,16 @@ volumes:
 
 | 项目 | 详情 |
 |------|------|
-| 默认登录 | `admin` / `admin` |
+| 首次用户名 | `admin` |
+| 首次密码 | 若设置了 `HEARTH_INITIAL_PASSWORD`，则使用该值；否则 Hearth 会生成 16 位随机密码并以横幅形式打印到标准输出，首次登录时强制修改。该密码不会写入磁盘，也不会再次出现在结构化日志中。 |
 | 频率限制 | 15 分钟内 5 次失败后锁定 5 分钟 |
 | 重置密码 | `docker exec -it hearth /hearth/reset-password -db /data/hearth.db -password 新密码` |
 
-⚠️ **首次登录后请立即修改默认密码！**
+获取容器启动时打印的初始密码：
+
+```bash
+docker logs hearth | head -20
+```
 
 ## ⚙️ 配置
 
@@ -109,6 +114,8 @@ volumes:
 | `HEARTH_SESSION_TTL` | `168h` | 会话过期时间 |
 | `HEARTH_COOKIE_SECURE` | `auto` | Secure Cookie 标志（`auto` / `true` / `false`） |
 | `HEARTH_DOCKER_SOCKET` | 自动检测 | Docker socket 路径（自动检测常见路径） |
+| `HEARTH_INITIAL_PASSWORD` | _(空)_ | 初始管理员密码。未设置时自动生成 16 位随机密码并打印到标准输出（通过 `docker logs` 查看）。 |
+| `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域允许列表（逗号分隔）。默认仅允许内置的 Vite 开发服务器；生产部署因前后端同源无需调整，除非将前端部署到独立域名。 |
 
 <details>
 <summary><b>NAS Docker 监控配置</b>（飞牛 fnOS、群晖 Synology 等）</summary>
@@ -135,6 +142,22 @@ mount --bind /var/run /vol2/1000/ServiceStore/docker-sock
 然后将 `/vol2/1000/ServiceStore/docker-sock` 挂载到 `/host-run`。
 
 </details>
+
+## 🔍 同类对比
+
+自托管仪表盘已有不少成熟方案。Hearth 面向使用 NAS（飞牛 OS / 群晖 / 极空间）的中文家庭用户，定位是带有温度感的个人启动页 —— 拼音 Cmd+K、玻璃态 UI、24 节气、粒子彩蛋。下表仅作参考，不是排名。
+
+| 维度        | Hearth        | homepage     | glance       | homarr         |
+| ----------- | ------------- | ------------ | ------------ | -------------- |
+| 适合谁      | 中文家用 NAS  | 重度玩家     | 信息聚合党   | 团队多用户     |
+| 技术栈      | Go + React 19 | Next.js      | 纯 Go        | Next.js + tRPC |
+| 配置方式    | UI + JSON     | YAML 文件    | YAML 文件    | UI 拖拽        |
+| 小组件      | 精选集合      | 100+ 集成    | RSS / HN / 微博 | 插件市场    |
+| 服务发现    | 手动添加      | Docker 标签  | 手动添加     | Docker + K8s   |
+| 多用户      | 单用户        | 无           | 无           | OIDC + RBAC    |
+| 体积        | 单 Go 二进制  | Node 运行时  | 二进制 ~25MB | Node 运行时    |
+
+**怎么选。** 如果你有几十个服务、想用 Docker 标签自动发现，选 **homepage**；如果你想要颜值最高、体积最小的报刊风信息聚合，选 **glance**；如果你要给团队提供带 SSO 和 RBAC 的共享仪表盘，选 **homarr**；如果你是中文家庭用户，想要拼音搜索、节气彩蛋和单二进制后端，Hearth 就是为这种口味做的。
 
 ## 🛠️ 开发
 

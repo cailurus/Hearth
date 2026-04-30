@@ -17,8 +17,10 @@ import { QuickLaunch } from '../components/layout/QuickLaunch'
 import { useQuickLaunch } from '../hooks/useQuickLaunch'
 import { useAppStatus } from '../hooks/useAppStatus'
 import { useVersionCheck } from '../hooks/useVersionCheck'
-import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog } from '../components/dialogs'
+import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog, ChangePasswordDialog, OnboardingWizard } from '../components/dialogs'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
+
+const ONBOARDED_KEY = 'hearth_onboarded_v1'
 import { SnowEffect } from '../components/effects/SnowEffect'
 import { RainEffect } from '../components/effects/RainEffect'
 import { SakuraEffect } from '../components/effects/SakuraEffect'
@@ -76,6 +78,28 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const versionCheck = useVersionCheck()
 
     const [activeEffect, setActiveEffect] = useState<EffectType | null>(null)
+
+    // ── First-run onboarding wizard ───────────────────────────────
+    // Shown once per browser after the forced password change clears (or
+    // immediately on first login if HEARTH_INITIAL_PASSWORD was provided).
+    // 4 skippable steps: language → background → first app → weather city.
+    // Closing or completing any step ends the wizard for good (localStorage).
+    const [onboardingOpen, setOnboardingOpen] = useState(false)
+    useEffect(() => {
+        if (!me) return
+        if (me.mustChangePassword) return
+        if (!me.admin) return
+        try {
+            if (window.localStorage.getItem(ONBOARDED_KEY)) return
+        } catch {
+            return
+        }
+        setOnboardingOpen(true)
+    }, [me])
+    const dismissOnboarding = () => {
+        setOnboardingOpen(false)
+        try { window.localStorage.setItem(ONBOARDED_KEY, '1') } catch {}
+    }
 
     // ── Daily quote ────────────────────────────────────────────
     const [quote, setQuote] = useState<QuoteResponse | null>(null)
@@ -620,6 +644,22 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 open={dialogs.edit}
                 onClose={() => closeDialog('edit')}
                 {...editor}
+            />
+
+            {/* Forced first-run password change. Cannot be dismissed; backend
+                rejects every other admin endpoint until the password is set. */}
+            <ChangePasswordDialog
+                open={!!me?.mustChangePassword}
+                forced
+                onSuccess={async () => { await actions.reload() }}
+            />
+
+            <OnboardingWizard
+                open={onboardingOpen}
+                settings={settings}
+                onSaveSettings={actions.updateSettings}
+                onCreateApp={async (data) => { await actions.createApp(data) }}
+                onClose={dismissOnboarding}
             />
 
             <QuickLaunch

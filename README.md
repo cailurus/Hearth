@@ -94,11 +94,16 @@ volumes:
 
 | Item | Details |
 |------|---------|
-| Default Login | `admin` / `admin` |
+| First-run username | `admin` |
+| First-run password | If `HEARTH_INITIAL_PASSWORD` is set, that value is used. Otherwise Hearth generates a 16-char random password, prints it once to stdout as a banner, and forces a password change on first login. The password is never written to disk and never re-emitted via the structured logger. |
 | Rate Limiting | 5 attempts per 15 min, then 5 min lockout |
 | Password Reset | `docker exec -it hearth /hearth/reset-password -db /data/hearth.db -password NEW` |
 
-⚠️ **Change the default password after first login!**
+To retrieve the generated password from a running container:
+
+```bash
+docker logs hearth | head -20
+```
 
 ## ⚙️ Configuration
 
@@ -109,6 +114,8 @@ volumes:
 | `HEARTH_SESSION_TTL` | `168h` | Session expiration |
 | `HEARTH_COOKIE_SECURE` | `auto` | Secure cookie flag (`auto` / `true` / `false`) |
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
+| `HEARTH_INITIAL_PASSWORD` | _(unset)_ | Initial admin password. If unset, a 16-char random password is generated and printed to stdout (visible via `docker logs`). |
+| `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed cross-origin URLs. The default permits the bundled Vite dev server only; production deployments serve the frontend from the same origin and need no override unless using a separate domain. |
 
 <details>
 <summary><b>NAS Docker Monitoring Setup</b> (fnOS, Synology, etc.)</summary>
@@ -135,6 +142,22 @@ mount --bind /var/run /vol2/1000/ServiceStore/docker-sock
 Then mount `/vol2/1000/ServiceStore/docker-sock` → `/host-run` instead.
 
 </details>
+
+## 🔍 Comparison
+
+The self-hosted dashboard space has several mature options. Hearth is built for Chinese-speaking home users on NAS platforms (fnOS / Synology / ZSpace) who want a personal launcher with a sense of warmth — pinyin Cmd+K search, glassmorphism UI, 24 solar terms, particle Easter eggs. The table below is a reference, not a ranking.
+
+| Dimension          | Hearth              | homepage            | glance              | homarr              |
+| ------------------ | ------------------- | ------------------- | ------------------- | ------------------- |
+| Best for           | CN home NAS users   | Power users, labels | News + aesthetics   | Teams, multi-user   |
+| Tech               | Go + React 19       | Next.js             | Pure Go             | Next.js + tRPC      |
+| Config             | UI + JSON           | YAML files          | YAML files          | UI drag-and-drop    |
+| Widgets            | Curated set         | 100+ integrations   | RSS / HN / Reddit   | Plugin marketplace  |
+| Service discovery  | Manual              | Docker labels       | Manual              | Docker + Kubernetes |
+| Multi-user         | Single user         | None                | None                | OIDC + RBAC         |
+| Bundle size        | Single Go binary    | Node runtime        | ~25MB binary        | Node runtime        |
+
+**Choosing the right tool.** If you run dozens of services and want auto-discovery via Docker labels, pick **homepage**. If you want the prettiest news-reader-style aggregator with the smallest footprint, pick **glance**. If you need shared dashboards with SSO and RBAC for a team, pick **homarr**. If you are a Chinese-speaking home user who wants pinyin search, seasonal touches, and a single-binary backend, Hearth is built for that taste.
 
 ## 🛠️ Development
 

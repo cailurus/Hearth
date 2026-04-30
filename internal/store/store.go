@@ -112,6 +112,13 @@ func (s *Store) Migrate() error {
 			return err
 		}
 	}
+	if _, err := s.db.Exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); err != nil {
+		// Ignore if column already exists.
+		errLower := strings.ToLower(err.Error())
+		if !strings.Contains(errLower, "duplicate") && !strings.Contains(errLower, "already exists") {
+			return err
+		}
+	}
 	// Migrate legacy default system group names.
 	_, _ = s.db.Exec(`UPDATE groups SET kind = 'system' WHERE name IN ('系统组件', 'System Tools', 'System Widgets')`)
 

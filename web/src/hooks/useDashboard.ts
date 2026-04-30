@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, apiPut, apiDelete } from '../api'
 import type { AppItem, BackgroundInfo, Group, Settings } from '../types'
 
-type Me = { admin: boolean; username?: string }
+type Me = { admin: boolean; username?: string; mustChangePassword?: boolean }
 
 interface DashboardState {
     me: Me | null

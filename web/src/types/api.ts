@@ -7,6 +7,8 @@
  */
 export interface Me {
     admin: boolean
+    username?: string
+    mustChangePassword?: boolean
 }
 
 /**
