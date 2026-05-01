@@ -429,3 +429,34 @@
 | **F3** | 5-8 个深度 widget | L | 等 C2 |
 | **F4** | 第三方 widget 协议 | XL | 等 C2 + F3 |
 | **F7** | K8s ingress 注解 | M | 优先级最低 |
+
+### Status 探测重分类 — 2026-05-01
+
+`/api/apps/status` 把所有错误归为 "down"(红点)是错的:服务器自身网络不可达不等于服务挂了。`internal/server/handlers_status.go` 加 `classifyProbeError`:
+- `EHOSTUNREACH` / `ENETUNREACH` / DNS 错 → "unknown"(灰点)
+- `ECONNREFUSED` / 其他 → "down"(红点)
+
+前端 StatusDot 已支持 unknown → 灰。`TestClassifyProbeError` 7 子用例覆盖映射。commit `627e65c`。
+
+### VPN 兼容模式 — 2026-05-01
+
+跨 VPN 部署的用户场景:Mac 装 VPN 抢默认路由后,Go `net.Dial` 对 LAN 目标(192.168/10/172.16)恒返 `EHOSTUNREACH`,即便 curl/浏览器从同台机器照常能连。后端探测/图标 resolve 全部受影响。
+
+设计稿 `docs/superpowers/specs/2026-05-01-vpn-compat-mode-design.md` + 实施计划 `docs/superpowers/plans/2026-05-01-vpn-compat-mode.md`。
+
+**用户契约**:右下角浮动 Shield/ShieldCheck 按钮,localStorage 持久化。开启后:
+- **状态探测**:私网 app 走浏览器 `fetch(url, {mode:'no-cors'})` + 5s 超时;公网仍走后端
+- **图标**:私网 app 直接 `<img src="${origin}/favicon.ico">`,绕开后端 resolve
+
+**实施分 8 个 commit**:
+1. `ea2be81` `isPrivateHost` util + 28 case smoke test + tsx dev dep
+2. `105c87b` `useVpnMode` localStorage hook + 跨 tab `storage` 事件同步
+3. `b93fd2d` `browserProbe` no-cors fetch + AbortController 超时
+4. `3d874ce` `useAppStatus(apps, options)` 重构,私网走浏览器
+5. `224babe` `VpnModeToggle` 浮动按钮
+6. `c2c994d` HomePage wire-up + en/zh i18n
+7. `45cb7da` `AppIcon` favicon fallback + `VpnModeContext` 共享 enabled
+
+**精度妥协**(spec 已明确):no-cors 模式下浏览器只能感知"连得上没",看不到 status code 与 latency 细分,所以私网 app 在 VPN 模式下没有 "slow" (>2000ms) 状态,也没有"上但 500"的精确状态——但用户场景里关心的就是绿/红可见性。
+
+**已知限制**:`isPrivateHost` 只识别字面 IP + `.local`/`.lan` 后缀;DNS 域名(`nas.example.com → 192.168.x.x`)不识别。用户应用 IP 直访或 mDNS 后缀。
