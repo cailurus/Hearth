@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -45,6 +46,11 @@ type Server struct {
 	// dockerAllowPatterns is the compiled allow-list of container name regexes
 	// (HEARTH_DOCKER_ALLOW_PATTERNS). nil/empty means "no restriction".
 	dockerAllowPatterns []*regexp.Regexp
+
+	// trustedProxyNetworks is the compiled CIDR list a reverse proxy can
+	// connect from for forward-auth header trust. Empty disables forward-auth
+	// regardless of HEARTH_TRUSTED_PROXY_HEADER.
+	trustedProxyNetworks []*net.IPNet
 }
 
 func New(cfg Config) (*Server, error) {
@@ -120,22 +126,57 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("HEARTH_DOCKER_ALLOW_PATTERNS: %w", err)
 	}
 
+	trustedProxyNets, err := compileTrustedProxyNetworks(cfg.TrustedProxyHeader, cfg.TrustedProxyNetworks)
+	if err != nil {
+		return nil, fmt.Errorf("HEARTH_TRUSTED_PROXY_NETWORKS: %w", err)
+	}
+
 	s := &Server{
-		cfg:                 cfg,
-		db:                  db,
-		store:               st,
-		auth:                authSvc,
-		iconResolver:        iconResolver,
-		bgSvc:               bgSvc,
-		dockerClient:        dockerClient,
-		metricsCollector:    mc,
-		dockerAllowPatterns: allowPatterns,
+		cfg:                  cfg,
+		db:                   db,
+		store:                st,
+		auth:                 authSvc,
+		iconResolver:         iconResolver,
+		bgSvc:                bgSvc,
+		dockerClient:         dockerClient,
+		metricsCollector:     mc,
+		dockerAllowPatterns:  allowPatterns,
+		trustedProxyNetworks: trustedProxyNets,
 	}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
 	}
 	s.router = s.buildRouter()
 	return s, nil
+}
+
+// compileTrustedProxyNetworks parses HEARTH_TRUSTED_PROXY_NETWORKS (comma-
+// separated CIDR list). If the operator has set HEARTH_TRUSTED_PROXY_HEADER
+// but left the network list empty, that's almost certainly a misconfiguration
+// — without an IP gate, anyone hitting the backend directly could forge the
+// header. We refuse to start in that case rather than silently disable.
+func compileTrustedProxyNetworks(header, raw string) ([]*net.IPNet, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if strings.TrimSpace(header) != "" {
+			return nil, fmt.Errorf("HEARTH_TRUSTED_PROXY_HEADER is set but HEARTH_TRUSTED_PROXY_NETWORKS is empty; refusing to trust the header without a source-IP guard")
+		}
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]*net.IPNet, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(p)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", p, err)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // compileDockerAllowPatterns parses HEARTH_DOCKER_ALLOW_PATTERNS (comma-separated
@@ -178,6 +219,11 @@ func (s *Server) buildRouter() chi.Router {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	// forwardAuth is a no-op unless TrustedProxyHeader + TrustedProxyNetworks
+	// are both configured. When active, it provisions a user from the upstream
+	// proxy header and stamps the userID into the request context so
+	// downstream auth middlewares short-circuit the cookie path.
+	r.Use(s.forwardAuth)
 
 	// Timeouts are applied per-route group below rather than globally:
 	// middleware.Timeout shortens via context.WithTimeout, so a global cap

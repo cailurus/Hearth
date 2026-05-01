@@ -16,6 +16,16 @@ type Config struct {
 	DockerAllowPatterns string // comma-separated container-name regex allowlist for start/stop/restart; empty = allow all
 	InitialPassword   string // first-run admin password; if empty, a random password is generated and printed to PasswordOutput
 
+	// Forward-auth (Authelia / Authentik / oauth2-proxy / Caddy forward_auth /
+	// Traefik forwardAuth). Both must be set to enable; either empty disables.
+	// TrustedProxyHeader is the HTTP header that carries the authenticated
+	// username (e.g. "X-Remote-User", "Remote-User"). TrustedProxyNetworks is
+	// the comma-separated CIDR list the proxy can connect from; the header is
+	// honored only when r.RemoteAddr is inside one of these networks. This
+	// prevents a request that bypasses the proxy from forging the header.
+	TrustedProxyHeader   string
+	TrustedProxyNetworks string
+
 	// PasswordOutput receives the generated initial password banner. Production
 	// leaves it nil (defaults to os.Stdout, captured by `docker logs`); tests
 	// inject a buffer to assert the printed value.
@@ -32,17 +42,21 @@ func LoadConfigFromEnv() Config {
 	dockerSocket := getEnv("HEARTH_DOCKER_SOCKET", "/var/run/docker.sock")
 	dockerAllowPatterns := getEnv("HEARTH_DOCKER_ALLOW_PATTERNS", "")
 	initialPassword := getEnv("HEARTH_INITIAL_PASSWORD", "")
+	trustedProxyHeader := getEnv("HEARTH_TRUSTED_PROXY_HEADER", "")
+	trustedProxyNetworks := getEnv("HEARTH_TRUSTED_PROXY_NETWORKS", "")
 
 	return Config{
-		Addr:                addr,
-		DataDir:             dataDir,
-		DatabaseDSN:         dsn,
-		SessionTTL:          sessionTTL,
-		CORSOrigins:         corsOrigins,
-		CookieSecure:        cookieSecure,
-		DockerSocket:        dockerSocket,
-		DockerAllowPatterns: dockerAllowPatterns,
-		InitialPassword:     initialPassword,
+		Addr:                 addr,
+		DataDir:              dataDir,
+		DatabaseDSN:          dsn,
+		SessionTTL:           sessionTTL,
+		CORSOrigins:          corsOrigins,
+		CookieSecure:         cookieSecure,
+		DockerSocket:         dockerSocket,
+		DockerAllowPatterns:  dockerAllowPatterns,
+		InitialPassword:      initialPassword,
+		TrustedProxyHeader:   trustedProxyHeader,
+		TrustedProxyNetworks: trustedProxyNetworks,
 	}
 }
 

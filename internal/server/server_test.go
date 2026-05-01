@@ -140,6 +140,96 @@ func TestMustChangePassword(t *testing.T) {
 	}
 }
 
+// TestForwardAuthHeader verifies that an upstream proxy can authenticate
+// users by setting HEARTH_TRUSTED_PROXY_HEADER, but ONLY when the request's
+// source IP is inside HEARTH_TRUSTED_PROXY_NETWORKS. Without the source-IP
+// guard, anyone hitting the backend could forge the header.
+func TestForwardAuthHeader(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := Config{
+		Addr:                 ":0",
+		DataDir:              dataDir,
+		DatabaseDSN:          filepath.Join(dataDir, "test.db"),
+		SessionTTL:           "1h",
+		InitialPassword:      "admin",
+		TrustedProxyHeader:   "X-Remote-User",
+		TrustedProxyNetworks: "10.0.0.0/8",
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Untrusted source IP — header should be ignored, request fails admin auth.
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"siteTitle":"X"}`))
+	req.RemoteAddr = "203.0.113.5:42000"
+	req.Header.Set("X-Remote-User", "alice")
+	w := httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("untrusted-IP forward-auth: expected 401, got %d", w.Code)
+	}
+
+	// Trusted source IP — header should provision and authenticate the user.
+	req = httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewBufferString(`{"siteTitle":"Y"}`))
+	req.RemoteAddr = "10.42.0.1:42001"
+	req.Header.Set("X-Remote-User", "alice")
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("trusted-IP forward-auth: expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+
+	// Same user via /api/auth/me should now report admin=true.
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.RemoteAddr = "10.42.0.1:42002"
+	req.Header.Set("X-Remote-User", "alice")
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("/me: expected 200, got %d", w.Code)
+	}
+	var me struct {
+		Admin    bool   `json:"admin"`
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
+		t.Fatalf("decode /me: %v", err)
+	}
+	if !me.Admin || me.Username != "alice" {
+		t.Fatalf("/me forward-auth: expected admin=true username=alice, got %+v", me)
+	}
+
+	// Forward-auth users should NOT be able to log in via /api/auth/login
+	// (their password_hash is the sentinel, never matches bcrypt).
+	body := bytes.NewBufferString(`{"username":"alice","password":"anything"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("forward-auth user password login: expected 401, got %d", w.Code)
+	}
+}
+
+// TestForwardAuthRefusesEmptyNetworks verifies that setting the header without
+// the source-IP guard fails fast at startup rather than silently trusting
+// every request that reaches the backend.
+func TestForwardAuthRefusesEmptyNetworks(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := Config{
+		Addr:               ":0",
+		DataDir:            dataDir,
+		DatabaseDSN:        filepath.Join(dataDir, "test.db"),
+		SessionTTL:         "1h",
+		InitialPassword:    "admin",
+		TrustedProxyHeader: "X-Remote-User",
+		// TrustedProxyNetworks intentionally empty
+	}
+	if _, err := New(cfg); err == nil {
+		t.Fatal("expected New to refuse TrustedProxyHeader without TrustedProxyNetworks")
+	}
+}
+
 func TestBackupAuth(t *testing.T) {
 	s := newTestServer(t)
 

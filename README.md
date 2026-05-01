@@ -117,6 +117,8 @@ docker logs hearth | head -20
 | `HEARTH_INITIAL_PASSWORD` | _(unset)_ | Initial admin password. If unset, a 16-char random password is generated and printed to stdout (visible via `docker logs`). |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed cross-origin URLs. The default permits the bundled Vite dev server only; production deployments serve the frontend from the same origin and need no override unless using a separate domain. |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(unset)_ | Comma-separated regex allowlist for container names that may receive `start`/`stop`/`restart` actions. Empty = allow any container the daemon exposes. Example: `^(jellyfin|sonarr|radarr)$`. Mismatches are denied with 403 and recorded to the audit log. |
+| `HEARTH_TRUSTED_PROXY_HEADER` | _(unset)_ | Name of the header carrying the authenticated username when Hearth sits behind a forward-auth proxy (Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`). Common values: `X-Remote-User`, `Remote-User`. Requires `HEARTH_TRUSTED_PROXY_NETWORKS` to also be set; Hearth refuses to start otherwise. |
+| `HEARTH_TRUSTED_PROXY_NETWORKS` | _(unset)_ | Comma-separated CIDR list naming the proxy's source IPs. The proxy header is honored only when the request arrives from one of these networks — bypassing the proxy and hitting Hearth directly cannot forge the header. Example: `10.0.0.0/8,172.20.0.0/16`. |
 
 <details>
 <summary><b>NAS Docker Monitoring Setup</b> (fnOS, Synology, etc.)</summary>

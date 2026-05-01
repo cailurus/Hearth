@@ -117,6 +117,8 @@ docker logs hearth | head -20
 | `HEARTH_INITIAL_PASSWORD` | _(空)_ | 初始管理员密码。未设置时自动生成 16 位随机密码并打印到标准输出（通过 `docker logs` 查看）。 |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域允许列表（逗号分隔）。默认仅允许内置的 Vite 开发服务器；生产部署因前后端同源无需调整，除非将前端部署到独立域名。 |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(空)_ | 容器 `start`/`stop`/`restart` 操作的容器名正则白名单（逗号分隔）。留空则允许操作任何 Docker 守护进程暴露的容器。示例：`^(jellyfin\|sonarr\|radarr)$`。不匹配则返回 403 并记入审计日志。 |
+| `HEARTH_TRUSTED_PROXY_HEADER` | _(空)_ | 当 Hearth 部署在 forward-auth 反代后（Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`），用于携带认证用户名的 HTTP 头部名称。常用值：`X-Remote-User`、`Remote-User`。必须同时设置 `HEARTH_TRUSTED_PROXY_NETWORKS`，否则 Hearth 拒绝启动。 |
+| `HEARTH_TRUSTED_PROXY_NETWORKS` | _(空)_ | 反代源 IP 的 CIDR 白名单（逗号分隔）。只有从这些网段进来的请求才会信任上面的头部 — 绕过反代直连 Hearth 无法伪造头部。示例：`10.0.0.0/8,172.20.0.0/16`。 |
 
 <details>
 <summary><b>NAS Docker 监控配置</b>（飞牛 fnOS、群晖 Synology 等）</summary>

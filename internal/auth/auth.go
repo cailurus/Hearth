@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -199,6 +200,43 @@ func generateRandomPassword(n int) (string, error) {
 		out[i] = passwordAlphabet[idx.Int64()]
 	}
 	return string(out), nil
+}
+
+// forwardAuthHashSentinel is stored as the password_hash for users provisioned
+// via the trusted-proxy header. It deliberately doesn't match the bcrypt
+// format so any /api/auth/login attempt against such a user fails the
+// CompareHashAndPassword check — these users authenticate via the upstream
+// proxy on every request, never via password.
+const forwardAuthHashSentinel = "__FORWARD_AUTH_ONLY__"
+
+// ProvisionForwardAuthUser returns the user ID for `username`, creating the
+// row on first sight. Used by the forward-auth middleware after it has
+// verified that the request comes from a trusted proxy and the upstream
+// header is non-empty. The created user has must_change_password=0 (no
+// password to change) and a sentinel password hash that prevents password
+// login for the same username.
+func (s *Service) ProvisionForwardAuthUser(username string) (string, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", errors.New("forward-auth username is empty")
+	}
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	id = uuid.NewString()
+	if _, err := s.db.Exec(
+		`INSERT INTO users (id, username, password_hash, must_change_password, created_at) VALUES (?, ?, ?, 0, ?)`,
+		id, username, forwardAuthHashSentinel, time.Now().Unix(),
+	); err != nil {
+		return "", err
+	}
+	slog.Info("provisioned forward-auth user", "username", username)
+	return id, nil
 }
 
 // MustChangePassword reports whether the user is required to change their password
