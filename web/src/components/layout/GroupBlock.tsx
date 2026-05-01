@@ -2,11 +2,10 @@
  * 分组区块组件 - 显示应用和小组件的分组
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { memo, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, RefreshCw, Trash2, Upload } from 'lucide-react'
-import type { AppItem, HolidaysResponse, HostMetrics, MarketsResponse, Weather, RSSResponse, CurrencyResponse, DealsResponse } from '../../types'
-import type { DockerResponse } from '../../types/models'
+import type { AppItem } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
 import { StatusDot } from '../ui/StatusDot'
 import { WeatherWidget } from '../widgets/WeatherWidget'
@@ -20,6 +19,7 @@ import { CurrencyWidget } from '../widgets/CurrencyWidget'
 import { DealsWidget } from '../widgets/DealsWidget'
 import { Spinner } from '../ui/Spinner'
 import { WidgetBoundary } from '../ui'
+import { useWidgetData } from '../../contexts/WidgetDataContext'
 import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -36,32 +36,12 @@ interface GroupBlockProps {
     onDeleteGroup?: (groupId: string) => void
     onRenameGroup?: (groupId: string, name: string) => void
     onReorder: (groupId: string | null, ids: string[]) => Promise<void>
-    weather: Weather | null
-    weatherErr: string | null
-    weatherById?: Record<string, Weather | null>
-    weatherErrById?: Record<string, string | null>
-    marketsById?: Record<string, MarketsResponse | null>
-    marketsErrById?: Record<string, string | null>
-    holidaysById?: Record<string, HolidaysResponse | null>
-    holidaysErrById?: Record<string, string | null>
-    metrics: HostMetrics | null
-    netRate?: { upBps: number; downBps: number } | null
     localTimezone: string
     statusMap?: Record<string, { status: string }>
-    dockerById?: Record<string, DockerResponse | null>
-    dockerErrById?: Record<string, string | null>
-    rssById?: Record<string, RSSResponse | null>
-    rssErrById?: Record<string, string | null>
-    refreshRss?: () => void
-    rssRefreshing?: boolean
-    currencyById?: Record<string, CurrencyResponse | null>
-    currencyErrById?: Record<string, string | null>
-    dealsById?: Record<string, DealsResponse | null>
-    dealsErrById?: Record<string, string | null>
     lang?: 'zh' | 'en'
 }
 
-export function GroupBlock({
+function GroupBlockImpl({
     groupId,
     name,
     groupKind,
@@ -73,30 +53,35 @@ export function GroupBlock({
     onDeleteGroup,
     onRenameGroup,
     onReorder,
-    weather,
-    weatherErr,
-    weatherById,
-    weatherErrById,
-    marketsById,
-    marketsErrById,
-    holidaysById,
-    holidaysErrById,
-    metrics,
-    netRate,
     localTimezone,
     statusMap,
-    dockerById,
-    dockerErrById,
-    rssById,
-    rssErrById,
-    refreshRss,
-    rssRefreshing,
-    currencyById,
-    currencyErrById,
-    dealsById,
-    dealsErrById,
     lang = 'en',
 }: GroupBlockProps) {
+    // Widget fetch state used to be 21 props drilled from HomePage. They're
+    // now read from context so HomePage state changes only invalidate this
+    // component when the relevant slice of widget data actually changes.
+    const {
+        weather,
+        weatherErr,
+        weatherById,
+        weatherErrById,
+        marketsById,
+        marketsErrById,
+        holidaysById,
+        holidaysErrById,
+        metrics,
+        netRate,
+        dockerById,
+        dockerErrById,
+        rssById,
+        rssErrById,
+        refreshRss,
+        rssRefreshing,
+        currencyById,
+        currencyErrById,
+        dealsById,
+        dealsErrById,
+    } = useWidgetData()
     const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
@@ -529,3 +514,12 @@ export function GroupBlock({
         </div>
     )
 }
+
+/**
+ * GroupBlock is wrapped in React.memo so HomePage state churn (clock tick,
+ * dialog state, drag hover) doesn't force every group on the page to
+ * re-render. Widget data flows through WidgetDataContext and is therefore
+ * not part of the prop comparison.
+ */
+export const GroupBlock = memo(GroupBlockImpl)
+GroupBlock.displayName = 'GroupBlock'

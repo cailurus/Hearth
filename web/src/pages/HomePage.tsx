@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { apiPost, apiPut } from '../api'
@@ -18,6 +18,7 @@ import { useQuickLaunch } from '../hooks/useQuickLaunch'
 import { useAppStatus } from '../hooks/useAppStatus'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog, ChangePasswordDialog, OnboardingWizard } from '../components/dialogs'
+import { WidgetDataProvider } from '../contexts/WidgetDataContext'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 
 const ONBOARDED_KEY = 'hearth_onboarded_v1'
@@ -155,29 +156,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     // Background blur: prefer draft (live slider value) over saved settings
     const bgBlur = siteDraft?.background?.blur ?? settings?.background?.blur ?? (isVideoBackground ? 0 : 3)
 
-    // Use the useWidgets hook for widget data fetching
-    const {
-        weather,
-        weatherErr,
-        weatherById,
-        weatherErrById,
-        marketsById,
-        marketsErrById,
-        holidaysById,
-        holidaysErrById,
-        metrics,
-        netRate,
-        dockerById,
-        dockerErrById,
-        rssById,
-        rssErrById,
-        refreshRss,
-        rssRefreshing,
-        currencyById,
-        currencyErrById,
-        dealsById,
-        dealsErrById,
-    } = useWidgets({
+    // Widget fetch state. The whole result is funneled through
+    // <WidgetDataProvider> below; consumers (GroupBlock, widget components)
+    // read whichever slice they need via useWidgetData() rather than having
+    // every field drilled down as props.
+    const widgetData = useWidgets({
         apps,
         lang,
         defaultCity: settings?.weather?.city,
@@ -250,39 +233,58 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [apps])
 
-    const openAddForGroup = (groupId: string | null) => {
-        if (!isAdmin) return
-        const g = groupId ? groups.find((x) => x.id === groupId) : null
-        const kind = g && isSystemGroup(g.kind, g.name) ? 'system' : (g?.kind === 'bookmark' ? 'bookmark' : 'app')
-        openAddItem(groupId, kind)
-    }
+    // useDashboard recreates its `actions` object every render. Bouncing
+    // through this ref lets the wrapped callbacks below stay referentially
+    // stable (they don't depend on `actions` directly), which in turn lets
+    // React.memo'd children skip re-renders driven by HomePage churn.
+    const actionsRef = useRef(actions)
+    actionsRef.current = actions
 
-    const deleteItem = async (id: string) => {
-        if (!isAdmin) return
-        try {
-            await actions.deleteApp(id)
-        } catch {
-            // ignore
-        }
-    }
+    const openAddForGroup = useCallback(
+        (groupId: string | null) => {
+            if (!isAdmin) return
+            const g = groupId ? groups.find((x) => x.id === groupId) : null
+            const kind = g && isSystemGroup(g.kind, g.name) ? 'system' : (g?.kind === 'bookmark' ? 'bookmark' : 'app')
+            openAddItem(groupId, kind)
+        },
+        [isAdmin, groups, openAddItem]
+    )
 
-    const deleteGroup = async (groupId: string) => {
-        if (!isAdmin) return
-        try {
-            await actions.deleteGroup(groupId)
-        } catch {
-            // ignore
-        }
-    }
+    const deleteItem = useCallback(
+        async (id: string) => {
+            if (!isAdmin) return
+            try {
+                await actionsRef.current.deleteApp(id)
+            } catch {
+                // ignore
+            }
+        },
+        [isAdmin]
+    )
 
-    const renameGroup = async (groupId: string, newName: string) => {
-        if (!isAdmin) return
-        try {
-            await actions.updateGroup(groupId, newName)
-        } catch {
-            // ignore
-        }
-    }
+    const deleteGroup = useCallback(
+        async (groupId: string) => {
+            if (!isAdmin) return
+            try {
+                await actionsRef.current.deleteGroup(groupId)
+            } catch {
+                // ignore
+            }
+        },
+        [isAdmin]
+    )
+
+    const renameGroup = useCallback(
+        async (groupId: string, newName: string) => {
+            if (!isAdmin) return
+            try {
+                await actionsRef.current.updateGroup(groupId, newName)
+            } catch {
+                // ignore
+            }
+        },
+        [isAdmin]
+    )
 
     const title = settings?.siteTitle || 'Hearth'
     const baseBgUrl = bg?.imageUrl || '/api/background/image'
@@ -307,6 +309,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     }
 
     return (
+        <WidgetDataProvider value={widgetData}>
         <div
             className="relative min-h-screen"
             onContextMenu={(e) => {
@@ -481,28 +484,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         onEdit={editor.openEditItem}
                                         onDelete={deleteItem}
                                         onReorder={reorderItems}
-                                        weather={weather}
-                                        weatherErr={weatherErr}
-                                        weatherById={weatherById}
-                                        weatherErrById={weatherErrById}
-                                        marketsById={marketsById}
-                                        marketsErrById={marketsErrById}
-                                        holidaysById={holidaysById}
-                                        holidaysErrById={holidaysErrById}
-                                        metrics={metrics}
-                                        netRate={netRate}
                                         localTimezone={systemTimezone}
                                         statusMap={statusMap}
-                                        dockerById={dockerById}
-                                        dockerErrById={dockerErrById}
-                                        rssById={rssById}
-                                        rssErrById={rssErrById}
-                                        refreshRss={refreshRss}
-                                        rssRefreshing={rssRefreshing}
-                                        currencyById={currencyById}
-                                        currencyErrById={currencyErrById}
-                                        dealsById={dealsById}
-                                        dealsErrById={dealsErrById}
                                         lang={lang}
                                     />
                                 )
@@ -548,30 +531,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                         onEdit={editor.openEditItem}
                                         onDelete={deleteItem}
                                         onDeleteGroup={deleteGroup}
-                                            onRenameGroup={renameGroup}
+                                        onRenameGroup={renameGroup}
                                         onReorder={reorderItems}
-                                        weather={weather}
-                                        weatherErr={weatherErr}
-                                        weatherById={weatherById}
-                                        weatherErrById={weatherErrById}
-                                        marketsById={marketsById}
-                                        marketsErrById={marketsErrById}
-                                        holidaysById={holidaysById}
-                                        holidaysErrById={holidaysErrById}
-                                        metrics={metrics}
-                                        netRate={netRate}
                                         localTimezone={systemTimezone}
                                         statusMap={statusMap}
-                                        dockerById={dockerById}
-                                        dockerErrById={dockerErrById}
-                                        rssById={rssById}
-                                        rssErrById={rssErrById}
-                                        refreshRss={refreshRss}
-                                        rssRefreshing={rssRefreshing}
-                                        currencyById={currencyById}
-                                        currencyErrById={currencyErrById}
-                                        dealsById={dealsById}
-                                        dealsErrById={dealsErrById}
                                         lang={lang}
                                     />
                                 </div>
@@ -708,5 +671,6 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 onSelect={quickLaunch.selectCurrent}
             />
         </div>
+        </WidgetDataProvider>
     )
 }
