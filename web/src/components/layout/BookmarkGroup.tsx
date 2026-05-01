@@ -201,7 +201,7 @@ export function BookmarkGroup({
                                     }`}
                                 >
                                     <div className="relative">
-                                        <AppIcon iconPath={a.iconPath} name={a.name} size="sm" />
+                                        <AppIcon iconPath={a.iconPath} name={a.name} appUrl={a.url} size="sm" />
                                         {st ? (
                                             <StatusDot status={st.status} className="absolute -bottom-0.5 -right-0.5 ring-1 ring-black/40" />
                                         ) : null}

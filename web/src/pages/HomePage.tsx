@@ -20,6 +20,7 @@ import { useAppStatus } from '../hooks/useAppStatus'
 import { useVersionCheck } from '../hooks/useVersionCheck'
 import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog, ChangePasswordDialog, OnboardingWizard } from '../components/dialogs'
 import { WidgetDataProvider } from '../contexts/WidgetDataContext'
+import { VpnModeProvider } from '../contexts/VpnModeContext'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
 
 const ONBOARDED_KEY = 'hearth_onboarded_v1'
@@ -312,6 +313,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
     return (
         <WidgetDataProvider value={widgetData}>
+        <VpnModeProvider enabled={vpnMode.enabled}>
         <div
             className="relative min-h-screen"
             onContextMenu={(e) => {
@@ -675,6 +677,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
             <VpnModeToggle enabled={vpnMode.enabled} onToggle={vpnMode.toggle} />
         </div>
+        </VpnModeProvider>
         </WidgetDataProvider>
     )
 }

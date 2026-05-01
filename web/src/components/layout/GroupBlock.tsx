@@ -488,7 +488,7 @@ function GroupBlockImpl({
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className="relative">
-                                            <AppIcon iconPath={a.iconPath} name={a.name} />
+                                            <AppIcon iconPath={a.iconPath} name={a.name} appUrl={a.url} />
                                             {statusMap?.[a.id] ? (
                                                 <StatusDot
                                                     status={statusMap[a.id].status}

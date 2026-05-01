@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { isPrivateHost } from '../../utils'
+import { useVpnModeEnabled } from '../../contexts/VpnModeContext'
 
 // Lucide CDN URL for SVG icons - pinned version for security
 const LUCIDE_CDN_BASE = 'https://unpkg.com/lucide-static@0.460.0/icons'
@@ -31,22 +33,36 @@ export interface AppIconProps {
     iconPath: string | null
     name: string
     size?: 'sm' | 'md' | 'lg'
+    /**
+     * The app's URL. Used by the VPN compat fallback path: when the
+     * backend can't resolve an icon for a LAN service (because the
+     * server's network can't reach it) but the user's browser can, we
+     * point an `<img>` straight at `${origin}/favicon.ico`. Browsers
+     * load cross-origin images fine — they just can't read the pixels,
+     * which we don't need.
+     */
+    appUrl?: string | null
 }
 
 /**
  * App icon component with error handling fallback
  * Supports:
  * - Lucide icons (iconPath starts with "lucide:") - loaded from CDN
- * - Regular image icons
+ * - Regular image icons (server-cached)
+ * - VPN compat mode: when iconPath is empty and appUrl points at a
+ *   private host, try the app's own /favicon.ico via the browser
  * - Fallback to first letter of name
  */
-export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
+export function AppIcon({ iconPath, name, size = 'md', appUrl }: AppIconProps) {
     const [hasError, setHasError] = useState(false)
+    const [vpnFaviconErr, setVpnFaviconErr] = useState(false)
+    const vpnMode = useVpnModeEnabled()
 
-    // Reset error state when iconPath changes
+    // Reset error state when inputs change.
     useEffect(() => {
         setHasError(false)
-    }, [iconPath])
+        setVpnFaviconErr(false)
+    }, [iconPath, appUrl])
 
     const px = size === 'sm' ? 28 : size === 'lg' ? 44 : 36
     const lucidePx = size === 'sm' ? 18 : size === 'lg' ? 28 : 22
@@ -65,6 +81,36 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         )
     }
 
+    // VPN compat mode: when there's no server-cached icon for a LAN
+    // service, attempt a direct browser load of `${origin}/favicon.ico`
+    // before giving up. We only do this for private hosts so we don't
+    // hammer random public sites with extra requests when they already
+    // have a working server-cached path.
+    if (!iconPath && vpnMode && appUrl && !vpnFaviconErr) {
+        let origin: string | null = null
+        let host = ''
+        try {
+            const u = new URL(appUrl)
+            origin = u.origin
+            host = u.hostname
+        } catch {
+            // fall through to letter fallback
+        }
+        if (origin && isPrivateHost(host)) {
+            return (
+                <img
+                    src={`${origin}/favicon.ico`}
+                    alt=""
+                    className="rounded-lg bg-white/10 object-contain"
+                    style={boxStyle}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                    onError={() => setVpnFaviconErr(true)}
+                />
+            )
+        }
+    }
+
     // Fallback: first letter
     if (!iconPath || hasError) {
         return (
@@ -74,7 +120,7 @@ export function AppIcon({ iconPath, name, size = 'md' }: AppIconProps) {
         )
     }
 
-    // Regular image icon
+    // Regular image icon (server-cached or absolute URL)
     const src = iconPath.startsWith('http') || iconPath.startsWith('data:')
         ? iconPath
         : `/assets/icons/${iconPath}`

@@ -157,6 +157,7 @@ export function QuickLaunch({
                                     <AppIcon
                                         iconPath={item.iconPath}
                                         name={item.name}
+                                        appUrl={item.url}
                                         size="sm"
                                     />
                                     <div className="min-w-0 flex-1">
