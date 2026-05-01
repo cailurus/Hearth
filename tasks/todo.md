@@ -403,3 +403,29 @@
 - **F7** K8s ingress 注解发现 — M · 优先级最低
 
 每一项都是单独的 1+ 天工时,适合分别开会话推进,不建议在一次 session 里堆砌。
+
+### Hot fix — 2026-05-01
+
+`HomePage.tsx` background-icon-refresh useEffect 依赖数组写成 `[apps.length > 0]`(boolean),导致新增 app 后 effect 不再触发。改成 `[apps]` + `useRef<Set<string>>` 按 id dedupe。commit `156dbc3`。
+
+### Batch 4 部分 — 2026-05-01
+
+完成项:**C1 + C4 + E4 + F5**(7 项中 4 项)。`go build` / `go test` / `npm run build` 全过。
+
+- **E4** 每 widget 独立 ErrorBoundary(commit `e2ccf9c`)— `WidgetBoundary` 类组件 + Fragment+resetKey 重 mount 机制,GroupBlock 包住 widget 渲染区
+- **C1** widget 数据 Context(commit `eb259b5`)— `WidgetDataProvider` + `useWidgetData()`,`useWidgets` 21 个返回字段不再 props 钻透;GroupBlockProps 从 27 字段降到 14
+- **C4** GroupBlock React.memo + HomePage callback useCallback(同 `eb259b5`)— `actionsRef` 让 callbacks 跳过 unstable `actions` 依赖,callbacks 引用稳定 → memo 真正生效
+  - **caveat 已记录**:`items={groupItems(g.id)}` 对空组每次新建 `[]`、`statusMap` 引用不稳,这两处后续 memo 收尾时再处理(独立小项)
+- **F5** Forward-Auth 头部认证(commit `e6d9fb3`)— `HEARTH_TRUSTED_PROXY_HEADER` + `HEARTH_TRUSTED_PROXY_NETWORKS`(必须同时设置),`forwardAuth` 中间件先判源 IP 在白名单 CIDR 内才信任 header;`auth.ProvisionForwardAuthUser` 按 username 查或创建用户(`__FORWARD_AUTH_ONLY__` sentinel hash,密码登录永远失败);`requireAdmin` / `optionalUser` 优先采纳 context 里已有的 userID。两个测试 `TestForwardAuthHeader` + `TestForwardAuthRefusesEmptyNetworks` 守住信任与拒启动两条路径
+
+### 仍未做 (按优先级排序)
+
+| ID | 内容 | 工时 | 备注 |
+|---|---|---|---|
+| **C2** | widget registry 替换 if-else 链 | L | F3/F4 前置 |
+| **F2** | Docker labels 服务发现 | M-L | 直接驱动 selfhost 圈认知度 |
+| **C3** | useDashboard 乐观更新 | M | |
+| **E5** | CSS 变量主题色板 | L | 数百处颜色硬编码迁移 |
+| **F3** | 5-8 个深度 widget | L | 等 C2 |
+| **F4** | 第三方 widget 协议 | XL | 等 C2 + F3 |
+| **F7** | K8s ingress 注解 | M | 优先级最低 |
