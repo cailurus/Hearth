@@ -90,6 +90,10 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if isDockerManagedID(id) {
+		writeError(w, http.StatusForbidden, "the docker virtual group cannot be modified")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -109,6 +113,10 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if isDockerManagedID(id) {
+		writeError(w, http.StatusForbidden, "the docker virtual group cannot be deleted")
+		return
+	}
 	// Delete all apps in the group first
 	if err := s.store.DeleteAppsByGroupID(id); err != nil {
 		slog.Warn("failed to delete apps in group", "groupId", id, "error", err)
@@ -204,6 +212,10 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if isDockerManagedID(id) {
+		writeError(w, http.StatusForbidden, "docker-discovered apps are managed via labels")
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req createAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -251,6 +263,10 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if isDockerManagedID(id) {
+		writeError(w, http.StatusForbidden, "docker-discovered apps are managed via labels")
+		return
+	}
 	if err := s.store.DeleteApp(id); err != nil {
 		slog.Error("failed to delete app", "error", err, "id", id)
 		writeError(w, http.StatusInternalServerError, "failed to delete app")
@@ -270,12 +286,24 @@ func (s *Server) handleReorderApps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	if req.GroupID != nil && isDockerManagedID(*req.GroupID) {
+		writeError(w, http.StatusForbidden, "the docker virtual group cannot be reordered")
+		return
+	}
 	if err := s.store.ReorderApps(req.GroupID, req.IDs); err != nil {
 		slog.Error("failed to reorder apps", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to reorder apps")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// isDockerManagedID reports whether the given app or group ID was
+// synthesized by the docker label discovery layer. Mutation handlers
+// refuse these IDs because docker-compose labels are the source of
+// truth — UI edits would be silently overwritten on the next scan.
+func isDockerManagedID(id string) bool {
+	return strings.HasPrefix(id, dockerAppIDPrefix)
 }
 
 // dockerVirtualGroupID is the synthetic ID of the in-memory "Docker"

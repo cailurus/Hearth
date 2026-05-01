@@ -318,6 +318,49 @@ func TestListAppsMergesDocker(t *testing.T) {
 	}
 }
 
+func TestDockerAppEditRefused(t *testing.T) {
+	s := newTestServer(t)
+	cookie := loginAsAdmin(t, s)
+
+	// PUT /api/apps/docker:abc123 must return 403 regardless of body.
+	body := bytes.NewBufferString(`{"groupId":null,"name":"x","description":null,"url":"http://x/","iconPath":null,"iconSource":null}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/apps/docker:abc123def456", body)
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("PUT docker app: expected 403, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// DELETE /api/apps/docker:abc123 must return 403.
+	req = httptest.NewRequest(http.MethodDelete, "/api/apps/docker:abc123def456", nil)
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("DELETE docker app: expected 403, got %d", w.Code)
+	}
+
+	// PUT /api/groups/docker: must return 403 (rename refused).
+	renameBody := bytes.NewBufferString(`{"name":"renamed"}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/groups/docker:", renameBody)
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("PUT docker group: expected 403, got %d", w.Code)
+	}
+
+	// DELETE /api/groups/docker: must return 403 (delete refused).
+	req = httptest.NewRequest(http.MethodDelete, "/api/groups/docker:", nil)
+	req.AddCookie(cookie)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("DELETE docker group: expected 403, got %d", w.Code)
+	}
+}
+
 func TestBackupAuth(t *testing.T) {
 	s := newTestServer(t)
 
