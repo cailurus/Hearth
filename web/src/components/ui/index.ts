@@ -4,3 +4,5 @@ export type { ModalProps } from './Modal'
 export { Spinner } from './Spinner'
 
 export { UserIcon } from './UserIcon'
+
+export { WidgetBoundary } from './WidgetBoundary'

@@ -376,3 +376,30 @@
 - **Settings 高度统一**:`SettingsDialog` 内层 `flex min-h-[400px]` → `flex h-[clamp(420px,60vh,560px)]`;右侧 content 加 `overflow-y-auto scrollbar-thin`。切换 tab 时 Modal 不再跳变高度,长 tab(账户/数据)在右侧滚动,sidebar 永远在原位。clamp 范围照顾小屏(≥420px)和大屏(≤560px)的舒适度。
 - **D3 拼音库切换** `pinyin-pro` → `tiny-pinyin`:bundle `pinyin` chunk **138.59 KB → 3.57 KB gzipped**(省 135 KB)。`useQuickLaunch.ts` 切到 `TinyPinyin.convertToPinyin` + `TinyPinyin.parse`,自实现初首字母逻辑(取每段 pinyin chunk 首字符,小写,过滤非字母)。`vite.config.ts` 的 `manualChunks` 也同步改成 `tiny-pinyin`。
 - **已知精度退化**(commit message 与 lessons 已记录):多音字"乐/行"等被 tiny-pinyin 选错读音(音乐→yinlao 而非 yinyue;银行→yinxing 而非 yinhang)。**全拼搜索这几个词会失败,首字母搜索仍 OK**。覆盖 NAS 圈最常见 90% 应用名(群晖/飞牛/极空间/哔哩哔哩/钉钉/企业微信等)无问题。如果未来用户反馈强烈,可 revert 这一 commit 改 lazy-load 方案。
+
+### Hot fix — 2026-05-01
+
+- **新增 app 后自动获取图标不生效**(用户报告):`HomePage.tsx` 的 background-icon-refresh useEffect 依赖数组写成 `[apps.length > 0]`(boolean),首次加载 0→N 触发后,后续 N→N+1 boolean 不变,effect 不再跑。改成 `[apps]` + `useRef<Set<string>>` 按 app id dedupe,新加的 app 自然进入 candidates,已处理过的不会重复请求。后端 resolver 经 curl 验证完好(github.com / bilibili.com / baidu.com 都正确返回 iconPath),回归纯属前端 effect gate。commit `156dbc3`。
+
+### Batch 4 — 2026-05-01(部分)
+
+完成项:**E4 widget ErrorBoundary**(7 项中 1 项)。
+
+- **E4** `web/src/components/ui/WidgetBoundary.tsx` — class component(getDerivedStateFromError),按钮"重试"使用 Fragment+resetKey 强制 children 重 mount。`GroupBlock.tsx` 把 `<div className="min-h-0 flex-1">` 内的全部 widget 渲染分支包进 `<WidgetBoundary>`,任一 widget 抛异常只显示该位置的"小组件加载失败 / 重试",不影响其他 widget 与 dashboard 主体。i18n 加 `widgetError` / `retry` 两个 common key(en + zh)。
+
+### 批次 4 / 5 待做
+
+未完成项工时估算与依赖:
+
+- **C1** 数据 Context 拆分(HomePage 全局 state 重构)— L · 风险高,影响所有 widget 数据流
+- **C2** widget registry 替换 if-else 链 — L · 风险高,F3/F4 的前置依赖
+- **C3** useDashboard 改乐观更新 — M · 涉及所有 reload() 调用点
+- **C4** React.memo + useMemo 稳定引用 — M · 应配合 C1 一起做
+- **E5** CSS 变量主题色板 + `darkMode: 'class'` — L · 数百处硬编码颜色需迁移
+- **F5** OIDC / Forward-Auth 头部认证 — M · 涉及 auth middleware 扩展
+- **F2** Docker labels 服务发现 — M-L
+- **F3** 5-8 个深度 widget — L · 依赖 C2
+- **F4** 第三方 widget 协议 — XL · 依赖 C2 + F3
+- **F7** K8s ingress 注解发现 — M · 优先级最低
+
+每一项都是单独的 1+ 天工时,适合分别开会话推进,不建议在一次 session 里堆砌。

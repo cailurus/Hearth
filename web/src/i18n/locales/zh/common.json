@@ -77,5 +77,7 @@
     "onboardingWeatherHint": "用于仪表盘顶部的天气小组件。",
     "onboardingWeatherCity": "城市",
     "onboardingWeatherPlaceholder": "北京、上海、旧金山……",
-    "atmosphereHint": "点击切换季节氛围 ✨"
+    "atmosphereHint": "点击切换季节氛围 ✨",
+    "widgetError": "小组件加载失败",
+    "retry": "重试"
 }

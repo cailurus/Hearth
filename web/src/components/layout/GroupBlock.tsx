@@ -19,6 +19,7 @@ import { RSSWidget } from '../widgets/RSSWidget'
 import { CurrencyWidget } from '../widgets/CurrencyWidget'
 import { DealsWidget } from '../widgets/DealsWidget'
 import { Spinner } from '../ui/Spinner'
+import { WidgetBoundary } from '../ui'
 import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
@@ -332,6 +333,10 @@ export function GroupBlock({
                                         {WIDGET_LABEL_KEYS[widget] ? t(WIDGET_LABEL_KEYS[widget] as never) : widget}
                                     </div>
                                     <div className="min-h-0 flex-1">
+                                        <WidgetBoundary
+                                            fallbackLabel={t('common:widgetError')}
+                                            retryLabel={t('common:retry')}
+                                        >
                                         {widget === 'weather' ? (
                                             <WeatherWidget
                                                 data={(weatherById && a.id in weatherById) ? (weatherById[a.id] ?? weather) : null}
@@ -400,6 +405,7 @@ export function GroupBlock({
                                         ) : (
                                             <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
                                         )}
+                                        </WidgetBoundary>
                                     </div>
                                 </div>
                             )
