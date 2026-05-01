@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -111,4 +112,75 @@ func TestParseLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractLabelApps(t *testing.T) {
+	entries := []containerListEntry{
+		{
+			ID:    "aaa1111111112222222222222222222222222222222222222222222222222222",
+			Names: []string{"/jellyfin"},
+			State: "running",
+			Labels: map[string]string{
+				"hearth.name":  "Jellyfin",
+				"hearth.href":  "http://nas.lan:8096/",
+				"hearth.group": "Media",
+			},
+		},
+		{
+			ID:    "bbb1111111112222222222222222222222222222222222222222222222222222",
+			Names: []string{"/sonarr"},
+			State: "exited", // must be filtered
+			Labels: map[string]string{
+				"hearth.name": "Sonarr",
+				"hearth.href": "http://nas.lan:8989/",
+			},
+		},
+		{
+			ID:    "ccc1111111112222222222222222222222222222222222222222222222222222",
+			Names: []string{"/no-labels"},
+			State: "running",
+			Labels: map[string]string{}, // no relevant labels — skipped
+		},
+		{
+			ID:    "ddd1111111112222222222222222222222222222222222222222222222222222",
+			Names: []string{"/missing-href"},
+			State: "running",
+			Labels: map[string]string{
+				"hearth.name": "Incomplete",
+			},
+		},
+		{
+			ID:    "eee1111111112222222222222222222222222222222222222222222222222222",
+			Names: []string{"/plex"},
+			State: "RUNNING", // case-insensitive state match
+			Labels: map[string]string{
+				"homepage.name": "Plex",
+				"homepage.href": "http://nas.lan:32400/",
+			},
+		},
+	}
+
+	got := extractLabelApps(entries)
+	if len(got) != 2 {
+		t.Fatalf("got %d apps, want 2 (jellyfin + plex). full=%+v", len(got), got)
+	}
+	names := []string{got[0].Name, got[1].Name}
+	wantNames := map[string]bool{"Jellyfin": true, "Plex": true}
+	for _, n := range names {
+		if !wantNames[n] {
+			t.Errorf("unexpected app %q", n)
+		}
+	}
+	if got[0].ContainerID == "" {
+		t.Error("ContainerID should be set from entry.ID")
+	}
+}
+
+func TestLabelDiscoveryDisabledWhenIntervalZero(t *testing.T) {
+	d := NewLabelDiscovery(nil, 0)
+	d.Start(context.Background())
+	if got := d.Apps(); got != nil {
+		t.Errorf("Apps() with interval=0 should be nil, got %v", got)
+	}
+	d.Stop() // must not block / panic
 }
