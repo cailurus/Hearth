@@ -117,6 +117,7 @@ docker logs hearth | head -20
 | `HEARTH_INITIAL_PASSWORD` | _(unset)_ | Initial admin password. If unset, a 16-char random password is generated and printed to stdout (visible via `docker logs`). |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed cross-origin URLs. The default permits the bundled Vite dev server only; production deployments serve the frontend from the same origin and need no override unless using a separate domain. |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(unset)_ | Comma-separated regex allowlist for container names that may receive `start`/`stop`/`restart` actions. Empty = allow any container the daemon exposes. Example: `^(jellyfin|sonarr|radarr)$`. Mismatches are denied with 403 and recorded to the audit log. |
+| `HEARTH_DOCKER_LABEL_INTERVAL` | `30s` | Poll interval for `hearth.*`/`homepage.*` label discovery. `0s` (or `0`) disables the loop entirely. |
 | `HEARTH_TRUSTED_PROXY_HEADER` | _(unset)_ | Name of the header carrying the authenticated username when Hearth sits behind a forward-auth proxy (Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`). Common values: `X-Remote-User`, `Remote-User`. Requires `HEARTH_TRUSTED_PROXY_NETWORKS` to also be set; Hearth refuses to start otherwise. |
 | `HEARTH_TRUSTED_PROXY_NETWORKS` | _(unset)_ | Comma-separated CIDR list naming the proxy's source IPs. The proxy header is honored only when the request arrives from one of these networks — bypassing the proxy and hitting Hearth directly cannot forge the header. Example: `10.0.0.0/8,172.20.0.0/16`. |
 
@@ -161,6 +162,47 @@ The self-hosted dashboard space has several mature options. Hearth is built for 
 | Bundle size        | Single Go binary    | Node runtime        | ~25MB binary        | Node runtime        |
 
 **Choosing the right tool.** If you run dozens of services and want auto-discovery via Docker labels, pick **homepage**. If you want the prettiest news-reader-style aggregator with the smallest footprint, pick **glance**. If you need shared dashboards with SSO and RBAC for a team, pick **homarr**. If you are a Chinese-speaking home user who wants pinyin search, seasonal touches, and a single-binary backend, Hearth is built for that taste.
+
+## 🐳 Docker Labels (auto-discovery)
+
+Hearth can pick apps up from the labels on your running Docker
+containers and add them to the dashboard automatically — no UI clicks
+per service. Add a few labels to any container's `docker-compose.yml`
+and the app appears within ~30 seconds:
+
+```yaml
+services:
+  jellyfin:
+    image: jellyfin/jellyfin
+    labels:
+      - "hearth.name=Jellyfin"
+      - "hearth.group=Media"
+      - "hearth.href=http://nas.lan:8096/"
+      - "hearth.icon=lucide:film"
+      - "hearth.description=Movie & TV server"
+```
+
+| Label | Required | Purpose |
+|---|---|---|
+| `hearth.name` | yes | Display name |
+| `hearth.href` | yes | Where the card links to |
+| `hearth.group` | no | Falls into a same-named user group (case-insensitive) or a virtual "Docker" group |
+| `hearth.icon` | no | URL or `lucide:icon-name` |
+| `hearth.description` | no | Subtitle text |
+
+**Already on gethomepage / homepage?** Hearth also reads `homepage.*`
+labels with the same field names, so you can keep your existing
+docker-compose unchanged. When both prefixes are set on the same
+container, `hearth.*` wins per-field.
+
+**Lifecycle:** Containers must be in `state="running"` to appear.
+Stopping or removing a container makes the app vanish from the
+dashboard within 30 seconds. Docker-discovered apps are read-only in
+the UI (the backend refuses `PUT` / `DELETE` on them) — labels are the
+source of truth.
+
+**Toggling discovery off:** Set `HEARTH_DOCKER_LABEL_INTERVAL=0` to
+disable the polling loop entirely.
 
 ## 🛠️ Development
 

@@ -82,5 +82,6 @@
     "retry": "重试",
     "vpnCompatMode": "VPN 兼容模式",
     "vpnModeOn": "已开启（私网服务由浏览器探测）",
-    "vpnModeOff": "已关闭（全部经后端探测）"
+    "vpnModeOff": "已关闭（全部经后端探测）",
+    "dockerDiscovered": "通过 Docker 发现"
 }

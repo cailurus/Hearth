@@ -117,6 +117,7 @@ docker logs hearth | head -20
 | `HEARTH_INITIAL_PASSWORD` | _(空)_ | 初始管理员密码。未设置时自动生成 16 位随机密码并打印到标准输出（通过 `docker logs` 查看）。 |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域允许列表（逗号分隔）。默认仅允许内置的 Vite 开发服务器；生产部署因前后端同源无需调整，除非将前端部署到独立域名。 |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(空)_ | 容器 `start`/`stop`/`restart` 操作的容器名正则白名单（逗号分隔）。留空则允许操作任何 Docker 守护进程暴露的容器。示例：`^(jellyfin\|sonarr\|radarr)$`。不匹配则返回 403 并记入审计日志。 |
+| `HEARTH_DOCKER_LABEL_INTERVAL` | `30s` | 容器 `hearth.*`/`homepage.*` 标签发现的轮询间隔。`0s`（或 `0`）彻底关闭轮询。 |
 | `HEARTH_TRUSTED_PROXY_HEADER` | _(空)_ | 当 Hearth 部署在 forward-auth 反代后（Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`），用于携带认证用户名的 HTTP 头部名称。常用值：`X-Remote-User`、`Remote-User`。必须同时设置 `HEARTH_TRUSTED_PROXY_NETWORKS`，否则 Hearth 拒绝启动。 |
 | `HEARTH_TRUSTED_PROXY_NETWORKS` | _(空)_ | 反代源 IP 的 CIDR 白名单（逗号分隔）。只有从这些网段进来的请求才会信任上面的头部 — 绕过反代直连 Hearth 无法伪造头部。示例：`10.0.0.0/8,172.20.0.0/16`。 |
 
@@ -161,6 +162,43 @@ mount --bind /var/run /vol2/1000/ServiceStore/docker-sock
 | 体积        | 单 Go 二进制  | Node 运行时  | 二进制 ~25MB | Node 运行时    |
 
 **怎么选。** 如果你有几十个服务、想用 Docker 标签自动发现，选 **homepage**；如果你想要颜值最高、体积最小的报刊风信息聚合，选 **glance**；如果你要给团队提供带 SSO 和 RBAC 的共享仪表盘，选 **homarr**；如果你是中文家庭用户，想要拼音搜索、节气彩蛋和单二进制后端，Hearth 就是为这种口味做的。
+
+## 🐳 Docker 标签自动发现
+
+Hearth 可以从正在运行的 Docker 容器的 labels 自动把服务加进
+dashboard,不需要在 UI 上一个一个手填。在任意容器的
+`docker-compose.yml` 加几个 label,~30 秒内自动出现:
+
+```yaml
+services:
+  jellyfin:
+    image: jellyfin/jellyfin
+    labels:
+      - "hearth.name=Jellyfin"
+      - "hearth.group=Media"
+      - "hearth.href=http://nas.lan:8096/"
+      - "hearth.icon=lucide:film"
+      - "hearth.description=Movie & TV server"
+```
+
+| Label | 必需 | 用途 |
+|---|---|---|
+| `hearth.name` | 是 | 显示名 |
+| `hearth.href` | 是 | 卡片跳转链接 |
+| `hearth.group` | 否 | 落入同名用户组(大小写不敏感)或虚拟"Docker"组 |
+| `hearth.icon` | 否 | URL 或 `lucide:图标名` |
+| `hearth.description` | 否 | 副标题 |
+
+**已经在用 gethomepage/homepage?** Hearth 同样识别 `homepage.*`
+labels(字段名相同),你的 docker-compose 一行不用改。同时存在两套
+prefix 时,`hearth.*` 在每个字段上分别优先。
+
+**生命周期:**容器必须在 `state="running"` 才显示。停止或删除容器,
+对应的 app 在 30 秒内从 dashboard 消失。通过 Docker 发现的 app
+在 UI 上只读(后端拒绝 `PUT` / `DELETE`)——labels 才是真相之源。
+
+**关闭自动发现:**设置 `HEARTH_DOCKER_LABEL_INTERVAL=0` 即可彻底
+关闭轮询。
 
 ## 🛠️ 开发
 

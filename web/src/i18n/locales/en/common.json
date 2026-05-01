@@ -82,5 +82,6 @@
     "retry": "Retry",
     "vpnCompatMode": "VPN compat mode",
     "vpnModeOn": "on (private hosts probed from your browser)",
-    "vpnModeOff": "off (all probes via backend)"
+    "vpnModeOff": "off (all probes via backend)",
+    "dockerDiscovered": "Discovered from Docker"
 }

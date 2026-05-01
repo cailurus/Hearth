@@ -18,9 +18,7 @@ export function DockerBadge({ className = '' }: DockerBadgeProps) {
         <span
             className={`inline-flex items-center justify-center rounded-sm bg-blue-500/80 text-white shadow-sm ${className}`}
             style={{ width: 12, height: 12 }}
-            // @ts-expect-error i18n key added in Task 8
             title={t('dockerDiscovered')}
-            // @ts-expect-error i18n key added in Task 8
             aria-label={t('dockerDiscovered')}
         >
             <svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor" aria-hidden="true">
