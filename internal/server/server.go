@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -51,6 +52,14 @@ type Server struct {
 	// connect from for forward-auth header trust. Empty disables forward-auth
 	// regardless of HEARTH_TRUSTED_PROXY_HEADER.
 	trustedProxyNetworks []*net.IPNet
+
+	// labelDiscovery polls Docker for hearth.*/homepage.* labels.
+	labelDiscovery *docker.LabelDiscovery
+
+	// labelAppsFn returns the current label-discovered apps. Production
+	// uses labelDiscovery.Apps; tests inject a fake. Always non-nil so
+	// handlers can call it without nil-checking.
+	labelAppsFn func() []docker.LabelApp
 }
 
 func New(cfg Config) (*Server, error) {
@@ -121,6 +130,13 @@ func New(cfg Config) (*Server, error) {
 	mc := metrics.NewCollector(db)
 	mc.Start()
 
+	labelInterval, err := time.ParseDuration(cfg.DockerLabelInterval)
+	if err != nil {
+		return nil, fmt.Errorf("HEARTH_DOCKER_LABEL_INTERVAL: %w", err)
+	}
+	labelDiscovery := docker.NewLabelDiscovery(dockerClient, labelInterval)
+	labelDiscovery.Start(context.Background())
+
 	allowPatterns, err := compileDockerAllowPatterns(cfg.DockerAllowPatterns)
 	if err != nil {
 		return nil, fmt.Errorf("HEARTH_DOCKER_ALLOW_PATTERNS: %w", err)
@@ -142,6 +158,8 @@ func New(cfg Config) (*Server, error) {
 		metricsCollector:     mc,
 		dockerAllowPatterns:  allowPatterns,
 		trustedProxyNetworks: trustedProxyNets,
+		labelDiscovery:       labelDiscovery,
+		labelAppsFn:          labelDiscovery.Apps,
 	}
 	if err := s.ensureDefaultSystemTools(); err != nil {
 		return nil, err
@@ -208,6 +226,9 @@ func (s *Server) Router() http.Handler { return s.router }
 
 // Close releases resources held by the server (database, background goroutines).
 func (s *Server) Close() error {
+	if s.labelDiscovery != nil {
+		s.labelDiscovery.Stop()
+	}
 	s.metricsCollector.Stop()
 	s.auth.Stop()
 	return s.db.Close()

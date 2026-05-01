@@ -14,6 +14,7 @@ type Config struct {
 	CookieSecure      string // "auto" | "true" | "false"; default "auto"
 	DockerSocket      string // Docker socket path; default "/var/run/docker.sock"
 	DockerAllowPatterns string // comma-separated container-name regex allowlist for start/stop/restart; empty = allow all
+	DockerLabelInterval string // poll interval for hearth.*/homepage.* label discovery; "0s" or "0" disables; default "30s"
 	InitialPassword   string // first-run admin password; if empty, a random password is generated and printed to PasswordOutput
 
 	// Forward-auth (Authelia / Authentik / oauth2-proxy / Caddy forward_auth /
@@ -41,6 +42,7 @@ func LoadConfigFromEnv() Config {
 	cookieSecure := getEnv("HEARTH_COOKIE_SECURE", "auto")
 	dockerSocket := getEnv("HEARTH_DOCKER_SOCKET", "/var/run/docker.sock")
 	dockerAllowPatterns := getEnv("HEARTH_DOCKER_ALLOW_PATTERNS", "")
+	dockerLabelInterval := getEnv("HEARTH_DOCKER_LABEL_INTERVAL", "30s")
 	initialPassword := getEnv("HEARTH_INITIAL_PASSWORD", "")
 	trustedProxyHeader := getEnv("HEARTH_TRUSTED_PROXY_HEADER", "")
 	trustedProxyNetworks := getEnv("HEARTH_TRUSTED_PROXY_NETWORKS", "")
@@ -54,6 +56,7 @@ func LoadConfigFromEnv() Config {
 		CookieSecure:         cookieSecure,
 		DockerSocket:         dockerSocket,
 		DockerAllowPatterns:  dockerAllowPatterns,
+		DockerLabelInterval:  dockerLabelInterval,
 		InitialPassword:      initialPassword,
 		TrustedProxyHeader:   trustedProxyHeader,
 		TrustedProxyNetworks: trustedProxyNetworks,

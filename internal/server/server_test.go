@@ -154,6 +154,7 @@ func TestForwardAuthHeader(t *testing.T) {
 		InitialPassword:      "admin",
 		TrustedProxyHeader:   "X-Remote-User",
 		TrustedProxyNetworks: "10.0.0.0/8",
+		DockerLabelInterval:  "0s",
 	}
 	s, err := New(cfg)
 	if err != nil {
@@ -217,12 +218,13 @@ func TestForwardAuthHeader(t *testing.T) {
 func TestForwardAuthRefusesEmptyNetworks(t *testing.T) {
 	dataDir := t.TempDir()
 	cfg := Config{
-		Addr:               ":0",
-		DataDir:            dataDir,
-		DatabaseDSN:        filepath.Join(dataDir, "test.db"),
-		SessionTTL:         "1h",
-		InitialPassword:    "admin",
-		TrustedProxyHeader: "X-Remote-User",
+		Addr:                ":0",
+		DataDir:             dataDir,
+		DatabaseDSN:         filepath.Join(dataDir, "test.db"),
+		SessionTTL:          "1h",
+		InitialPassword:     "admin",
+		TrustedProxyHeader:  "X-Remote-User",
+		DockerLabelInterval: "0s",
 		// TrustedProxyNetworks intentionally empty
 	}
 	if _, err := New(cfg); err == nil {
@@ -276,11 +278,12 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	dataDir := t.TempDir()
 	cfg := Config{
-		Addr:            ":0",
-		DataDir:         dataDir,
-		DatabaseDSN:     filepath.Join(dataDir, "test.db"),
-		SessionTTL:      "1h",
-		InitialPassword: "admin", // skip the must-change-password flow in tests
+		Addr:                ":0",
+		DataDir:             dataDir,
+		DatabaseDSN:         filepath.Join(dataDir, "test.db"),
+		SessionTTL:          "1h",
+		InitialPassword:     "admin", // skip the must-change-password flow in tests
+		DockerLabelInterval: "0s",    // disable the docker label scan in tests
 	}
 	s, err := New(cfg)
 	if err != nil {
@@ -297,11 +300,12 @@ func newTestServerWithGeneratedPassword(t *testing.T) (*Server, string) {
 	dataDir := t.TempDir()
 	var buf bytes.Buffer
 	cfg := Config{
-		Addr:           ":0",
-		DataDir:        dataDir,
-		DatabaseDSN:    filepath.Join(dataDir, "test.db"),
-		SessionTTL:     "1h",
-		PasswordOutput: &buf,
+		Addr:                ":0",
+		DataDir:             dataDir,
+		DatabaseDSN:         filepath.Join(dataDir, "test.db"),
+		SessionTTL:          "1h",
+		PasswordOutput:      &buf,
+		DockerLabelInterval: "0s",
 	}
 	s, err := New(cfg)
 	if err != nil {
