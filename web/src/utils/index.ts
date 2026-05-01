@@ -61,3 +61,6 @@ export {
 export type { KnownMarketSymbol } from './markets'
 
 export { isPrivateHost } from './network'
+
+export { browserProbe } from './browserProbe'
+export type { BrowserProbeResult } from './browserProbe'
