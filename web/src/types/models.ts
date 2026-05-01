@@ -63,6 +63,12 @@ export interface AppItem {
     iconSource: string | null
     sortOrder: number
     createdAt: number
+    /**
+     * Where this app came from. Absent or "manual" → user-created (DB row).
+     * "docker" → synthesized at request time from a container's hearth.* /
+     * homepage.* labels. Docker-source apps are immutable through the UI.
+     */
+    source?: 'manual' | 'docker'
 }
 
 /**
