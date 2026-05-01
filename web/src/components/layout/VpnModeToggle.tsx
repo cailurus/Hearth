@@ -13,10 +13,8 @@ interface VpnModeToggleProps {
 export function VpnModeToggle({ enabled, onToggle }: VpnModeToggleProps) {
     const { t } = useTranslation('common')
     const Icon = enabled ? ShieldCheck : Shield
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const label = t('vpnCompatMode' as any) as string
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stateLabel = t((enabled ? 'vpnModeOn' : 'vpnModeOff') as any) as string
+    const label = t('vpnCompatMode')
+    const stateLabel = t(enabled ? 'vpnModeOn' : 'vpnModeOff')
 
     return (
         <button

@@ -5,7 +5,7 @@ import { apiPost, apiPut } from '../api'
 import { Cog, Search } from 'lucide-react'
 import type { Group, IconResolve, QuoteResponse } from '../types'
 import { apiGet } from '../api'
-import { useNow, useWidgets, useVideoBackground, useDialogState, useBackgroundRefresh, useSettingsDraft, useDashboard } from '../hooks'
+import { useNow, useWidgets, useVideoBackground, useDialogState, useBackgroundRefresh, useSettingsDraft, useDashboard, useVpnMode } from '../hooks'
 import { useWidgetEditor } from '../hooks/useWidgetEditor'
 import { useGroupDragSort } from '../hooks/useGroupDragSort'
 import { UserIcon } from '../components/ui/UserIcon'
@@ -14,6 +14,7 @@ import { Greeting } from '../components/layout/Greeting'
 import { GroupBlock } from '../components/layout/GroupBlock'
 import { BookmarkGroup } from '../components/layout/BookmarkGroup'
 import { QuickLaunch } from '../components/layout/QuickLaunch'
+import { VpnModeToggle } from '../components/layout/VpnModeToggle'
 import { useQuickLaunch } from '../hooks/useQuickLaunch'
 import { useAppStatus } from '../hooks/useAppStatus'
 import { useVersionCheck } from '../hooks/useVersionCheck'
@@ -85,7 +86,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     const quickLaunch = useQuickLaunch(apps)
 
     // ── App status indicators ────────────────────────────────────
-    const { statusMap } = useAppStatus(true)
+    const vpnMode = useVpnMode()
+    const { statusMap } = useAppStatus(apps, { enabled: true, vpnMode: vpnMode.enabled })
 
     // ── Version check ────────────────────────────────────────────
     const versionCheck = useVersionCheck()
@@ -670,6 +672,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 onNavigateDown={quickLaunch.navigateDown}
                 onSelect={quickLaunch.selectCurrent}
             />
+
+            <VpnModeToggle enabled={vpnMode.enabled} onToggle={vpnMode.toggle} />
         </div>
         </WidgetDataProvider>
     )

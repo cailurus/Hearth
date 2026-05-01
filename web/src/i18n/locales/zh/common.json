@@ -79,5 +79,8 @@
     "onboardingWeatherPlaceholder": "北京、上海、旧金山……",
     "atmosphereHint": "点击切换季节氛围 ✨",
     "widgetError": "小组件加载失败",
-    "retry": "重试"
+    "retry": "重试",
+    "vpnCompatMode": "VPN 兼容模式",
+    "vpnModeOn": "已开启（私网服务由浏览器探测）",
+    "vpnModeOff": "已关闭（全部经后端探测）"
 }

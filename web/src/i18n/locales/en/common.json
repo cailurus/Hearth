@@ -79,5 +79,8 @@
     "onboardingWeatherPlaceholder": "Beijing, San Francisco, …",
     "atmosphereHint": "Click for seasonal atmosphere ✨",
     "widgetError": "Widget failed",
-    "retry": "Retry"
+    "retry": "Retry",
+    "vpnCompatMode": "VPN compat mode",
+    "vpnModeOn": "on (private hosts probed from your browser)",
+    "vpnModeOff": "off (all probes via backend)"
 }
