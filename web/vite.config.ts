@@ -21,7 +21,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'lucide-icons': ['lucide-react'],
-          'pinyin': ['pinyin-pro'],
+          'pinyin': ['tiny-pinyin'],
         },
       },
     },

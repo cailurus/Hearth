@@ -1,15 +1,18 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { pinyin } from 'pinyin-pro'
+import * as TinyPinyin from 'tiny-pinyin'
 import type { AppItem } from '../types'
 
-// Cache pinyin conversions to avoid repeated computation
+// Memoize pinyin conversions to avoid hitting the (~140 KB-pre-2024-swap)
+// dictionary on every keystroke. Cache lives for the lifetime of the page.
 const pinyinCache = new Map<string, string>()
 
 function toPinyin(text: string): string {
     const cached = pinyinCache.get(text)
     if (cached !== undefined) return cached
-    // Full pinyin (no spaces, no tones) e.g. "百度" → "baidu"
-    const full = pinyin(text, { toneType: 'none', type: 'array' }).join('')
+    // Full pinyin, lower case, no separator. tiny-pinyin returns the input
+    // verbatim for non-Chinese chunks, so "Plex 影音" → "plex yingyin"; we
+    // strip whitespace so a query like "plexyingyin" still matches.
+    const full = TinyPinyin.convertToPinyin(text, '', true).replace(/\s+/g, '')
     pinyinCache.set(text, full)
     return full
 }
@@ -18,8 +21,14 @@ function toInitials(text: string): string {
     const key = `_init_${text}`
     const cached = pinyinCache.get(key)
     if (cached !== undefined) return cached
-    // First letter of each character e.g. "百度" → "bd"
-    const initials = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' }).join('')
+    // First letter of each pinyin chunk. e.g. "百度" → "bd",
+    // "Plex Server" → "ps". Non-letter characters are dropped so a query
+    // like "ps" finds "Plex Server" without spaces leaking through.
+    const initials = TinyPinyin.parse(text)
+        .map((p) => (p.target || '').charAt(0))
+        .join('')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '')
     pinyinCache.set(key, initials)
     return initials
 }

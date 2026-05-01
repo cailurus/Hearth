@@ -19,6 +19,12 @@
 - **Lesson**: when a past commit claims "fixed X via env var Y", read the *unset-Y* code path before trusting it. The dangerous default is the one most users will run.
 - **How to apply**: for any "[x] Phase N.M security fix", grep for the env var, then read the `else` branch / fallback. Don't rely on the todo description.
 
+## Swapping Chinese pinyin libraries: test polyphones, not just the API surface
+- 2026-05-01 swap of `pinyin-pro` (302 KB / 138 KB gzipped) → `tiny-pinyin` (8 KB / 3.6 KB gzipped) was driven by bundle size. The two libraries have similar APIs for the calls we use (`convertToPinyin`, `parse`), so the *code-shape* port was trivial.
+- The functional regression was elsewhere: tiny-pinyin's dictionary doesn't disambiguate polyphones from context. Concrete cases that broke full-pinyin search: "音乐" (`yinyue` → `yinlao`), "银行" (`yinhang` → `yinxing`), "行情" (`hangqing` → `xingqing`). Initials-search still worked because polyphones share the same声母 ("y"/"x"), so user impact was bounded but real.
+- **Lesson**: when swapping a Chinese-language utility library — even one with an "almost-identical" API — write a smoke test against actual project content (NAS apps, Chinese brand names) before trusting the swap. The dictionary choices are part of the contract, not just the function signatures.
+- **How to apply**: build a list of canonical inputs from the project's actual user data (or representative samples) and snapshot the outputs. Any library swap must produce comparable outputs on that list, or the regression must be acknowledged in the commit and lessons.
+
 ## NAS / docker-self-host first-run secrets: print to stdout, don't write a file
 - Initial design (2026-05-01) wrote the auto-generated admin password to `<data>/initial-admin.txt`. User pushed back: "directly print to terminal, no file."
 - **Why**: NAS UIs (fnOS / Synology / 极空间) often *don't* expose a shell, but they always show container logs. `docker logs hearth` is one click; `docker exec cat /data/initial-admin.txt` is two layers of friction. Files also linger after rotation/restore and become a stale credential leak.

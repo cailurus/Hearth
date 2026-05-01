@@ -368,4 +368,11 @@
 
 ### 偏离/未做
 - **D2** lucide-react tree-shake 验证:**确认不需要做**。实际 build 输出 `lucide-icons-CKQy0cg3.js 12.79 KB → 4.97 KB gzipped`,Vite 已经 tree-shake 到位,Round 2 评审里"全量 1.5MB"是误判。
-- **D3** `pinyin-pro` (~138 KB gzipped)替换 / lazy-load:**未做**。是 D 段唯一真正能省体积的项,但要么切 `tiny-pinyin`(损失 `pattern: first` API,需自实现初首字母)、要么 lazy-load(改 useQuickLaunch 同步 → 异步)— 都需要单独决策与验证。建议作为独立小批次(可叫 batch 3.5 / 3a)。
+
+### Batch 3.5 — 2026-05-01
+
+完成项:**Settings 高度统一 · D3 切 tiny-pinyin**。
+
+- **Settings 高度统一**:`SettingsDialog` 内层 `flex min-h-[400px]` → `flex h-[clamp(420px,60vh,560px)]`;右侧 content 加 `overflow-y-auto scrollbar-thin`。切换 tab 时 Modal 不再跳变高度,长 tab(账户/数据)在右侧滚动,sidebar 永远在原位。clamp 范围照顾小屏(≥420px)和大屏(≤560px)的舒适度。
+- **D3 拼音库切换** `pinyin-pro` → `tiny-pinyin`:bundle `pinyin` chunk **138.59 KB → 3.57 KB gzipped**(省 135 KB)。`useQuickLaunch.ts` 切到 `TinyPinyin.convertToPinyin` + `TinyPinyin.parse`,自实现初首字母逻辑(取每段 pinyin chunk 首字符,小写,过滤非字母)。`vite.config.ts` 的 `manualChunks` 也同步改成 `tiny-pinyin`。
+- **已知精度退化**(commit message 与 lessons 已记录):多音字"乐/行"等被 tiny-pinyin 选错读音(音乐→yinlao 而非 yinyue;银行→yinxing 而非 yinhang)。**全拼搜索这几个词会失败,首字母搜索仍 OK**。覆盖 NAS 圈最常见 90% 应用名(群晖/飞牛/极空间/哔哩哔哩/钉钉/企业微信等)无问题。如果未来用户反馈强烈,可 revert 这一 commit 改 lazy-load 方案。

@@ -105,7 +105,10 @@ export function SettingsDialog({
             maxWidthClass="max-w-2xl"
             containerClassName="items-start pt-[12vh] sm:pt-[16vh]"
         >
-            <div className="flex min-h-[400px]">
+            {/* Fixed height so the dialog doesn't visibly resize when the user
+                switches between tabs. Contents that exceed the budget scroll
+                inside the right pane only — the sidebar stays put. */}
+            <div className="flex h-[clamp(420px,60vh,560px)]">
                 {/* Left sidebar tabs */}
                 <div className="flex w-32 flex-shrink-0 flex-col border-r border-white/10 pr-4">
                     <button
@@ -144,7 +147,7 @@ export function SettingsDialog({
                 </div>
 
                 {/* Right content area */}
-                <div className="flex-1 pl-4">
+                <div className="flex-1 overflow-y-auto scrollbar-thin pl-4 pr-1">
                     {siteSaveErr ? <div className="mb-4 rounded-lg border border-white/10 bg-black/40 p-3 text-sm">{siteSaveErr}</div> : null}
 
                     {/* General Tab */}
