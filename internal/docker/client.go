@@ -203,11 +203,12 @@ func (c *Client) Collect(ctx context.Context) Response {
 // ── Docker API types (unexported) ────────────────────────────────
 
 type containerListEntry struct {
-	ID        string   `json:"Id"`
-	Names     []string `json:"Names"`
-	Image     string   `json:"Image"`
-	State     string   `json:"State"`
-	StatusStr string   `json:"Status"`
+	ID        string            `json:"Id"`
+	Names     []string          `json:"Names"`
+	Image     string            `json:"Image"`
+	State     string            `json:"State"`
+	StatusStr string            `json:"Status"`
+	Labels    map[string]string `json:"Labels"`
 }
 
 func (e *containerListEntry) name() string {
