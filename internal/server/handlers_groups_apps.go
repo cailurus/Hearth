@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/morezhou/hearth/internal/docker"
+	"github.com/morezhou/hearth/internal/store"
 )
 
 // Group kind constants.
@@ -41,7 +45,9 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list groups")
 		return
 	}
-	writeJSON(w, http.StatusOK, gs)
+	labelApps := s.labelAppsFn()
+	merged := mergeGroupsWithDocker(gs, labelApps)
+	writeJSON(w, http.StatusOK, merged)
 }
 
 func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -132,13 +138,21 @@ func (s *Server) handleReorderGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
-	apps, err := s.store.ListApps()
+	manual, err := s.store.ListApps()
 	if err != nil {
 		slog.Error("failed to list apps", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list apps")
 		return
 	}
-	writeJSON(w, http.StatusOK, apps)
+	groups, err := s.store.ListGroups()
+	if err != nil {
+		slog.Error("failed to list groups for app merge", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list apps")
+		return
+	}
+	labelApps := s.labelAppsFn()
+	merged := mergeAppsWithDocker(manual, labelApps, groups)
+	writeJSON(w, http.StatusOK, merged)
 }
 
 func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
@@ -262,4 +276,122 @@ func (s *Server) handleReorderApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// dockerVirtualGroupID is the synthetic ID of the in-memory "Docker"
+// group that holds label-discovered apps with no matching user group.
+const dockerVirtualGroupID = "docker:"
+
+// dockerVirtualGroupName is the display name of the synthetic group.
+const dockerVirtualGroupName = "Docker"
+
+// dockerAppIDPrefix is prepended to a container's short ID to form the
+// AppItem.ID for label-discovered apps. The prefix doubles as the
+// "this app is docker-managed" marker for the mutation handlers.
+const dockerAppIDPrefix = "docker:"
+
+// mergeAppsWithDocker appends label-discovered apps (one per LabelApp)
+// to the manual app list. Group placement: case-insensitive exact
+// match against existing user groups; on miss, falls into the
+// dockerVirtualGroupID synthetic group. Output order = manual apps
+// first (preserving DB order), docker apps last in container-name
+// (Name) lexicographic order — keeps React keys stable across renders
+// and gives users a predictable display.
+func mergeAppsWithDocker(manual []store.AppItem, labelApps []docker.LabelApp, groups []store.Group) []store.AppItem {
+	if len(labelApps) == 0 {
+		return manual
+	}
+
+	// Index user groups by lowercased name for case-insensitive lookup.
+	groupIDByName := make(map[string]string, len(groups))
+	for _, g := range groups {
+		groupIDByName[strings.ToLower(g.Name)] = g.ID
+	}
+
+	// Stable sort of label apps by Name so SortOrder is deterministic.
+	sorted := make([]docker.LabelApp, len(labelApps))
+	copy(sorted, labelApps)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
+
+	out := make([]store.AppItem, 0, len(manual)+len(sorted))
+	out = append(out, manual...)
+	for i, la := range sorted {
+		var groupID *string
+		if la.Group != "" {
+			if id, ok := groupIDByName[strings.ToLower(la.Group)]; ok {
+				gid := id
+				groupID = &gid
+			}
+		}
+		if groupID == nil {
+			vid := dockerVirtualGroupID
+			groupID = &vid
+		}
+		shortID := la.ContainerID
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		var iconPath, iconSource *string
+		if la.Icon != "" {
+			ic := la.Icon
+			iconPath = &ic
+			src := "docker"
+			iconSource = &src
+		}
+		var description *string
+		if la.Description != "" {
+			d := la.Description
+			description = &d
+		}
+		out = append(out, store.AppItem{
+			ID:          dockerAppIDPrefix + shortID,
+			GroupID:     groupID,
+			Name:        la.Name,
+			Description: description,
+			URL:         la.Href,
+			IconPath:    iconPath,
+			IconSource:  iconSource,
+			// SortOrder offset so docker apps follow manual apps consistently.
+			SortOrder: 100000 + i,
+			CreatedAt: 0,
+			Source:    "docker",
+		})
+	}
+	return out
+}
+
+// mergeGroupsWithDocker injects a virtual "Docker" group into the
+// returned groups slice if (and only if) at least one label app is
+// going to land in it. Otherwise the slice is returned untouched.
+func mergeGroupsWithDocker(manual []store.Group, labelApps []docker.LabelApp) []store.Group {
+	if len(labelApps) == 0 {
+		return manual
+	}
+	groupIDByName := make(map[string]bool, len(manual))
+	for _, g := range manual {
+		groupIDByName[strings.ToLower(g.Name)] = true
+	}
+	needVirtual := false
+	for _, la := range labelApps {
+		if la.Group == "" || !groupIDByName[strings.ToLower(la.Group)] {
+			needVirtual = true
+			break
+		}
+	}
+	if !needVirtual {
+		return manual
+	}
+	out := make([]store.Group, 0, len(manual)+1)
+	out = append(out, manual...)
+	out = append(out, store.Group{
+		ID:        dockerVirtualGroupID,
+		Name:      dockerVirtualGroupName,
+		Kind:      GroupKindApp,
+		// Push the virtual group to the end; user groups keep their order.
+		SortOrder: 1 << 30,
+		CreatedAt: 0,
+	})
+	return out
 }

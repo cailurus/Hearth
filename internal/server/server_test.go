@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/morezhou/hearth/internal/docker"
 )
 
 func TestHealth(t *testing.T) {
@@ -229,6 +231,90 @@ func TestForwardAuthRefusesEmptyNetworks(t *testing.T) {
 	}
 	if _, err := New(cfg); err == nil {
 		t.Fatal("expected New to refuse TrustedProxyHeader without TrustedProxyNetworks")
+	}
+}
+
+func TestListAppsMergesDocker(t *testing.T) {
+	s := newTestServer(t)
+
+	// Login so the admin endpoint accepts.
+	cookie := loginAsAdmin(t, s)
+
+	// Create a manual group named "Media" so we can verify case-insensitive
+	// group matching against a docker app.
+	mediaGroupBody := bytes.NewBufferString(`{"name":"Media","kind":"app"}`)
+	mediaReq := httptest.NewRequest(http.MethodPost, "/api/groups", mediaGroupBody)
+	mediaReq.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	s.Router().ServeHTTP(w, mediaReq)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create group: expected 201, got %d (%s)", w.Code, w.Body.String())
+	}
+	var createdGroup struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &createdGroup); err != nil {
+		t.Fatalf("decode created group: %v", err)
+	}
+
+	// Inject fake docker apps: one matches "Media" (case-insensitive),
+	// one has no group, one has a group name that doesn't match anything.
+	s.labelAppsFn = func() []docker.LabelApp {
+		return []docker.LabelApp{
+			{ContainerID: "aaaaaa111111aaaaaa", Name: "Jellyfin", Group: "media", Href: "http://nas.lan:8096/"},
+			{ContainerID: "bbbbbb222222bbbbbb", Name: "Sonarr", Href: "http://nas.lan:8989/"},
+			{ContainerID: "cccccc333333cccccc", Name: "Vaultwarden", Group: "Personal", Href: "http://nas.lan:8222/"},
+		}
+	}
+
+	// GET /api/apps should return all 3 docker apps with source=docker.
+	req := httptest.NewRequest(http.MethodGet, "/api/apps", nil)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list apps: expected 200, got %d", w.Code)
+	}
+	var apps []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &apps); err != nil {
+		t.Fatalf("decode apps: %v", err)
+	}
+	dockerApps := 0
+	var jellyfinGroupID *string
+	for _, a := range apps {
+		if src, _ := a["source"].(string); src == "docker" {
+			dockerApps++
+			if a["name"] == "Jellyfin" {
+				if g, ok := a["groupId"].(string); ok {
+					jellyfinGroupID = &g
+				}
+			}
+		}
+	}
+	if dockerApps != 3 {
+		t.Fatalf("got %d docker apps, want 3", dockerApps)
+	}
+	if jellyfinGroupID == nil || *jellyfinGroupID != createdGroup.ID {
+		t.Fatalf("Jellyfin should match user 'Media' group %q (case-insensitive), got %v", createdGroup.ID, jellyfinGroupID)
+	}
+
+	// GET /api/groups should now include the virtual "Docker" group
+	// (because Sonarr + Vaultwarden don't match a user group).
+	req = httptest.NewRequest(http.MethodGet, "/api/groups", nil)
+	w = httptest.NewRecorder()
+	s.Router().ServeHTTP(w, req)
+	var groups []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &groups); err != nil {
+		t.Fatalf("decode groups: %v", err)
+	}
+	hasVirtual := false
+	for _, g := range groups {
+		if g["id"] == "docker:" {
+			hasVirtual = true
+			break
+		}
+	}
+	if !hasVirtual {
+		t.Fatal("expected virtual 'docker:' group in /api/groups response")
 	}
 }
 
