@@ -59,3 +59,5 @@ export {
 } from './markets'
 
 export type { KnownMarketSymbol } from './markets'
+
+export { isPrivateHost } from './network'
