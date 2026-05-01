@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
 import { apiPost, apiPut } from '../api'
@@ -183,14 +183,25 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         defaultCity: settings?.weather?.city,
     })
 
-    // Background refresh favicons for custom apps in auto mode on page load
+    // Background refresh favicons for custom apps in auto mode.
+    // Triggers on first load AND whenever a new app is added — previously the
+    // dep was `[apps.length > 0]`, a boolean that stayed `true` forever after
+    // the first non-empty render and silently skipped the refresh for any
+    // subsequently-added app, which is exactly what users hit when they
+    // created an app without clicking the "auto-fetch" button in the dialog.
+    //
+    // We dedupe by app id via a ref so re-runs (caused by the apps array
+    // reference changing on every reload) only fetch icons we haven't tried
+    // yet in this session.
+    const refreshedIconAppIdsRef = useRef<Set<string>>(new Set())
     useEffect(() => {
         if (apps.length === 0) return
 
         const autoIconSources = new Set(['site', 'fallback', 'google', 'auto'])
+        const seen = refreshedIconAppIdsRef.current
 
-        // Only refresh non-widget apps that have URLs and auto icon sources
         const customApps = apps.filter((a) => {
+            if (seen.has(a.id)) return false
             if (a.url.startsWith('widget:') || !a.url.trim()) return false
             if (a.iconPath?.startsWith('lucide:')) return false
             if (!a.iconSource) return true
@@ -200,11 +211,13 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
 
         let cancelled = false
 
-        // Refresh icons in the background (don't block UI)
         let anyChanged = false
         const refreshIcons = async () => {
             for (const app of customApps) {
                 if (cancelled) break
+                // Mark before the fetch so a fast subsequent reload doesn't
+                // re-enqueue this app while it's already in flight.
+                seen.add(app.id)
                 try {
                     const res = await apiPost<IconResolve>('/api/icon/resolve', {
                         url: app.url,
@@ -215,7 +228,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                         anyChanged = true
                     }
                 } catch {
-                    // Silently ignore errors - this is background refresh
+                    // Silently ignore — this is background refresh.
                 }
             }
             if (!cancelled && anyChanged) {
@@ -223,7 +236,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             }
         }
 
-        // Delay slightly to not block initial render
+        // Slight delay so we don't block initial paint.
         const timer = window.setTimeout(() => {
             void refreshIcons()
         }, 1000)
@@ -232,9 +245,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             cancelled = true
             window.clearTimeout(timer)
         }
-        // Only run once when apps first load (apps.length changes from 0 to N)
+        // actions is recreated each render in useDashboard; we intentionally
+        // don't include it to avoid scheduling a new 1s timer on every paint.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [apps.length > 0])
+    }, [apps])
 
     const openAddForGroup = (groupId: string | null) => {
         if (!isAdmin) return
