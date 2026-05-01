@@ -460,3 +460,34 @@
 **精度妥协**(spec 已明确):no-cors 模式下浏览器只能感知"连得上没",看不到 status code 与 latency 细分,所以私网 app 在 VPN 模式下没有 "slow" (>2000ms) 状态,也没有"上但 500"的精确状态——但用户场景里关心的就是绿/红可见性。
 
 **已知限制**:`isPrivateHost` 只识别字面 IP + `.local`/`.lan` 后缀;DNS 域名(`nas.example.com → 192.168.x.x`)不识别。用户应用 IP 直访或 mDNS 后缀。
+
+### Docker Labels 服务发现 (F2) — 2026-05-01
+
+selfhost 圈"够不够格"的隐形门槛——容器加 `hearth.*` 或 `homepage.*` labels,30 秒内自动出现在 dashboard,容器消失自动撤回。
+
+设计稿 `docs/superpowers/specs/2026-05-01-docker-labels-design.md` + 实施计划 `docs/superpowers/plans/2026-05-01-docker-labels.md`。
+
+**核心模型**:运行时-only,零持久化,Polling 30s(`HEARTH_DOCKER_LABEL_INTERVAL`,`0` 禁用);只看 `state="running"` 容器;`hearth.*` 与 `homepage.*` 双格式识别,前者优先;`hearth.group` 大小写不敏感命中现有用户组,否则进虚拟"Docker"组;UI 禁止编辑/删除 docker 来源的 app + 虚拟组,后端 mutation handler 同步拒 403;视觉上图标右上角小蓝色 Docker 鲸鱼角标。
+
+**实施 8 个 commit**:
+1. `ca34ab8` `LabelApp` + `parseLabels` — 7 case TDD,双格式 + 缺失字段跳过
+2. `2f73b10` `LabelDiscovery` 轮询(scan / Start / Stop / Apps,interval=0 禁用)
+3. `201a78b` Server 接入 + `HEARTH_DOCKER_LABEL_INTERVAL` env + Close 优雅停止 + `labelAppsFn` 测试注入字段
+4. `e343151` `handleListApps` / `handleListGroups` 合并 + `AppItem.Source` 字段 + `mergeAppsWithDocker` / `mergeGroupsWithDocker` + 虚拟组 emission(`TestListAppsMergesDocker`)
+5. `86a6307` 5 个 mutation handler 拒 `docker:` 前缀(`TestDockerAppEditRefused`)
+6. `09b5f51` 前端 `AppItem.source` 类型 + `DockerBadge` 鲸鱼角标 inline SVG
+7. `3043274` 接入 GroupBlock / BookmarkGroup / QuickLaunch + 锁 docker app 编辑/删除 + 锁虚拟组重命名/删除
+8. `896b347` `dockerDiscovered` i18n key(en + zh)+ README 双语 docker 标签段 + `HEARTH_DOCKER_LABEL_INTERVAL` 配置表行
+
+**已知限制**:DNS 名指向私网的容器(如 `hearth.href=http://nas.example.com/`)在 VPN 兼容模式下不会被识别为私网,因为 `isPrivateHost` 只看字面 IP 与 `.local`/`.lan`。用户用 IP 直访或 mDNS 后缀。
+
+### 仍未做(按优先级排序)
+
+| ID | 内容 | 工时 | 备注 |
+|---|---|---|---|
+| **C2** | widget registry 替换 if-else 链 | L | F3/F4 前置 |
+| **C3** | useDashboard 乐观更新 | M | |
+| **E5** | CSS 变量主题色板 | L | 数百处颜色硬编码迁移 |
+| **F3** | 5-8 个深度 widget | L | 等 C2 |
+| **F4** | 第三方 widget 协议 | XL | 等 C2 + F3 |
+| **F7** | K8s ingress 注解 | M | 优先级最低 |
