@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Cog, Trash2 } from 'lucide-react'
 import type { AppItem } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
+import { DockerBadge } from '../cards/DockerBadge'
 import { StatusDot } from '../ui/StatusDot'
 
 interface BookmarkGroupProps {
@@ -46,12 +47,14 @@ export function BookmarkGroup({
     const [renameValue, setRenameValue] = useState('')
     const renameInputRef = useRef<HTMLInputElement>(null)
 
+    const isDockerGroup = groupId === 'docker:'
+
     const startRename = useCallback(() => {
-        if (!isAdmin || !onRenameGroup) return
+        if (!isAdmin || !onRenameGroup || isDockerGroup) return
         setRenameValue(name)
         setRenaming(true)
         requestAnimationFrame(() => renameInputRef.current?.select())
-    }, [isAdmin, onRenameGroup, name])
+    }, [isAdmin, onRenameGroup, isDockerGroup, name])
 
     const commitRename = useCallback(() => {
         const trimmed = renameValue.trim()
@@ -105,17 +108,19 @@ export function BookmarkGroup({
                         >
                             +
                         </button>
-                        <button
-                            onClick={() => {
-                                if (window.confirm(t('widgets:deleteGroupConfirm'))) {
-                                    onDeleteGroup(groupId)
-                                }
-                            }}
-                            className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-red-500/50 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
-                            aria-label="delete group"
-                        >
-                            −
-                        </button>
+                        {!isDockerGroup ? (
+                            <button
+                                onClick={() => {
+                                    if (window.confirm(t('widgets:deleteGroupConfirm'))) {
+                                        onDeleteGroup(groupId)
+                                    }
+                                }}
+                                className="invisible rounded-lg bg-white/10 px-2 py-1 text-xs text-white/90 shadow-sm shadow-black/20 transition-colors transition-shadow hover:bg-red-500/50 hover:shadow-lg hover:shadow-black/30 group-hover:visible"
+                                aria-label="delete group"
+                            >
+                                −
+                            </button>
+                        ) : null}
                     </>
                 ) : null}
             </div>
@@ -174,7 +179,7 @@ export function BookmarkGroup({
                                     await onReorder(groupId, next)
                                 }}
                             >
-                                {isAdmin ? (
+                                {isAdmin && a.source !== 'docker' ? (
                                     <div className="absolute -right-1 -top-1 z-10 flex gap-0.5 opacity-0 transition-opacity group-hover/pill:opacity-100">
                                         <button
                                             className="rounded-full bg-black/60 p-0.5 text-white/90 hover:bg-black/80"
@@ -202,6 +207,9 @@ export function BookmarkGroup({
                                 >
                                     <div className="relative">
                                         <AppIcon iconPath={a.iconPath} name={a.name} appUrl={a.url} size="sm" />
+                                        {a.source === 'docker' ? (
+                                            <DockerBadge className="absolute -top-1 -right-1 ring-1 ring-black/40" />
+                                        ) : null}
                                         {st ? (
                                             <StatusDot status={st.status} className="absolute -bottom-0.5 -right-0.5 ring-1 ring-black/40" />
                                         ) : null}

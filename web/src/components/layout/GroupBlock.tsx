@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Cog, Cpu, Download, HardDrive, MemoryStick, RefreshCw, Trash2, Upload } from 'lucide-react'
 import type { AppItem } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
+import { DockerBadge } from '../cards/DockerBadge'
 import { StatusDot } from '../ui/StatusDot'
 import { WeatherWidget } from '../widgets/WeatherWidget'
 import { MarketsWidget } from '../widgets/MarketsWidget'
@@ -92,12 +93,14 @@ function GroupBlockImpl({
     const [renameValue, setRenameValue] = useState('')
     const renameInputRef = useRef<HTMLInputElement>(null)
 
+    const isDockerGroup = groupId === 'docker:'
+
     const startRename = useCallback(() => {
-        if (!isAdmin || !groupId || !onRenameGroup) return
+        if (!isAdmin || !groupId || !onRenameGroup || isDockerGroup) return
         setRenameValue(name)
         setRenaming(true)
         requestAnimationFrame(() => renameInputRef.current?.select())
-    }, [isAdmin, groupId, onRenameGroup, name])
+    }, [isAdmin, groupId, onRenameGroup, isDockerGroup, name])
 
     const commitRename = useCallback(() => {
         const trimmed = renameValue.trim()
@@ -159,7 +162,7 @@ function GroupBlockImpl({
                         >
                             +
                         </button>
-                        {groupId && onDeleteGroup ? (
+                        {groupId && onDeleteGroup && !isDockerGroup ? (
                             <button
                                 onClick={() => {
                                     if (window.confirm(t('widgets:deleteGroupConfirm'))) {
@@ -450,7 +453,7 @@ function GroupBlockImpl({
                                     await onReorder(groupId, next)
                                 }}
                             >
-                                {isAdmin ? (
+                                {isAdmin && a.source !== 'docker' ? (
                                     <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
                                         <button
                                             className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
@@ -489,6 +492,9 @@ function GroupBlockImpl({
                                     <div className="flex items-center gap-3">
                                         <div className="relative">
                                             <AppIcon iconPath={a.iconPath} name={a.name} appUrl={a.url} />
+                                            {a.source === 'docker' ? (
+                                                <DockerBadge className="absolute -top-1 -right-1 ring-1 ring-black/40" />
+                                            ) : null}
                                             {statusMap?.[a.id] ? (
                                                 <StatusDot
                                                     status={statusMap[a.id].status}

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Search } from 'lucide-react'
 import type { AppItem } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
+import { DockerBadge } from '../cards/DockerBadge'
 
 interface QuickLaunchProps {
     open: boolean
@@ -154,12 +155,17 @@ export function QuickLaunch({
                                     }}
                                     onMouseEnter={() => setSelectedIndex(i)}
                                 >
-                                    <AppIcon
-                                        iconPath={item.iconPath}
-                                        name={item.name}
-                                        appUrl={item.url}
-                                        size="sm"
-                                    />
+                                    <span className="relative inline-flex">
+                                        <AppIcon
+                                            iconPath={item.iconPath}
+                                            name={item.name}
+                                            appUrl={item.url}
+                                            size="sm"
+                                        />
+                                        {item.source === 'docker' ? (
+                                            <DockerBadge className="absolute -top-1 -right-1 ring-1 ring-black/40" />
+                                        ) : null}
+                                    </span>
                                     <div className="min-w-0 flex-1">
                                         <div className="truncate text-sm font-medium text-white">
                                             {item.name}
