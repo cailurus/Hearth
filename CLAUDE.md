@@ -43,6 +43,12 @@
 5. **Document Results**: Add review section to `tasks/todo.md`
 6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
+## Session Resume
+At session start, read the top of `tasks/todo.md` for the most recent
+"会话恢复指引" section — it summarises what was done in the previous
+session and where to pick up. Cross-reference against `git log` for
+the current state on `main`.
+
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.

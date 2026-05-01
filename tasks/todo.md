@@ -1,5 +1,52 @@
 # Hearth Code Fix - Progress Tracker
 
+---
+
+## 2026-05-01 会话恢复指引(下次进来先看这里)
+
+**当前版本**:`v0.7.0` (已打 tag,Docker Hub 镜像由 `dockerhub.yml` 自动构建)
+
+**这一轮会话做了什么**(34 commits,从 `7e4f558` 到 `fad2718`):
+
+| 段 | 落地内容 | 备注 |
+|---|---|---|
+| **A 段 安全基线** | A1-A7 全部完成 | 强制改密 / CORS 收紧 / TLS 私网白名单 / Docker action 审计 / 限流落库 / 背景图兜底 / slog 统一 |
+| **B 段 后端打磨** | B1-B4 全部完成 | 路由超时分级 / PRAGMA table_info / 参数白名单 / SQLite 注释 |
+| **C 段 前端架构** | C1 + C4(部分) | WidgetData Context + GroupBlock React.memo + callback useCallback;C4 收尾(items/statusMap 稳定化)未做 |
+| **D 段 前端瘦身** | D1 / D3 / D4 ✓;D2 跳过 | react-icons 删 / pinyin-pro 切 tiny-pinyin 省 135KB / backdrop-filter 兜底;D2 经验证不必做 |
+| **E 段 UX** | E1-E4, E6-E8 ✓ | ARIA combobox / Modal focus trap / prefers-reduced-motion / Widget ErrorBoundary / i18n CI / 安全区 / 对比度 |
+| **F 段 增长功能** | F1, F2, F5, F6 ✓ | 首启 onboarding / Docker labels 服务发现 / Forward-Auth / 季节彩蛋 |
+| **G 段 运营** | G4 ✓ | README 同类对比表;G1-G3 你自己 |
+| **额外修复** | 状态探测分类 / 自动图标 dep / VPN 兼容模式(独立特性) | 详见各小节 |
+
+**还剩 5 项**(按推荐 ROI 排序):
+
+| ID | 内容 | 工时 | 备注 |
+|---|---|---|---|
+| **C2** | widget registry 替换 if-else 链 | L | F3/F4 前置;实施后续就 cheap |
+| **F3** | 5-8 个深度 widget(Jellyfin/Plex/Sonarr...) | L | 等 C2;直接驱动 stars |
+| **C3** | useDashboard 乐观更新 | M | 独立 |
+| **E5** | CSS 变量主题色板 | L | 颜色硬编码迁移多 |
+| **F4** | 第三方 widget 协议 | XL | 等 C2 + F3 |
+| **F7** | K8s ingress 注解 | M | 优先级最低 |
+
+**下次会话的入口**:推荐从 **C2 widget registry** 开始——它是 F3/F4 的地基,做完后续多 widget 集成都便宜。或者直接挑某一项独立做(C3/E5 都不依赖任何东西)。
+
+**会话沿用的工作流**(可保留):
+- 直接 main 分支提交(VPN 模式 / Docker labels 全程都这么走的,没出问题)
+- 大特性走 brainstorming → spec → plan → subagent-driven 实施
+- 简化版 review:每 task 1 个 implementer subagent,完整三阶 review 留给真出问题再开
+- 推送时 `git push origin main` + 打 `v*` tag 触发 docker 镜像构建
+
+**未提交的工作**:仅有 `influxdb2/` `scrutiny/` 两个 untracked 目录(用户私有,session 起就在),和会话无关。
+
+**关键文档**:
+- 设计稿:`docs/superpowers/specs/2026-05-01-*-design.md`(VPN + Docker Labels)
+- 实施计划:`docs/superpowers/plans/2026-05-01-*.md`(同两个特性)
+- 经验沉淀:`tasks/lessons.md`(Phase 1 部分修复可能不彻底 / NAS 首启凭证应 stdout 不落盘 / 中文库切库要测多音字)
+
+---
+
 ## Phase 1: Backend Security Baseline
 - [x] 1.1 CORS configuration fix (server.go) - env var HEARTH_CORS_ORIGINS
 - [x] 1.2 SSRF protection - Icon Resolver (resolver.go) - proper CIDR checks + URL validation
