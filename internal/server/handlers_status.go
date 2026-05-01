@@ -3,17 +3,50 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 type appStatus struct {
 	ID         string `json:"id"`
-	Status     string `json:"status"`     // "up" | "slow" | "down"
+	Status     string `json:"status"`     // "up" | "slow" | "down" | "unknown"
 	StatusCode int    `json:"statusCode"` // HTTP status code, 0 if unreachable
 	LatencyMs  int64  `json:"latencyMs"`
+}
+
+// classifyProbeError maps a probe failure to a status string.
+//
+// Distinguish "the server can't see the target at all" (network-layer
+// unreachable, DNS failure) from "the target rejected our request"
+// (connection refused, TLS error, timeout from a slow upstream).
+// The first case is rendered as "unknown" (gray dot in the UI) because
+// the target may still be reachable from the user's browser — for
+// instance, when Hearth runs on a host behind a VPN that doesn't route
+// the LAN, the operator's Go runtime cannot dial 192.168.x.y but the
+// operator's browser still can. Calling that "down" misleads the user.
+// The second case really is unhealthy from the operator's vantage point
+// and stays "down".
+func classifyProbeError(err error) string {
+	if err == nil {
+		return "up"
+	}
+	// EHOSTUNREACH / ENETUNREACH: the kernel says the destination address
+	// has no route from this socket. Common when a VPN owns the default
+	// route and the LAN isn't included.
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
+		return "unknown"
+	}
+	// DNS resolution failed — also a server-side network issue.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "unknown"
+	}
+	return "down"
 }
 
 type statusResponse struct {
@@ -101,9 +134,11 @@ func (s *Server) handleGetAppsStatus(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Any HTTP response (even 401/403/500) means the service is reachable.
-			// Only a connection error (timeout, refused, DNS) means truly down.
+			// On error, distinguish network-layer unreachable ("unknown" — the
+			// server-side stack can't see the target, but the user's browser
+			// might) from app-level unhealthy ("down").
 			if err != nil {
-				results[idx] = appStatus{ID: id, Status: "down", LatencyMs: latency}
+				results[idx] = appStatus{ID: id, Status: classifyProbeError(err), LatencyMs: latency}
 				return
 			}
 
