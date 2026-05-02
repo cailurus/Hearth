@@ -164,13 +164,21 @@ export interface WidgetSpec<TConfig = unknown, TData = unknown> {
   /**
    * 渲染组件。registry 内部 byId Map 存 `unknown`,但 defineWidget 泛型把
    * cast 推到注册声明处,Component 接收的 props 类型精确。
+   *
+   * 5 个标准 props:
+   *  - data / error / cfg: 来自 byId slice + 配置
+   *  - refresh: 该 widget 实例的手动刷新(RSS 等需要)
+   *  - isAdmin: 当前用户是否管理员(Notes/Docker 等需要,用于显示编辑/操作按钮)
+   *
+   * 其他 ambient state(lang / localTimezone / 等)widget 内部用 hook 或
+   * 浏览器 API 拿(useTranslation / Intl.DateTimeFormat),不进标准 props。
    */
   readonly Component: React.ComponentType<{
     data: TData | null
     error: string | null
     cfg: TConfig
-    /** 该 widget 实例的手动刷新(RSS 等需要) */
     refresh: () => void
+    isAdmin: boolean
   }>
 }
 ```
@@ -204,8 +212,10 @@ function WeatherWidgetView({ data, error, cfg }: {
   error: string | null
   cfg: WeatherConfig
   refresh: () => void
+  isAdmin: boolean
 }) {
-  // 现有 WeatherWidget 实现,props 收敛到 4 个标准字段
+  // 现有 WeatherWidget 实现,props 收敛到 5 个标准字段
+  // (lang 通过 useTranslation 从内部读;cityName 改用 cfg.city)
 }
 
 export const weatherWidget = defineWidget<WeatherConfig, Weather>({
@@ -391,6 +401,7 @@ return (
       error={slice?.error ?? null}
       cfg={cfg}
       refresh={slice?.refresh ?? noop}
+      isAdmin={isAdmin}
     />
   </WidgetBoundary>
 )
