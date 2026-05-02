@@ -20,8 +20,11 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
 /**
  * GET 请求
  */
-export async function apiGet<T>(path: string): Promise<T> {
-    const res = await fetch(path, { credentials: 'include' })
+export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
+    const res = await fetch(path, {
+        credentials: 'include',
+        signal: opts?.signal,
+    })
     return parseJsonOrThrow<T>(res)
 }
 

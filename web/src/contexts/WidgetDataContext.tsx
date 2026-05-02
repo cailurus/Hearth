@@ -17,6 +17,7 @@
 
 import { createContext, useContext, type ReactNode } from 'react'
 import type { UseWidgetsResult } from '../hooks'
+import type { WidgetSlice } from '../widgets/types'
 
 const WidgetDataContext = createContext<UseWidgetsResult | null>(null)
 
@@ -40,4 +41,16 @@ export function useWidgetData(): UseWidgetsResult {
         throw new Error('useWidgetData must be used inside <WidgetDataProvider>')
     }
     return ctx
+}
+
+/**
+ * useWidgetSlice — read this widget instance's fetch state from the registry.
+ *
+ * Returns undefined if the kind isn't in the registry (LEGACY path) or the
+ * generic loop hasn't seeded a placeholder yet. Component code should treat
+ * undefined the same as a slice with null data + null error.
+ */
+export function useWidgetSlice(widgetId: string): WidgetSlice | undefined {
+    const { byId } = useWidgetData()
+    return byId.get(widgetId)
 }

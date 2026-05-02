@@ -1,6 +1,8 @@
 import type { CurrencyResponse, CurrencyPair } from '../../types'
 import { MiniSparkline } from './MiniSparkline'
 import { Spinner } from '../ui/Spinner'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
 
 const CURRENCY_FLAGS: Record<string, string> = {
     USD: '\u{1F1FA}\u{1F1F8}', CNY: '\u{1F1E8}\u{1F1F3}', EUR: '\u{1F1EA}\u{1F1FA}',
@@ -103,3 +105,38 @@ export function CurrencyWidget({ data, error }: CurrencyWidgetProps) {
         </div>
     )
 }
+
+export interface CurrencyConfig {
+    pairs: string[]
+}
+
+const CURRENCY_DEFAULT_CONFIG: CurrencyConfig = { pairs: [] }
+
+function CurrencyView({ data, error }: {
+    data: CurrencyResponse | null
+    error: string | null
+    cfg: CurrencyConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <CurrencyWidget data={data} error={error} />
+}
+
+export const currencyWidget = defineWidget<CurrencyConfig, CurrencyResponse>({
+    kind: 'currency',
+    labelKey: 'widgets:currency',
+    defaultConfig: CURRENCY_DEFAULT_CONFIG,
+    pollIntervalMs: 5 * 60 * 1000,
+    fetchData: async (cfg, signal) => {
+        const pairs = (Array.isArray(cfg.pairs) ? cfg.pairs : [])
+            .map((x) => String(x ?? '').trim())
+            .filter(Boolean)
+            .slice(0, 4)
+        if (pairs.length === 0) {
+            return { fetchedAt: 0, items: [] } as CurrencyResponse
+        }
+        const qs = new URLSearchParams({ pairs: pairs.join(',') })
+        return apiGet<CurrencyResponse>(`/api/widgets/currency?${qs.toString()}`, { signal })
+    },
+    Component: CurrencyView,
+})

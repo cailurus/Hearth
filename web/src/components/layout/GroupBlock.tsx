@@ -24,6 +24,9 @@ import { useWidgetData } from '../../contexts/WidgetDataContext'
 import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 
 import { safeParseJSON, formatBytesPerSec, formatGiB, shortenCpuModelName, clocksFromCfg, isSystemGroup, isWidgetItem } from '../../utils'
+import { getWidget } from '../../widgets/registry'
+
+const noop = () => {}
 
 interface GroupBlockProps {
     groupId: string | null
@@ -62,6 +65,7 @@ function GroupBlockImpl({
     // now read from context so HomePage state changes only invalidate this
     // component when the relevant slice of widget data actually changes.
     const {
+        byId,
         weather,
         weatherErr,
         weatherById,
@@ -325,74 +329,93 @@ function GroupBlockImpl({
                                             fallbackLabel={t('common:widgetError')}
                                             retryLabel={t('common:retry')}
                                         >
-                                        {widget === 'weather' ? (
-                                            <WeatherWidget
-                                                data={(weatherById && a.id in weatherById) ? (weatherById[a.id] ?? weather) : null}
-                                                error={(weatherErrById && a.id in weatherErrById) ? (weatherErrById[a.id] ?? weatherErr) : null}
-                                                cityName={cfg?.city as string | undefined}
-                                            />
-                                        ) : widget === 'metrics' ? (
-                                            metrics ? (
-                                                <div className="space-y-2 sm:space-y-3 text-[11px] sm:text-xs text-white/85 overflow-hidden">
-                                                    {cfg?.showCpu !== false ? (
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />CPU</span>
-                                                            <span className="text-right min-w-0 truncate">
-                                                                {metrics.cpuModel ? <span className="mr-1">{shortenCpuModelName(metrics.cpuModel)} ·</span> : null}
-                                                                <span className="tabular-nums">{metrics.cpuPercent.toFixed(1)}%</span>
-                                                            </span>
-                                                        </div>
-                                                    ) : null}
-                                                    {cfg?.showMem !== false ? (
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><MemoryStick className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:memory')}</span>
-                                                            <span className="tabular-nums text-right min-w-0 truncate">
-                                                                {formatGiB(metrics.memUsed)}/{formatGiB(metrics.memTotal)} · {metrics.memPercent.toFixed(0)}%
-                                                            </span>
-                                                        </div>
-                                                    ) : null}
-                                                    {cfg?.showDisk !== false ? (
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><HardDrive className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:disk')}</span>
-                                                            <span className="tabular-nums text-right min-w-0 truncate">
-                                                                {formatGiB(metrics.diskUsed)}/{formatGiB(metrics.diskTotal)} · {metrics.diskPercent.toFixed(0)}%
-                                                            </span>
-                                                        </div>
-                                                    ) : null}
+                                        {(() => {
+                                            // Registry path — preferred when this kind has migrated.
+                                            const spec = getWidget(widget)
+                                            if (spec) {
+                                                const slice = byId.get(a.id)
+                                                return (
+                                                    <spec.Component
+                                                        data={slice?.data ?? null}
+                                                        error={slice?.error ?? null}
+                                                        cfg={cfg}
+                                                        refresh={slice?.refresh ?? noop}
+                                                        isAdmin={isAdmin}
+                                                    />
+                                                )
+                                            }
+                                            // LEGACY path — fall through to existing if-else chain below.
+                                            return (
+                                                widget === 'weather' ? (
+                                                    <WeatherWidget
+                                                        data={(weatherById && a.id in weatherById) ? (weatherById[a.id] ?? weather) : null}
+                                                        error={(weatherErrById && a.id in weatherErrById) ? (weatherErrById[a.id] ?? weatherErr) : null}
+                                                        cityName={cfg?.city as string | undefined}
+                                                    />
+                                                ) : widget === 'metrics' ? (
+                                                    metrics ? (
+                                                        <div className="space-y-2 sm:space-y-3 text-[11px] sm:text-xs text-white/85 overflow-hidden">
+                                                            {cfg?.showCpu !== false ? (
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />CPU</span>
+                                                                    <span className="text-right min-w-0 truncate">
+                                                                        {metrics.cpuModel ? <span className="mr-1">{shortenCpuModelName(metrics.cpuModel)} ·</span> : null}
+                                                                        <span className="tabular-nums">{metrics.cpuPercent.toFixed(1)}%</span>
+                                                                    </span>
+                                                                </div>
+                                                            ) : null}
+                                                            {cfg?.showMem !== false ? (
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><MemoryStick className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:memory')}</span>
+                                                                    <span className="tabular-nums text-right min-w-0 truncate">
+                                                                        {formatGiB(metrics.memUsed)}/{formatGiB(metrics.memTotal)} · {metrics.memPercent.toFixed(0)}%
+                                                                    </span>
+                                                                </div>
+                                                            ) : null}
+                                                            {cfg?.showDisk !== false ? (
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="flex items-center gap-1.5 sm:gap-2 shrink-0"><HardDrive className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:disk')}</span>
+                                                                    <span className="tabular-nums text-right min-w-0 truncate">
+                                                                        {formatGiB(metrics.diskUsed)}/{formatGiB(metrics.diskTotal)} · {metrics.diskPercent.toFixed(0)}%
+                                                                    </span>
+                                                                </div>
+                                                            ) : null}
 
-                                                    {cfg?.showNet !== false ? (
-                                                        <>
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:upload')}</span>
-                                                                <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.upBps) : '—'}</span>
-                                                            </div>
-                                                            <div className="flex items-center justify-between gap-2">
-                                                                <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:download')}</span>
-                                                                <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.downBps) : '—'}</span>
-                                                            </div>
-                                                        </>
-                                                    ) : null}
-                                                </div>
-                                            ) : (
-                                                <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
+                                                            {cfg?.showNet !== false ? (
+                                                                <>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Upload className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:upload')}</span>
+                                                                        <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.upBps) : '—'}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="flex items-center gap-1.5 sm:gap-2 text-white/85 shrink-0"><Download className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/70" />{t('widgets:download')}</span>
+                                                                        <span className="tabular-nums">{netRate ? formatBytesPerSec(netRate.downBps) : '—'}</span>
+                                                                    </div>
+                                                                </>
+                                                            ) : null}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
+                                                    )
+                                                ) : widget === 'markets' ? (
+                                                    <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} symbols={cfg?.symbols as string[] | undefined} />
+                                                ) : widget === 'holidays' ? (
+                                                    <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
+                                                ) : widget === 'docker' ? (
+                                                    <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} isAdmin={isAdmin} />
+                                                ) : widget === 'notes' ? (
+                                                    <NotesWidget isAdmin={isAdmin} />
+                                                ) : widget === 'rss' ? (
+                                                    <RSSWidget data={rssById?.[a.id] || null} error={rssErrById?.[a.id] || null} lang={lang} />
+                                                ) : widget === 'currency' ? (
+                                                    <CurrencyWidget data={currencyById?.[a.id] || null} error={currencyErrById?.[a.id] || null} />
+                                                ) : widget === 'deals' ? (
+                                                    <DealsWidget data={dealsById?.[a.id] || null} error={dealsErrById?.[a.id] || null} lang={lang} />
+                                                ) : (
+                                                    <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
+                                                )
                                             )
-                                        ) : widget === 'markets' ? (
-                                            <MarketsWidget data={marketsById?.[a.id] || null} error={marketsErrById?.[a.id] || null} symbols={cfg?.symbols as string[] | undefined} />
-                                        ) : widget === 'holidays' ? (
-                                            <HolidaysWidget data={holidaysById?.[a.id] || null} error={holidaysErrById?.[a.id] || null} />
-                                        ) : widget === 'docker' ? (
-                                            <DockerWidget data={dockerById?.[a.id] || null} error={dockerErrById?.[a.id] || null} isAdmin={isAdmin} />
-                                        ) : widget === 'notes' ? (
-                                            <NotesWidget isAdmin={isAdmin} />
-                                        ) : widget === 'rss' ? (
-                                            <RSSWidget data={rssById?.[a.id] || null} error={rssErrById?.[a.id] || null} lang={lang} />
-                                        ) : widget === 'currency' ? (
-                                            <CurrencyWidget data={currencyById?.[a.id] || null} error={currencyErrById?.[a.id] || null} />
-                                        ) : widget === 'deals' ? (
-                                            <DealsWidget data={dealsById?.[a.id] || null} error={dealsErrById?.[a.id] || null} lang={lang} />
-                                        ) : (
-                                            <TimezonesWidget localTimezone={localTimezone} clocks={clocksFromCfg(cfg)} />
-                                        )}
+                                        })()}
                                         </WidgetBoundary>
                                     </div>
                                 </div>

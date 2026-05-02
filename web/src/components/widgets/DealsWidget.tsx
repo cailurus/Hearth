@@ -1,6 +1,9 @@
 import { Monitor, Apple } from 'lucide-react'
 import type { DealsResponse } from '../../types'
 import { Spinner } from '../ui/Spinner'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
+import { useTranslation } from 'react-i18next'
 
 interface DealsWidgetProps {
     data: DealsResponse | null
@@ -104,3 +107,34 @@ export function DealsWidget({ data, error, lang }: DealsWidgetProps) {
         </div>
     )
 }
+
+export interface DealsConfig {
+    region: string
+}
+
+const DEALS_DEFAULT_CONFIG: DealsConfig = { region: 'us' }
+
+function DealsView({ data, error }: {
+    data: DealsResponse | null
+    error: string | null
+    cfg: DealsConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    const { i18n } = useTranslation()
+    const lang: 'zh' | 'en' = i18n.language === 'en' ? 'en' : 'zh'
+    return <DealsWidget data={data} error={error} lang={lang} />
+}
+
+export const dealsWidget = defineWidget<DealsConfig, DealsResponse>({
+    kind: 'deals',
+    labelKey: 'widgets:deals',
+    defaultConfig: DEALS_DEFAULT_CONFIG,
+    pollIntervalMs: 15 * 60 * 1000,
+    fetchData: async (cfg, signal) => {
+        const region = String(cfg.region ?? 'us').trim() || 'us'
+        const qs = new URLSearchParams({ region })
+        return apiGet<DealsResponse>(`/api/widgets/deals?${qs.toString()}`, { signal })
+    },
+    Component: DealsView,
+})

@@ -3,8 +3,12 @@ import { apiGet } from '../api'
 import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics, RSSResponse, CurrencyResponse, DealsResponse } from '../types'
 import type { DockerResponse } from '../types/models'
 import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
+import { getWidget } from '../widgets/registry'
+import type { WidgetSlice } from '../widgets/types'
 
 export interface UseWidgetsResult {
+    /** Per-instance fetch state for widgets that have been migrated to the registry. */
+    byId: Map<string, WidgetSlice>
     /** Weather data for default widget */
     weather: Weather | null
     weatherErr: string | null
@@ -49,6 +53,8 @@ interface UseWidgetsOptions {
  * Hook for managing widget data fetching
  */
 export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseWidgetsResult {
+    const [byId, setById] = useState<Map<string, WidgetSlice>>(() => new Map())
+
     const [weather, setWeather] = useState<Weather | null>(null)
     const [weatherErr, setWeatherErr] = useState<string | null>(null)
     const [weatherById, setWeatherById] = useState<Record<string, Weather | null>>({})
@@ -77,6 +83,102 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
     const lastMetricsRef = useRef<HostMetrics | null>(null)
+
+    // Generic registry-driven fetch loop. Handles every widget that has been
+    // migrated to defineWidget(). Old per-widget effects below skip kinds
+    // already in the registry to avoid duplicate work.
+    useEffect(() => {
+        const controllers = new Map<string, AbortController>()
+        const timers = new Map<string, number>()
+
+        type Inst = { id: string; kind: string; spec: NonNullable<ReturnType<typeof getWidget>>; cfg: unknown }
+        const instances: Inst[] = []
+        for (const a of apps) {
+            const kind = widgetKindFromUrl(a.url)
+            if (!kind) continue
+            const spec = getWidget(kind)
+            if (!spec) continue
+            const cfg = { ...(spec.defaultConfig as object), ...((safeParseJSON(a.description) as object | null) ?? {}) }
+            instances.push({ id: a.id, kind, spec, cfg })
+        }
+
+        // Drop any byId entries for apps that no longer exist.
+        setById((prev) => {
+            const liveIds = new Set(instances.map((i) => i.id))
+            let dirty = false
+            const next = new Map(prev)
+            for (const id of prev.keys()) {
+                if (!liveIds.has(id)) {
+                    next.delete(id)
+                    dirty = true
+                }
+            }
+            return dirty ? next : prev
+        })
+
+        for (const inst of instances) {
+            const fetchOnce = async () => {
+                if (!inst.spec.fetchData) return
+                controllers.get(inst.id)?.abort()
+                const ctrl = new AbortController()
+                controllers.set(inst.id, ctrl)
+                try {
+                    const data = await inst.spec.fetchData(inst.cfg, ctrl.signal)
+                    setById((prev) => {
+                        const next = new Map(prev)
+                        next.set(inst.id, {
+                            kind: inst.kind,
+                            data,
+                            error: null,
+                            refresh: fetchOnce,
+                        })
+                        return next
+                    })
+                } catch (e) {
+                    if (ctrl.signal.aborted) return
+                    setById((prev) => {
+                        const next = new Map(prev)
+                        next.set(inst.id, {
+                            kind: inst.kind,
+                            data: null,
+                            error: e instanceof Error ? e.message : 'failed',
+                            refresh: fetchOnce,
+                        })
+                        return next
+                    })
+                }
+            }
+
+            // Seed a placeholder slice so consumers see refresh() immediately.
+            setById((prev) => {
+                if (prev.has(inst.id)) return prev
+                const next = new Map(prev)
+                next.set(inst.id, {
+                    kind: inst.kind,
+                    data: null,
+                    error: null,
+                    refresh: fetchOnce,
+                })
+                return next
+            })
+
+            void fetchOnce()
+
+            const intervalRaw = inst.spec.pollIntervalMs
+            const intervalMs = typeof intervalRaw === 'function'
+                ? intervalRaw(inst.cfg)
+                : intervalRaw
+            if (typeof intervalMs === 'number' && intervalMs > 0) {
+                const t = window.setInterval(fetchOnce, intervalMs)
+                timers.set(inst.id, t)
+            }
+        }
+
+        return () => {
+            controllers.forEach((c) => c.abort())
+            timers.forEach((t) => window.clearInterval(t))
+        }
+    }, [apps])
 
     // Fetch default weather
     useEffect(() => {
@@ -360,9 +462,15 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
-    // Fetch currency data
+    // Fetch currency data — skipped during migration if registry handles it.
     useEffect(() => {
         let cancelled = false
+        if (getWidget('currency')) {
+            // Registry handles this kind; clear LEGACY state and bail.
+            setCurrencyById({})
+            setCurrencyErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'currency')
         if (ws.length === 0) {
             setCurrencyById({})
@@ -407,9 +515,14 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         return () => { cancelled = true; window.clearInterval(id) }
     }, [apps])
 
-    // Fetch deals data
+    // Fetch deals data — skipped during migration if registry handles it.
     useEffect(() => {
         let cancelled = false
+        if (getWidget('deals')) {
+            setDealsById({})
+            setDealsErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'deals')
         if (ws.length === 0) {
             setDealsById({})
@@ -510,6 +623,7 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
     }, [apps, rssRefreshSeq])
 
     return {
+        byId,
         weather,
         weatherErr,
         weatherById,
