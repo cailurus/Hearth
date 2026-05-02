@@ -3,6 +3,8 @@ import { prettifyCompanyName } from '../../utils'
 import { MarketLogo } from './MarketLogo'
 import { MiniSparkline } from './MiniSparkline'
 import { Spinner } from '../ui/Spinner'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
 
 interface MarketsWidgetProps {
     data: MarketsResponse | null
@@ -96,3 +98,36 @@ export function MarketsWidget({ data, error, symbols }: MarketsWidgetProps) {
 }
 
 export default MarketsWidget
+
+export interface MarketsConfig {
+    symbols: string[]
+}
+
+const MARKETS_DEFAULT_CONFIG: MarketsConfig = { symbols: [] }
+
+function MarketsView({ data, error, cfg }: {
+    data: MarketsResponse | null
+    error: string | null
+    cfg: MarketsConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <MarketsWidget data={data} error={error} symbols={cfg.symbols} />
+}
+
+export const marketsWidget = defineWidget<MarketsConfig, MarketsResponse>({
+    kind: 'markets',
+    labelKey: 'widgets:markets',
+    defaultConfig: MARKETS_DEFAULT_CONFIG,
+    pollIntervalMs: 5 * 60 * 1000,
+    fetchData: async (cfg, signal) => {
+        const raw = Array.isArray(cfg.symbols) ? cfg.symbols : []
+        const symbols = raw.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 4)
+        if (symbols.length === 0) {
+            return null as unknown as MarketsResponse
+        }
+        const qs = new URLSearchParams({ symbols: symbols.join(',') })
+        return apiGet<MarketsResponse>(`/api/widgets/markets?${qs.toString()}`, { signal })
+    },
+    Component: MarketsView,
+})

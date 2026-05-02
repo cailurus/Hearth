@@ -261,6 +261,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
     // Fetch markets data
     useEffect(() => {
         let cancelled = false
+        if (getWidget('markets')) {
+            setMarketsById({})
+            setMarketsErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'markets')
         if (ws.length === 0) {
             setMarketsById({})

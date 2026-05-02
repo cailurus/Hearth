@@ -18,11 +18,13 @@ import type { WidgetSpec } from './types'
 import { currencyWidget } from '../components/widgets/CurrencyWidget'
 import { dealsWidget } from '../components/widgets/DealsWidget'
 import { holidaysWidget } from '../components/widgets/HolidaysWidget'
+import { marketsWidget } from '../components/widgets/MarketsWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
     dealsWidget,
     holidaysWidget,
+    marketsWidget,
 ] as const
 
 /** Literal union derived from the tuple — adding a widget extends this automatically. */
