@@ -206,9 +206,14 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [defaultCity, lang])
 
-    // Fetch weather for each weather widget
+    // Fetch weather for each weather widget — skipped during migration if registry handles it.
     useEffect(() => {
         let cancelled = false
+        if (getWidget('weather')) {
+            setWeatherById({})
+            setWeatherErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'weather')
         if (ws.length === 0) {
             setWeatherById({})

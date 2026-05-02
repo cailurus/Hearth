@@ -29,7 +29,6 @@ export const WIDGET_URL_PREFIX = 'widget:'
  * shared-interval polling, doesn't fit the registry shape).
  */
 const LEGACY_KINDS = [
-    'weather',
     'metrics',
     'timezones',
     'notes',
@@ -37,7 +36,6 @@ const LEGACY_KINDS = [
 ] as const
 
 const LEGACY_LABEL_KEYS: Record<string, string> = {
-    weather: 'widgets:weather',
     metrics: 'widgets:systemStatus',
     timezones: 'widgets:worldClock',
     notes: 'widgets:notes',

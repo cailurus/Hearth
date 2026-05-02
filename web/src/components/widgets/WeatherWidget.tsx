@@ -3,6 +3,9 @@ import type { Weather } from '../../types'
 import { cityShort, weekdayLabel, weatherCodeLabel } from '../../utils'
 import { WeatherGlyph } from './WeatherGlyph'
 import { Spinner } from '../ui/Spinner'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
+import i18n from '../../i18n'
 
 interface WeatherWidgetProps {
     data: Weather | null
@@ -90,3 +93,33 @@ export function WeatherWidget({ data, error, cityName }: WeatherWidgetProps) {
 }
 
 export default WeatherWidget
+
+export interface WeatherConfig {
+    city: string
+}
+
+const WEATHER_DEFAULT_CONFIG: WeatherConfig = { city: '' }
+
+function WeatherView({ data, error, cfg }: {
+    data: Weather | null
+    error: string | null
+    cfg: WeatherConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <WeatherWidget data={data} error={error} cityName={cfg.city || undefined} />
+}
+
+export const weatherWidget = defineWidget<WeatherConfig, Weather>({
+    kind: 'weather',
+    labelKey: 'widgets:weather',
+    defaultConfig: WEATHER_DEFAULT_CONFIG,
+    fetchData: async (cfg, signal) => {
+        const city = String(cfg.city ?? '').trim()
+        if (!city) throw new Error('city not configured')
+        const lang: 'zh' | 'en' = i18n.language === 'en' ? 'en' : 'zh'
+        const qs = new URLSearchParams({ city, lang })
+        return apiGet<Weather>(`/api/widgets/weather?${qs.toString()}`, { signal })
+    },
+    Component: WeatherView,
+})
