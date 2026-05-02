@@ -425,6 +425,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
     // Fetch docker data
     useEffect(() => {
         let cancelled = false
+        if (getWidget('docker')) {
+            setDockerById({})
+            setDockerErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'docker')
         if (ws.length === 0) {
             setDockerById({})

@@ -32,7 +32,6 @@ const LEGACY_KINDS = [
     'weather',
     'metrics',
     'timezones',
-    'docker',
     'notes',
     'rss',
 ] as const
@@ -41,7 +40,6 @@ const LEGACY_LABEL_KEYS: Record<string, string> = {
     weather: 'widgets:weather',
     metrics: 'widgets:systemStatus',
     timezones: 'widgets:worldClock',
-    docker: 'widgets:docker',
     notes: 'widgets:notes',
     rss: 'widgets:rss',
 }

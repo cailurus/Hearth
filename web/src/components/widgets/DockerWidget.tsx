@@ -4,6 +4,8 @@ import type { DockerContainer, DockerResponse } from '../../types/models'
 import { formatGiB } from '../../utils'
 import { Spinner } from '../ui/Spinner'
 import { DockerDetailModal } from './DockerDetailModal'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
 
 interface DockerWidgetProps {
     data: DockerResponse | null
@@ -96,3 +98,33 @@ export function DockerWidget({ data, error, isAdmin }: DockerWidgetProps) {
         </>
     )
 }
+
+export interface DockerConfig {
+    refreshSec: 5 | 10 | 30
+}
+
+const DOCKER_DEFAULT_CONFIG: DockerConfig = { refreshSec: 10 }
+
+function DockerView({ data, error, isAdmin }: {
+    data: DockerResponse | null
+    error: string | null
+    cfg: DockerConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <DockerWidget data={data} error={error} isAdmin={isAdmin} />
+}
+
+export const dockerWidget = defineWidget<DockerConfig, DockerResponse>({
+    kind: 'docker',
+    labelKey: 'widgets:docker',
+    defaultConfig: DOCKER_DEFAULT_CONFIG,
+    pollIntervalMs: (cfg) => {
+        const sec = cfg.refreshSec
+        return (sec === 5 || sec === 10 || sec === 30 ? sec : 10) * 1000
+    },
+    fetchData: async (_cfg, signal) => {
+        return apiGet<DockerResponse>('/api/widgets/docker', { signal })
+    },
+    Component: DockerView,
+})
