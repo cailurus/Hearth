@@ -25,6 +25,30 @@
 - **Lesson**: when swapping a Chinese-language utility library — even one with an "almost-identical" API — write a smoke test against actual project content (NAS apps, Chinese brand names) before trusting the swap. The dictionary choices are part of the contract, not just the function signatures.
 - **How to apply**: build a list of canonical inputs from the project's actual user data (or representative samples) and snapshot the outputs. Any library swap must produce comparable outputs on that list, or the regression must be acknowledged in the commit and lessons.
 
+## TSX-direct-import circular dependency: TDZ traps in lint scripts
+- 2026-05-03 (C2 task 19): wrote `web/scripts/check-widget-registry.mjs` to lint the registry. Plan said to use `node --import tsx` and import `WIDGET_REGISTRY` from `../src/widgets/registry.ts` directly.
+- Implementer subagent ran into a TDZ error: `ReferenceError: Cannot access 'WIDGET_REGISTRY' before initialization` at `constants.ts:29`. The dependency cycle is: `registry.ts` imports widget files → widget files (transitively, via shared util re-exports) reach `constants.ts` → `constants.ts` imports `WIDGET_REGISTRY` from `registry.ts` (still mid-evaluation) → TDZ.
+- Vite/rollup handles this fine via hoisting at build time; raw Node + tsx does NOT.
+- **Fix used**: static parsing of widget `.tsx` files via regex (extract `kind`, `labelKey`, `pollIntervalMs` from `defineWidget(...)` calls). Less rigorous than direct import (won't catch widget-file-exists-but-not-in-registry mismatches) but works without the cycle.
+- **Lesson**: when a lint script needs to introspect TypeScript sources, prefer static parsing or AST extraction over runtime import — the import resolution failure modes are nasty and platform-specific. Reserve runtime import for cases where you genuinely need to execute code (e.g., evaluating computed properties, type checks).
+- **How to apply**: any `*.mjs` script that wants to read project state should default to `readFileSync` + parsing. Only escalate to `--import tsx` if there's no other way and the import graph is known to be acyclic.
+
+## React component standard-prop wrappers: destructure only what you use, list everything in the type
+- 2026-05-02 (C2 stage 1-2): the registry's `WidgetSpec.Component` props is `{ data, error, cfg, refresh, isAdmin }` — 5 standard props. Many widget wrappers only use 2-3 (e.g., `CurrencyView` uses just `data` + `error`).
+- Hearth has strict TypeScript with `noUnusedLocals`. Destructuring `{ data, error, cfg, refresh, isAdmin }` but referencing only `data` + `error` in the body **fails the build** with TS6133 "declared but never read".
+- **Fix**: destructure only what's used (`{ data, error }`), but keep the full type annotation listing all 5 fields:
+  ```ts
+  function CurrencyView({ data, error }: {
+      data: CurrencyResponse | null
+      error: string | null
+      cfg: CurrencyConfig         ← stays in type
+      refresh: () => void          ← stays in type
+      isAdmin: boolean             ← stays in type
+  }) { ... }
+  ```
+- **Lesson**: TS6133 fires on unused destructured **bindings**, not unused fields **in the parameter type**. The two are independent. Keep the parameter type complete (so the wrapper is shape-compatible with `WidgetSpec.Component`), but only destructure the names you actually reference.
+- **How to apply**: when writing thin wrapper components that adapt one prop shape to another (registry → legacy widget body), use this asymmetric pattern. It compiles, satisfies the registry signature, and doesn't generate noise warnings.
+
 ## NAS / docker-self-host first-run secrets: print to stdout, don't write a file
 - Initial design (2026-05-01) wrote the auto-generated admin password to `<data>/initial-admin.txt`. User pushed back: "directly print to terminal, no file."
 - **Why**: NAS UIs (fnOS / Synology / 极空间) often *don't* expose a shell, but they always show container logs. `docker logs hearth` is one click; `docker exec cat /data/initial-admin.txt` is two layers of friction. Files also linger after rotation/restore and become a stale credential leak.

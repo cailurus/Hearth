@@ -2,7 +2,55 @@
 
 ---
 
-## 2026-05-01 会话恢复指引(下次进来先看这里)
+## 2026-05-03 会话恢复指引(下次进来先看这里)
+
+**这一轮做了什么**:**C2 widget registry 重构全部完成**,共 10 个 C2 commits + 1 个不相关修复(`090fd8a` 修 react/react-dom 版本错配),`3d13b7e` → `b3abf8f`。
+
+**C2 成绩**:
+
+| 指标 | 改前 | 改后 |
+|---|---|---|
+| `useWidgets.ts` | 536 行(8 段重复 fetch 模板) | 233 行(1 段通用循环 + 2 个 carve-out) |
+| `GroupBlock.tsx` | 531 行(if-else 长链) | 498 行(metrics inline + registry dispatch) |
+| `WidgetDataContext` 字段 | 21 个 | 4 个(byId Map + 2 carve-out) |
+| 加新 widget 改动面 | 7 处 / 4 文件 | 1 新文件 + registry 加 1 行 |
+
+**架构**:`widgets/registry.ts` 是 9 个 widget 的 `as const` tuple;`metrics` 走 GroupBlock 内联渲染 carve-out;`defaultWeather` 走 useWidgets 顶层 carve-out。新增 `npm run check:widgets` lint 脚本。
+
+**还剩 5 项**(按推荐 ROI 排序):
+
+| ID | 内容 | 工时 | 备注 |
+|---|---|---|---|
+| **F3** | 5-8 个深度 widget(Jellyfin/Plex/Sonarr...) | L | C2 已铺好,**直接驱动 stars** — 加每个 widget 现在便宜 |
+| **C3** | useDashboard 乐观更新 | M | 独立任务 |
+| **E5** | CSS 变量主题色板 | L | 独立任务 |
+| **F4** | 第三方 widget 插件协议 | XL | C2 已预留 registerWidget 形状;等 F3 积累更多 widget 形态 |
+| **F7** | K8s ingress 注解 | M | 优先级最低,场景重叠 Docker Labels |
+
+**下次会话推荐入口**:**F3** 第一个深度 widget(比如 Jellyfin 或 Sonarr)。一个 widget 跑通后,后面 5-8 个就是模板复制。
+
+**未做但 spec 提的小尾巴**(C2 留下的 follow-ups,不紧急):
+- RSS 手动 refresh 不再带 `?nocache=1`,只是普通 fetch — 见 `24e5a70` commit message
+- `useWidgetEditor.ts` 仍是 ~250 行 per-widget config state — 留作 C2.5 / F3 时一起做
+- byId Map 整体变化触发 Context 全消费方重渲染 — 实测无瓶颈,真有再优化
+
+**关键文档**:
+- 设计稿:`docs/superpowers/specs/2026-05-02-widget-registry-design.md`
+- 实施计划:`docs/superpowers/plans/2026-05-02-widget-registry.md`
+- 一致性脚本:`web/scripts/check-widget-registry.mjs`
+- 经验沉淀:`tasks/lessons.md`(本轮新增 2 条:TDZ 循环依赖 / 5 标准 props 解构)
+
+**会话沿用的工作流**(继续保留):
+- 直接 main 分支提交(C2 全程也这么走,没出问题)
+- 大特性走 brainstorming → spec → plan → subagent-driven 实施
+- 简化版 review:每 task 1 个 implementer subagent,真出问题再开三阶
+- 大型/重构性的 task 18 这种(9 个 useEffect + 16 个 useState 全删)主控制台直接做反而稳,subagent 容易累
+
+**当前版本**:`v0.7.0` (已打 tag);C2 commits 推上 main 后会触发 Docker Hub workflow,但**没打新 tag**,所以不会产生新版本镜像。下次有切版本意图再打 `v0.7.1` / `v0.8.0`。
+
+---
+
+## 2026-05-01 会话恢复指引(归档,见上)
 
 **当前版本**:`v0.7.0` (已打 tag,Docker Hub 镜像由 `dockerhub.yml` 自动构建)
 
