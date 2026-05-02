@@ -121,3 +121,28 @@ export function NotesWidget({ isAdmin }: NotesWidgetProps) {
         </>
     )
 }
+
+// Registry export — no fetchData, NotesWidget manages its own state
+import { defineWidget } from '../../widgets/types'
+
+type NotesConfig = Record<string, never>
+
+const NOTES_DEFAULT_CONFIG = {} as NotesConfig
+
+function NotesView({ isAdmin }: {
+    data: null
+    error: string | null
+    cfg: NotesConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <NotesWidget isAdmin={isAdmin} />
+}
+
+export const notesWidget = defineWidget<NotesConfig, null>({
+    kind: 'notes',
+    labelKey: 'widgets:notes',
+    defaultConfig: NOTES_DEFAULT_CONFIG,
+    // No fetchData — NotesWidget manages its own data.
+    Component: NotesView,
+})
