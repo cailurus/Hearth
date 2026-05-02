@@ -283,20 +283,24 @@ function GroupBlockImpl({
                                 >
                                     {isAdmin ? (
                                         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
-                                            {widget === 'rss' && refreshRss ? (
-                                                <button
-                                                    className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white disabled:opacity-50"
-                                                    aria-label="refresh"
-                                                    title={lang === 'zh' ? '刷新' : 'Refresh'}
-                                                    disabled={rssRefreshing}
-                                                    onClick={(e) => {
-                                                        e.stopPropagation()
-                                                        refreshRss()
-                                                    }}
-                                                >
-                                                    <RefreshCw className={`h-4 w-4 ${rssRefreshing ? 'animate-spin' : ''}`} />
-                                                </button>
-                                            ) : null}
+                                            {widget === 'rss' ? (() => {
+                                                const slice = byId.get(a.id)
+                                                const onRefresh = slice?.refresh ?? refreshRss
+                                                return onRefresh ? (
+                                                    <button
+                                                        className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white disabled:opacity-50"
+                                                        aria-label="refresh"
+                                                        title={lang === 'zh' ? '刷新' : 'Refresh'}
+                                                        disabled={rssRefreshing}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation()
+                                                            onRefresh()
+                                                        }}
+                                                    >
+                                                        <RefreshCw className={`h-4 w-4 ${rssRefreshing ? 'animate-spin' : ''}`} />
+                                                    </button>
+                                                ) : null
+                                            })() : null}
                                             <button
                                                 className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                                 aria-label="edit"

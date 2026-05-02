@@ -1,5 +1,8 @@
 import type { RSSResponse } from '../../types'
 import { Spinner } from '../ui/Spinner'
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
+import { useTranslation } from 'react-i18next'
 
 interface RSSWidgetProps {
     data: RSSResponse | null
@@ -74,3 +77,39 @@ export function RSSWidget({ data, error, lang }: RSSWidgetProps) {
         </div>
     )
 }
+
+export interface RSSConfig {
+    feeds: string[]
+}
+
+const RSS_DEFAULT_CONFIG: RSSConfig = { feeds: [] }
+
+function RSSView({ data, error }: {
+    data: RSSResponse | null
+    error: string | null
+    cfg: RSSConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    const { i18n } = useTranslation()
+    const lang: 'zh' | 'en' = i18n.language === 'en' ? 'en' : 'zh'
+    return <RSSWidget data={data} error={error} lang={lang} />
+}
+
+export const rssWidget = defineWidget<RSSConfig, RSSResponse>({
+    kind: 'rss',
+    labelKey: 'widgets:rss',
+    defaultConfig: RSS_DEFAULT_CONFIG,
+    pollIntervalMs: 15 * 60 * 1000,
+    fetchData: async (cfg, signal) => {
+        const raw = Array.isArray(cfg.feeds) ? cfg.feeds : []
+        const feeds = raw.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
+        if (feeds.length === 0) {
+            return { fetchedAt: 0, items: [] } as RSSResponse
+        }
+        const qs = new URLSearchParams()
+        for (const f of feeds) qs.append('feed', f)
+        return apiGet<RSSResponse>(`/api/widgets/rss?${qs.toString()}`, { signal })
+    },
+    Component: RSSView,
+})

@@ -589,6 +589,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
     // Fetch RSS data
     useEffect(() => {
         let cancelled = false
+        if (getWidget('rss')) {
+            setRssById({})
+            setRssErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'rss')
         if (ws.length === 0) {
             setRssById({})

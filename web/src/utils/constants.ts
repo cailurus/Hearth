@@ -32,14 +32,12 @@ const LEGACY_KINDS = [
     'metrics',
     'timezones',
     'notes',
-    'rss',
 ] as const
 
 const LEGACY_LABEL_KEYS: Record<string, string> = {
     metrics: 'widgets:systemStatus',
     timezones: 'widgets:worldClock',
     notes: 'widgets:notes',
-    rss: 'widgets:rss',
 }
 
 /**
