@@ -59,3 +59,40 @@ export function HolidaysWidget({ data, error }: HolidaysWidgetProps) {
 }
 
 export default HolidaysWidget
+
+import { defineWidget } from '../../widgets/types'
+import { apiGet } from '../../api'
+import { normalizeCountryCodes } from '../../utils'
+
+export interface HolidaysConfig {
+    countries: string[]
+}
+
+const HOLIDAYS_DEFAULT_CONFIG: HolidaysConfig = { countries: [] }
+
+function HolidaysView({ data, error }: {
+    data: HolidaysResponse | null
+    error: string | null
+    cfg: HolidaysConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    return <HolidaysWidget data={data} error={error} />
+}
+
+export const holidaysWidget = defineWidget<HolidaysConfig, HolidaysResponse>({
+    kind: 'holidays',
+    labelKey: 'widgets:upcomingHolidays',
+    defaultConfig: HOLIDAYS_DEFAULT_CONFIG,
+    pollIntervalMs: 5 * 60 * 1000,
+    fetchData: async (cfg, signal) => {
+        const raw = Array.isArray(cfg.countries) ? cfg.countries : []
+        const countries = normalizeCountryCodes(raw.map((x) => String(x ?? '')))
+        if (countries.length === 0) {
+            return null as unknown as HolidaysResponse
+        }
+        const qs = new URLSearchParams({ countries: countries.join(',') })
+        return apiGet<HolidaysResponse>(`/api/widgets/holidays?${qs.toString()}`, { signal })
+    },
+    Component: HolidaysView,
+})

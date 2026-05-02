@@ -308,9 +308,15 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
-    // Fetch holidays data
+    // Fetch holidays data — skipped during migration if registry handles it.
     useEffect(() => {
         let cancelled = false
+        if (getWidget('holidays')) {
+            // Registry handles this kind; clear LEGACY state and bail.
+            setHolidaysById({})
+            setHolidaysErrById({})
+            return
+        }
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'holidays')
         if (ws.length === 0) {
             setHolidaysById({})
