@@ -23,6 +23,7 @@ import { dockerWidget } from '../components/widgets/DockerWidget'
 import { weatherWidget } from '../components/widgets/WeatherWidget'
 import { rssWidget } from '../components/widgets/RSSWidget'
 import { notesWidget } from '../components/widgets/NotesWidget'
+import { timezonesWidget } from '../components/widgets/TimezonesWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
@@ -33,6 +34,7 @@ export const WIDGET_REGISTRY = [
     weatherWidget,
     rssWidget,
     notesWidget,
+    timezonesWidget,
 ] as const
 
 /** Literal union derived from the tuple — adding a widget extends this automatically. */

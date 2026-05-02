@@ -96,3 +96,36 @@ export function TimezonesWidget({ localTimezone, clocks }: TimezonesWidgetProps)
 }
 
 export default TimezonesWidget
+
+import { defineWidget } from '../../widgets/types'
+
+export interface TimezonesConfig {
+    clocks: WorldClockCity[]
+}
+
+const TIMEZONES_DEFAULT_CONFIG: TimezonesConfig = { clocks: [] }
+
+function TimezonesView({ cfg }: {
+    data: null
+    error: string | null
+    cfg: TimezonesConfig
+    refresh: () => void
+    isAdmin: boolean
+}) {
+    const localTimezone = (() => {
+        try {
+            return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+        } catch {
+            return 'UTC'
+        }
+    })()
+    return <TimezonesWidget localTimezone={localTimezone} clocks={cfg.clocks} />
+}
+
+export const timezonesWidget = defineWidget<TimezonesConfig, null>({
+    kind: 'timezones',
+    labelKey: 'widgets:worldClock',
+    defaultConfig: TIMEZONES_DEFAULT_CONFIG,
+    // No fetchData — purely cfg-driven local rendering
+    Component: TimezonesView,
+})

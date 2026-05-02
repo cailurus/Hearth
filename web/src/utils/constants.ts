@@ -30,12 +30,10 @@ export const WIDGET_URL_PREFIX = 'widget:'
  */
 const LEGACY_KINDS = [
     'metrics',
-    'timezones',
 ] as const
 
 const LEGACY_LABEL_KEYS: Record<string, string> = {
     metrics: 'widgets:systemStatus',
-    timezones: 'widgets:worldClock',
 }
 
 /**
