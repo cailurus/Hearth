@@ -1,46 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
-import type { AppItem, Weather, MarketsResponse, HolidaysResponse, HostMetrics, RSSResponse, CurrencyResponse, DealsResponse } from '../types'
-import type { DockerResponse } from '../types/models'
-import { safeParseJSON, widgetKindFromUrl, normalizeCountryCodes } from '../utils'
+import type { AppItem, Weather, HostMetrics } from '../types'
+import { safeParseJSON, widgetKindFromUrl } from '../utils'
 import { getWidget } from '../widgets/registry'
 import type { WidgetSlice } from '../widgets/types'
 
 export interface UseWidgetsResult {
-    /** Per-instance fetch state for widgets that have been migrated to the registry. */
+    /** Per-instance fetch state for all registry widgets. */
     byId: Map<string, WidgetSlice>
-    /** Weather data for default widget */
+    /** Default-city weather (when user configured defaultCity but added no weather widget). */
     weather: Weather | null
     weatherErr: string | null
-    /** Weather data by widget ID */
-    weatherById: Record<string, Weather | null>
-    weatherErrById: Record<string, string | null>
-    /** Markets data by widget ID */
-    marketsById: Record<string, MarketsResponse | null>
-    marketsErrById: Record<string, string | null>
-    /** Holidays data by widget ID */
-    holidaysById: Record<string, HolidaysResponse | null>
-    holidaysErrById: Record<string, string | null>
-    /** Host metrics */
+    /** Host metrics — shared across all metrics widget instances. */
     metrics: HostMetrics | null
-    /** Network rate */
+    /** Network rate derived from metrics samples. */
     netRate: { upBps: number; downBps: number } | null
-    /** Docker data by widget ID */
-    dockerById: Record<string, DockerResponse | null>
-    dockerErrById: Record<string, string | null>
-    /** RSS data by widget ID */
-    rssById: Record<string, RSSResponse | null>
-    rssErrById: Record<string, string | null>
-    /** Trigger RSS refresh (bypass cache) */
-    refreshRss: () => void
-    /** Whether RSS is currently refreshing */
-    rssRefreshing: boolean
-    /** Currency data by widget ID */
-    currencyById: Record<string, CurrencyResponse | null>
-    currencyErrById: Record<string, string | null>
-    /** Deals data by widget ID */
-    dealsById: Record<string, DealsResponse | null>
-    dealsErrById: Record<string, string | null>
 }
 
 interface UseWidgetsOptions {
@@ -50,43 +24,30 @@ interface UseWidgetsOptions {
 }
 
 /**
- * Hook for managing widget data fetching
+ * Hook for managing widget data fetching.
+ *
+ * The 8 LEGACY per-widget useEffects (weather/markets/holidays/docker/
+ * currency/deals/rss) are gone — the generic registry loop replaces them
+ * for any kind in WIDGET_REGISTRY. Two carve-outs remain:
+ *  - defaultWeather: pulls weather for `defaultCity` even when the user
+ *    has no weather widget instance.
+ *  - metrics: shared-interval polling + cpu%/network-rate derivation.
+ *    Stays inline because metrics is rendered as inline JSX in
+ *    GroupBlock, not as a registry component.
  */
 export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseWidgetsResult {
     const [byId, setById] = useState<Map<string, WidgetSlice>>(() => new Map())
 
     const [weather, setWeather] = useState<Weather | null>(null)
     const [weatherErr, setWeatherErr] = useState<string | null>(null)
-    const [weatherById, setWeatherById] = useState<Record<string, Weather | null>>({})
-    const [weatherErrById, setWeatherErrById] = useState<Record<string, string | null>>({})
-
-    const [marketsById, setMarketsById] = useState<Record<string, MarketsResponse | null>>({})
-    const [marketsErrById, setMarketsErrById] = useState<Record<string, string | null>>({})
-
-    const [holidaysById, setHolidaysById] = useState<Record<string, HolidaysResponse | null>>({})
-    const [holidaysErrById, setHolidaysErrById] = useState<Record<string, string | null>>({})
-
-    const [dockerById, setDockerById] = useState<Record<string, DockerResponse | null>>({})
-    const [dockerErrById, setDockerErrById] = useState<Record<string, string | null>>({})
-
-    const [currencyById, setCurrencyById] = useState<Record<string, CurrencyResponse | null>>({})
-    const [currencyErrById, setCurrencyErrById] = useState<Record<string, string | null>>({})
-
-    const [dealsById, setDealsById] = useState<Record<string, DealsResponse | null>>({})
-    const [dealsErrById, setDealsErrById] = useState<Record<string, string | null>>({})
-
-    const [rssById, setRssById] = useState<Record<string, RSSResponse | null>>({})
-    const [rssErrById, setRssErrById] = useState<Record<string, string | null>>({})
-    const [rssRefreshSeq, setRssRefreshSeq] = useState(0)
-    const [rssRefreshing, setRssRefreshing] = useState(false)
 
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
     const lastMetricsRef = useRef<HostMetrics | null>(null)
 
-    // Generic registry-driven fetch loop. Handles every widget that has been
-    // migrated to defineWidget(). Old per-widget effects below skip kinds
-    // already in the registry to avoid duplicate work.
+    // Generic registry-driven fetch loop. Handles every widget kind in
+    // WIDGET_REGISTRY (currently 9 of the 10 kinds — metrics is the
+    // carve-out further down).
     useEffect(() => {
         const controllers = new Map<string, AbortController>()
         const timers = new Map<string, number>()
@@ -180,7 +141,7 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
-    // Fetch default weather
+    // Carve-out 1: default weather (no widget instance, just defaultCity).
     useEffect(() => {
         if (!defaultCity) return
         let cancelled = false
@@ -206,175 +167,10 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [defaultCity, lang])
 
-    // Fetch weather for each weather widget — skipped during migration if registry handles it.
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('weather')) {
-            setWeatherById({})
-            setWeatherErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'weather')
-        if (ws.length === 0) {
-            setWeatherById({})
-            setWeatherErrById({})
-            return
-        }
-
-        // Clear old data immediately so the loading skeleton shows the new
-        // city name from config while fresh weather data is being fetched.
-        setWeatherById({})
-        setWeatherErrById({})
-
-        void (async () => {
-            const next: Record<string, Weather | null> = {}
-            const nextErr: Record<string, string | null> = {}
-
-            await Promise.all(
-                ws.map(async (a) => {
-                    const cfg = safeParseJSON(a.description)
-                    const city = String(cfg?.city ?? '').trim()
-                    if (!city) {
-                        next[a.id] = null
-                        nextErr[a.id] = null
-                        return
-                    }
-
-                    try {
-                        const qs = new URLSearchParams({ city, lang })
-                        const wx = await apiGet<Weather>(`/api/widgets/weather?${qs.toString()}`)
-                        next[a.id] = wx
-                        nextErr[a.id] = null
-                    } catch (e) {
-                        next[a.id] = null
-                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                    }
-                })
-            )
-
-            if (!cancelled) {
-                setWeatherById(next)
-                setWeatherErrById(nextErr)
-            }
-        })()
-
-        return () => {
-            cancelled = true
-        }
-    }, [apps, lang])
-
-    // Fetch markets data
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('markets')) {
-            setMarketsById({})
-            setMarketsErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'markets')
-        if (ws.length === 0) {
-            setMarketsById({})
-            setMarketsErrById({})
-            return
-        }
-
-        const run = async () => {
-            const next: Record<string, MarketsResponse | null> = {}
-            const nextErr: Record<string, string | null> = {}
-
-            await Promise.all(
-                ws.map(async (a) => {
-                    const cfg = safeParseJSON(a.description)
-                    const rawSymbols = Array.isArray(cfg?.symbols) ? (cfg?.symbols as unknown[]) : []
-                    const symbols = rawSymbols.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 4)
-                    if (symbols.length === 0) {
-                        next[a.id] = null
-                        nextErr[a.id] = null
-                        return
-                    }
-                    try {
-                        const qs = new URLSearchParams({ symbols: symbols.join(',') })
-                        const res = await apiGet<MarketsResponse>(`/api/widgets/markets?${qs.toString()}`)
-                        next[a.id] = res
-                        nextErr[a.id] = null
-                    } catch (e) {
-                        next[a.id] = null
-                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                    }
-                })
-            )
-
-            if (!cancelled) {
-                setMarketsById(next)
-                setMarketsErrById(nextErr)
-            }
-        }
-
-        void run()
-        const id = window.setInterval(run, 5 * 60 * 1000)
-        return () => {
-            cancelled = true
-            window.clearInterval(id)
-        }
-    }, [apps])
-
-    // Fetch holidays data — skipped during migration if registry handles it.
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('holidays')) {
-            // Registry handles this kind; clear LEGACY state and bail.
-            setHolidaysById({})
-            setHolidaysErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'holidays')
-        if (ws.length === 0) {
-            setHolidaysById({})
-            setHolidaysErrById({})
-            return
-        }
-
-        const run = async () => {
-            const next: Record<string, HolidaysResponse | null> = {}
-            const nextErr: Record<string, string | null> = {}
-
-            await Promise.all(
-                ws.map(async (a) => {
-                    const cfg = safeParseJSON(a.description)
-                    const rawCountries = Array.isArray(cfg?.countries) ? (cfg?.countries as unknown[]) : []
-                    const countries = normalizeCountryCodes(rawCountries.map((x) => String(x ?? '')))
-                    if (countries.length === 0) {
-                        next[a.id] = null
-                        nextErr[a.id] = null
-                        return
-                    }
-                    try {
-                        const qs = new URLSearchParams({ countries: countries.join(',') })
-                        const res = await apiGet<HolidaysResponse>(`/api/widgets/holidays?${qs.toString()}`)
-                        next[a.id] = res
-                        nextErr[a.id] = null
-                    } catch (e) {
-                        next[a.id] = null
-                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                    }
-                })
-            )
-
-            if (!cancelled) {
-                setHolidaysById(next)
-                setHolidaysErrById(nextErr)
-            }
-        }
-
-        void run()
-        const id = window.setInterval(run, 5 * 60 * 1000)
-        return () => {
-            cancelled = true
-            window.clearInterval(id)
-        }
-    }, [apps])
-
-    // Fetch host metrics
+    // Carve-out 2: host metrics. Shared interval across all metrics widget
+    // instances (interval is the min refreshSec across all instances, or
+    // 5s when there are no metrics widgets at all). Network rate is
+    // derived from successive samples.
     useEffect(() => {
         let cancelled = false
 
@@ -427,250 +223,11 @@ export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseW
         }
     }, [apps])
 
-    // Fetch docker data
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('docker')) {
-            setDockerById({})
-            setDockerErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'docker')
-        if (ws.length === 0) {
-            setDockerById({})
-            setDockerErrById({})
-            return
-        }
-
-        let intervalMs = 5000
-        for (const a of ws) {
-            const cfg = safeParseJSON(a.description)
-            const rs = Number(cfg?.refreshSec)
-            const ms = (rs === 10 || rs === 30 ? rs : 5) * 1000
-            intervalMs = Math.min(intervalMs, ms)
-        }
-
-        const run = async () => {
-            try {
-                const data = await apiGet<DockerResponse>('/api/widgets/docker')
-                if (cancelled) return
-                const next: Record<string, DockerResponse | null> = {}
-                const nextErr: Record<string, string | null> = {}
-                for (const a of ws) {
-                    next[a.id] = data
-                    nextErr[a.id] = null
-                }
-                setDockerById(next)
-                setDockerErrById(nextErr)
-            } catch (e) {
-                if (cancelled) return
-                const next: Record<string, DockerResponse | null> = {}
-                const nextErr: Record<string, string | null> = {}
-                for (const a of ws) {
-                    next[a.id] = null
-                    nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                }
-                setDockerById(next)
-                setDockerErrById(nextErr)
-            }
-        }
-
-        void run()
-        const id = window.setInterval(run, intervalMs)
-        return () => {
-            cancelled = true
-            window.clearInterval(id)
-        }
-    }, [apps])
-
-    // Fetch currency data — skipped during migration if registry handles it.
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('currency')) {
-            // Registry handles this kind; clear LEGACY state and bail.
-            setCurrencyById({})
-            setCurrencyErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'currency')
-        if (ws.length === 0) {
-            setCurrencyById({})
-            setCurrencyErrById({})
-            return
-        }
-
-        const run = async () => {
-            const next: Record<string, CurrencyResponse | null> = {}
-            const nextErr: Record<string, string | null> = {}
-
-            await Promise.all(
-                ws.map(async (a) => {
-                    const cfg = safeParseJSON(a.description)
-                    const rawPairs = Array.isArray(cfg?.pairs) ? (cfg?.pairs as unknown[]) : []
-                    const pairs = rawPairs.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 4)
-                    if (pairs.length === 0) {
-                        next[a.id] = { fetchedAt: 0, items: [] }
-                        nextErr[a.id] = null
-                        return
-                    }
-                    try {
-                        const qs = new URLSearchParams({ pairs: pairs.join(',') })
-                        const res = await apiGet<CurrencyResponse>(`/api/widgets/currency?${qs.toString()}`)
-                        next[a.id] = res
-                        nextErr[a.id] = null
-                    } catch (e) {
-                        next[a.id] = null
-                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                    }
-                })
-            )
-
-            if (!cancelled) {
-                setCurrencyById(next)
-                setCurrencyErrById(nextErr)
-            }
-        }
-
-        void run()
-        const id = window.setInterval(run, 5 * 60 * 1000)
-        return () => { cancelled = true; window.clearInterval(id) }
-    }, [apps])
-
-    // Fetch deals data — skipped during migration if registry handles it.
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('deals')) {
-            setDealsById({})
-            setDealsErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'deals')
-        if (ws.length === 0) {
-            setDealsById({})
-            setDealsErrById({})
-            return
-        }
-
-        const run = async () => {
-            // Use region from the first deals widget config.
-            const cfg = safeParseJSON(ws[0].description)
-            const region = String(cfg?.region ?? 'us').trim()
-
-            try {
-                const qs = new URLSearchParams({ region })
-                const data = await apiGet<DealsResponse>(`/api/widgets/deals?${qs.toString()}`)
-                if (cancelled) return
-                const next: Record<string, DealsResponse | null> = {}
-                const nextErr: Record<string, string | null> = {}
-                for (const a of ws) {
-                    next[a.id] = data
-                    nextErr[a.id] = null
-                }
-                setDealsById(next)
-                setDealsErrById(nextErr)
-            } catch (e) {
-                if (cancelled) return
-                const next: Record<string, DealsResponse | null> = {}
-                const nextErr: Record<string, string | null> = {}
-                for (const a of ws) {
-                    next[a.id] = null
-                    nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                }
-                setDealsById(next)
-                setDealsErrById(nextErr)
-            }
-        }
-
-        void run()
-        const id = window.setInterval(run, 15 * 60 * 1000)
-        return () => { cancelled = true; window.clearInterval(id) }
-    }, [apps])
-
-    // Fetch RSS data
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('rss')) {
-            setRssById({})
-            setRssErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'rss')
-        if (ws.length === 0) {
-            setRssById({})
-            setRssErrById({})
-            return
-        }
-
-        const isManualRefresh = rssRefreshSeq > 0
-
-        const run = async (useNoCache: boolean) => {
-            if (useNoCache) setRssRefreshing(true)
-
-            const next: Record<string, RSSResponse | null> = {}
-            const nextErr: Record<string, string | null> = {}
-
-            await Promise.all(
-                ws.map(async (a) => {
-                    const cfg = safeParseJSON(a.description)
-                    const rawFeeds = Array.isArray(cfg?.feeds) ? (cfg?.feeds as unknown[]) : []
-                    const feeds = rawFeeds.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
-                    if (feeds.length === 0) {
-                        next[a.id] = { fetchedAt: 0, items: [] }
-                        nextErr[a.id] = null
-                        return
-                    }
-                    try {
-                        const qs = new URLSearchParams()
-                        for (const f of feeds) qs.append('feed', f)
-                        if (useNoCache) qs.set('nocache', '1')
-                        const res = await apiGet<RSSResponse>(`/api/widgets/rss?${qs.toString()}`)
-                        next[a.id] = res
-                        nextErr[a.id] = null
-                    } catch (e) {
-                        next[a.id] = null
-                        nextErr[a.id] = e instanceof Error ? e.message : 'failed'
-                    }
-                })
-            )
-
-            if (!cancelled) {
-                setRssById(next)
-                setRssErrById(nextErr)
-                setRssRefreshing(false)
-            }
-        }
-
-        void run(isManualRefresh)
-        const id = window.setInterval(() => run(false), 15 * 60 * 1000)
-        return () => {
-            cancelled = true
-            window.clearInterval(id)
-        }
-    }, [apps, rssRefreshSeq])
-
     return {
         byId,
         weather,
         weatherErr,
-        weatherById,
-        weatherErrById,
-        marketsById,
-        marketsErrById,
-        holidaysById,
-        holidaysErrById,
         metrics,
         netRate,
-        dockerById,
-        dockerErrById,
-        rssById,
-        rssErrById,
-        refreshRss: () => setRssRefreshSeq((n) => n + 1),
-        rssRefreshing,
-        currencyById,
-        currencyErrById,
-        dealsById,
-        dealsErrById,
     }
 }
-
-export default useWidgets

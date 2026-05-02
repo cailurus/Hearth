@@ -20,34 +20,18 @@ export const DEFAULT_TIMEZONE = 'Asia/Shanghai'
 export const WIDGET_URL_PREFIX = 'widget:'
 
 /**
- * Widget kinds NOT yet in the registry. Once stage 2 finishes migrating
- * each widget, remove its entry here. When this array is empty, also
- * delete it and the LEGACY label table below — at that point the
- * registry is the sole source of truth.
+ * Supported widget kinds — registry plus the metrics carve-out.
  *
- * `metrics` stays here permanently (carve-out: inline rendering +
- * shared-interval polling, doesn't fit the registry shape).
- */
-const LEGACY_KINDS = [
-    'metrics',
-] as const
-
-const LEGACY_LABEL_KEYS: Record<string, string> = {
-    metrics: 'widgets:systemStatus',
-}
-
-/**
- * 支持的 Widget 类型 — registry 推导项与 LEGACY 项合并。
+ * `metrics` stays out of the registry: inline rendering + shared-interval
+ * polling don't fit the WidgetSpec shape. See spec § 边界划分:
+ * docs/superpowers/specs/2026-05-02-widget-registry-design.md
  */
 export const WIDGET_KINDS = [
     ...WIDGET_REGISTRY.map((w) => w.kind),
-    ...LEGACY_KINDS,
+    'metrics',
 ] as readonly string[]
 
-/**
- * Widget i18n label keys — registry 推导项 + LEGACY 项合并。
- */
 export const WIDGET_LABEL_KEYS: Record<string, string> = {
     ...Object.fromEntries(WIDGET_REGISTRY.map((w) => [w.kind, w.labelKey])),
-    ...LEGACY_LABEL_KEYS,
+    metrics: 'widgets:systemStatus',
 }
