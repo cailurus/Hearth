@@ -63,6 +63,10 @@ func (s *Store) ImportAll(payload Export) error {
 	}
 	defer tx.Rollback()
 
+	if err := removeRetiredWidgetApps(tx); err != nil {
+		return err
+	}
+
 	// Settings
 	for k, v := range payload.Settings {
 		if _, err := tx.Exec(`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v); err != nil {
@@ -85,6 +89,9 @@ func (s *Store) ImportAll(payload Export) error {
 
 	// Apps
 	for _, a := range payload.Apps {
+		if isRetiredWidgetURL(a.URL) {
+			continue
+		}
 		_, err := tx.Exec(`INSERT INTO apps (id, group_id, name, description, url, icon_path, icon_source, sort_order, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET group_id=excluded.group_id, name=excluded.name, description=excluded.description, url=excluded.url, icon_path=excluded.icon_path, icon_source=excluded.icon_source, sort_order=excluded.sort_order`,
 			a.ID, a.GroupID, a.Name, a.Description, a.URL, a.IconPath, a.IconSource, a.SortOrder, a.CreatedAt)

@@ -9,6 +9,11 @@
 
 import type { ComponentType } from 'react'
 
+export interface WidgetFetchOptions {
+    force?: boolean
+    lang?: 'zh' | 'en'
+}
+
 export interface WidgetSpec<TConfig = unknown, TData = unknown> {
     /** Type literal matching the widget URL `widget:<kind>`. */
     readonly kind: string
@@ -25,7 +30,7 @@ export interface WidgetSpec<TConfig = unknown, TData = unknown> {
      *  - returns TData or throws (throw lands in slice.error)
      *  - undefined means the widget renders local data only (timezones / notes)
      */
-    readonly fetchData?: (cfg: TConfig, signal: AbortSignal) => Promise<TData>
+    readonly fetchData?: (cfg: TConfig, signal: AbortSignal, options?: WidgetFetchOptions) => Promise<TData>
 
     /**
      * Polling interval (ms) for fetchData:
@@ -65,6 +70,8 @@ export interface WidgetSlice {
     data: unknown
     error: string | null
     refresh: () => void
+    loading: boolean
+    refreshing: boolean
 }
 
 /**

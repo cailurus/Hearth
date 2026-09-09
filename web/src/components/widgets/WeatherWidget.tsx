@@ -1,11 +1,12 @@
 import { useTranslation } from 'react-i18next'
-import type { Weather } from '../../types'
+import type { Weather, WeatherSettings } from '../../types'
 import { cityShort, weekdayLabel, weatherCodeLabel } from '../../utils'
 import { WeatherGlyph } from './WeatherGlyph'
 import { Spinner } from '../ui/Spinner'
 import { defineWidget } from '../../widgets/types'
 import { apiGet } from '../../api'
 import i18n from '../../i18n'
+import { weatherQuery } from '../../utils/weatherLocation'
 
 interface WeatherWidgetProps {
     data: Weather | null
@@ -22,7 +23,7 @@ export function WeatherWidget({ data, error, cityName }: WeatherWidgetProps) {
 
     if (!data) {
         const msg = String(error || '').trim()
-        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        if (msg) return <div className="flex h-full items-center justify-center text-xs text-white/60">{t('unavailable')}</div>
 
         // Show city name placeholder while loading
         if (cityName) {
@@ -94,9 +95,7 @@ export function WeatherWidget({ data, error, cityName }: WeatherWidgetProps) {
 
 export default WeatherWidget
 
-export interface WeatherConfig {
-    city: string
-}
+export type WeatherConfig = WeatherSettings
 
 const WEATHER_DEFAULT_CONFIG: WeatherConfig = { city: '' }
 
@@ -114,11 +113,13 @@ export const weatherWidget = defineWidget<WeatherConfig, Weather>({
     kind: 'weather',
     labelKey: 'widgets:weather',
     defaultConfig: WEATHER_DEFAULT_CONFIG,
-    fetchData: async (cfg, signal) => {
+    pollIntervalMs: 5 * 60 * 1000,
+    fetchData: async (cfg, signal, options) => {
         const city = String(cfg.city ?? '').trim()
         if (!city) throw new Error('city not configured')
-        const lang: 'zh' | 'en' = i18n.language === 'en' ? 'en' : 'zh'
-        const qs = new URLSearchParams({ city, lang })
+        const lang = options?.lang ?? (i18n.language === 'en' ? 'en' : 'zh')
+        const qs = weatherQuery({ ...cfg, city }, lang)
+        if (options?.force) qs.set('nocache', '1')
         return apiGet<Weather>(`/api/widgets/weather?${qs.toString()}`, { signal })
     },
     Component: WeatherView,

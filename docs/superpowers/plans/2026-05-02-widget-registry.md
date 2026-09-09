@@ -4,7 +4,7 @@
 
 **Goal:** Replace the duplicated per-widget fetch templates and if-else dispatch with a `WidgetSpec` registry, so adding a widget requires creating one new file plus a one-line entry in `registry.ts`.
 
-**Architecture:** Pure-frontend refactor. New `widgets/types.ts` exports `defineWidget<TConfig, TData>(spec)` factory + `WidgetSpec` interface. New `widgets/registry.ts` is an `as const` tuple of all built-in widgets — both `WidgetKind` literal union and `getWidget(kind)` are derived from it. `useWidgets` collapses 8 duplicated `useEffect`s into one generic loop that reads from the registry; results land in a `Map<widgetId, WidgetSlice>` exposed via `WidgetDataContext`. Two carve-outs (`defaultWeather`, `metricsShared`) stay top-level. Migration is incremental: stage 1 lands the infra + first 2 widgets; stage 2 migrates the remaining 7 one-at-a-time; stage 3 deletes the LEGACY path.
+**Architecture:** Pure-frontend refactor. New `widgets/types.ts` exports `defineWidget<TConfig, TData>(spec)` factory + `WidgetSpec` interface. New `widgets/registry.ts` is an `as const` tuple of all built-in widgets — both `WidgetKind` literal union and `getWidget(kind)` are derived from it. `useWidgets` collapses 7 duplicated `useEffect`s into one generic loop that reads from the registry; results land in a `Map<widgetId, WidgetSlice>` exposed via `WidgetDataContext`. Two carve-outs (`defaultWeather`, `metricsShared`) stay top-level. Migration is incremental: stage 1 lands the infra + first widget; stage 2 migrates the remaining 7 one-at-a-time; stage 3 deletes the LEGACY path.
 
 **Tech Stack:** React 19, TypeScript 5.9, Vite 7. No new dependencies. No backend changes.
 
@@ -24,7 +24,6 @@
 | `web/src/utils/constants.ts` | Modify | `WIDGET_KINDS` and `WIDGET_LABEL_KEYS` derive from `WIDGET_REGISTRY` (with `LEGACY_*` merge during migration) |
 | `web/src/components/layout/GroupBlock.tsx` | Modify (heavy) | Dispatch via `getWidget()` first; old if-else chain only handles registry-misses; eventually shrinks to metrics-inline + registry-dispatch only |
 | `web/src/components/widgets/CurrencyWidget.tsx` | Modify | Collapse props to 5 standard (data/error/cfg/refresh/isAdmin); `export const currencyWidget = defineWidget(...)` |
-| `web/src/components/widgets/DealsWidget.tsx` | Modify | Same pattern; `lang` via `useTranslation()` internally |
 | `web/src/components/widgets/HolidaysWidget.tsx` | Modify | Same pattern |
 | `web/src/components/widgets/MarketsWidget.tsx` | Modify | Same pattern; `symbols` via `cfg.symbols` |
 | `web/src/components/widgets/DockerWidget.tsx` | Modify | Same pattern; `isAdmin` from standard props (already used) |
@@ -39,7 +38,7 @@
 
 ---
 
-## Stage 1: Infrastructure + first cut (currency + deals) — single commit
+## Stage 1: Infrastructure + first cut (currency) — single commit
 
 Tasks 1-10 collectively form one commit at the end of Task 10. Each task is a logical sub-step; do not commit between them.
 
@@ -256,77 +255,7 @@ Expected: no errors. The new `currencyWidget` constant has full type inference f
 
 ---
 
-### Task 4: Migrate `DealsWidget` to defineWidget shape
-
-**Files:**
-- Modify: `web/src/components/widgets/DealsWidget.tsx`
-
-- [ ] **Step 1: Update `DealsWidget` to read `lang` internally**
-
-Find the current signature in `web/src/components/widgets/DealsWidget.tsx`:
-
-```ts
-interface DealsWidgetProps {
-    data: DealsResponse | null
-    error?: string | null
-    lang: 'zh' | 'en'
-}
-
-export function DealsWidget({ data, error, lang }: DealsWidgetProps) {
-```
-
-The existing component is still consumed by the LEGACY GroupBlock branch — leave it alone, but add a wrapper that pulls `lang` from `useTranslation`:
-
-Append to the bottom of the file:
-
-```ts
-import { defineWidget } from '../../widgets/types'
-import { apiGet } from '../../api'
-import { useTranslation } from 'react-i18next'
-
-export interface DealsConfig {
-    region: string
-}
-
-const DEALS_DEFAULT_CONFIG: DealsConfig = { region: 'us' }
-
-function DealsView({ data, error }: {
-    data: DealsResponse | null
-    error: string | null
-    cfg: DealsConfig
-    refresh: () => void
-    isAdmin: boolean
-}) {
-    const { i18n } = useTranslation()
-    const lang: 'zh' | 'en' = i18n.language === 'en' ? 'en' : 'zh'
-    return <DealsWidget data={data} error={error} lang={lang} />
-}
-
-export const dealsWidget = defineWidget<DealsConfig, DealsResponse>({
-    kind: 'deals',
-    labelKey: 'widgets:deals',
-    defaultConfig: DEALS_DEFAULT_CONFIG,
-    pollIntervalMs: 15 * 60 * 1000,
-    fetchData: async (cfg, signal) => {
-        const region = String(cfg.region ?? 'us').trim() || 'us'
-        const qs = new URLSearchParams({ region })
-        return apiGet<DealsResponse>(`/api/widgets/deals?${qs.toString()}`, { signal })
-    },
-    Component: DealsView,
-})
-```
-
-- [ ] **Step 2: Typecheck**
-
-```
-npx tsc --noEmit
-```
-
-Expected: no errors.
-
----
-
-### Task 5: Create `widgets/registry.ts` with currency + deals
+### Task 5: Create `widgets/registry.ts` with currency
 
 **Files:**
 - Create: `web/src/widgets/registry.ts`
@@ -352,11 +281,9 @@ Expected: no errors.
 
 import type { WidgetSpec } from './types'
 import { currencyWidget } from '../components/widgets/CurrencyWidget'
-import { dealsWidget } from '../components/widgets/DealsWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
 ] as const
 
 /** Literal union derived from the tuple — adding a widget extends this automatically. */
@@ -377,7 +304,7 @@ export function getWidget(kind: string): WidgetSpec | undefined {
 npx tsc --noEmit
 ```
 
-Expected: no errors. The `as const` + indexed-access type produces the union `'currency' | 'deals'` for `WidgetKind`.
+Expected: no errors. The `as const` + indexed-access type produces the literal `'currency'` for `WidgetKind`.
 
 ---
 
@@ -386,7 +313,7 @@ Expected: no errors. The `as const` + indexed-access type produces the union `'c
 **Files:**
 - Modify: `web/src/hooks/useWidgets.ts`
 
-This task adds the new generic loop **alongside** the existing 8 per-widget useEffects. The old effects gain a registry-skip guard so they don't fight with the new loop.
+This task adds the new generic loop **alongside** the existing 7 per-widget useEffects. The old effects gain a registry-skip guard so they don't fight with the new loop.
 
 - [ ] **Step 1: Add new imports near the top**
 
@@ -545,23 +472,7 @@ with:
         const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'currency')
 ```
 
-- [ ] **Step 6: Same skip guard for the LEGACY deals effect**
-
-Find the `// Fetch deals data` effect (around line 411). Replace its top similarly:
-
-```ts
-    // Fetch deals data — skipped during migration if registry handles it.
-    useEffect(() => {
-        let cancelled = false
-        if (getWidget('deals')) {
-            setDealsById({})
-            setDealsErrById({})
-            return
-        }
-        const ws = apps.filter((a) => widgetKindFromUrl(a.url) === 'deals')
-```
-
-- [ ] **Step 7: Add `byId` to the return value**
+- [ ] **Step 6: Add `byId` to the return value**
 
 Find the `return { ... }` at the bottom of `useWidgets` (around line 512). Add `byId` as the first field:
 
@@ -575,7 +486,7 @@ Find the `return { ... }` at the bottom of `useWidgets` (around line 512). Add `
     }
 ```
 
-- [ ] **Step 8: Typecheck**
+- [ ] **Step 7: Typecheck**
 
 ```
 npx tsc --noEmit
@@ -632,7 +543,7 @@ Expected: no errors.
 Current `web/src/utils/constants.ts`:
 
 ```ts
-export const WIDGET_KINDS = ['weather', 'metrics', 'timezones', 'markets', 'holidays', 'docker', 'notes', 'rss', 'currency', 'deals'] as const
+export const WIDGET_KINDS = ['weather', 'metrics', 'timezones', 'markets', 'holidays', 'docker', 'notes', 'rss', 'currency'] as const
 
 export const WIDGET_LABEL_KEYS: Record<string, string> = {
     weather: 'widgets:weather',
@@ -644,7 +555,6 @@ export const WIDGET_LABEL_KEYS: Record<string, string> = {
     notes: 'widgets:notes',
     rss: 'widgets:rss',
     currency: 'widgets:currency',
-    deals: 'widgets:deals',
 }
 ```
 
@@ -856,7 +766,6 @@ cd web && npm run dev
 Open the browser to the dev URL and verify:
 
 - [ ] Currency widget renders normally (data displays for configured pairs)
-- [ ] Deals widget renders normally
 - [ ] Open browser DevTools console — no React warnings or unhandled exceptions
 - [ ] Other widgets (weather/markets/holidays/metrics/docker/notes/rss/timezones) still render — they're on the LEGACY path
 - [ ] Edit a currency widget config (change a pair), save, refresh page — new pair appears
@@ -876,13 +785,13 @@ If the diff is **> +700 added**, the design didn't converge as expected — paus
 - [ ] **Step 4: Commit Stage 1**
 
 ```
-git add web/src/widgets/ web/src/api/client.ts web/src/hooks/useWidgets.ts web/src/contexts/WidgetDataContext.tsx web/src/utils/constants.ts web/src/components/widgets/CurrencyWidget.tsx web/src/components/widgets/DealsWidget.tsx web/src/components/layout/GroupBlock.tsx
+git add web/src/widgets/ web/src/api/client.ts web/src/hooks/useWidgets.ts web/src/contexts/WidgetDataContext.tsx web/src/utils/constants.ts web/src/components/widgets/CurrencyWidget.tsx web/src/components/layout/GroupBlock.tsx
 git commit -m "$(cat <<'EOF'
-refactor(widgets): introduce widget registry — stage 1 (currency + deals)
+refactor(widgets): introduce widget registry — stage 1 (currency)
 
 Build the registry infrastructure (defineWidget factory, WIDGET_REGISTRY
-tuple, generic fetch loop, byId Map context) and migrate the two
-simplest widgets as a sanity check. Existing 8 LEGACY useEffects in
+tuple, generic fetch loop, byId Map context) and migrate the
+currency widget as a sanity check. Existing 7 LEGACY useEffects in
 useWidgets and the if-else chain in GroupBlock now fall through to the
 registry path when a kind has been migrated, otherwise stay on the old
 path. WIDGET_KINDS and WIDGET_LABEL_KEYS are now derived from the
@@ -964,7 +873,6 @@ import { holidaysWidget } from '../components/widgets/HolidaysWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
 ] as const
 ```
@@ -1082,7 +990,6 @@ import { marketsWidget } from '../components/widgets/MarketsWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
 ] as const
@@ -1176,7 +1083,6 @@ import { dockerWidget } from '../components/widgets/DockerWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,
@@ -1272,7 +1178,6 @@ import { weatherWidget } from '../components/widgets/WeatherWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,
@@ -1375,7 +1280,6 @@ import { rssWidget } from '../components/widgets/RSSWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,
@@ -1502,7 +1406,6 @@ import { notesWidget } from '../components/widgets/NotesWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,
@@ -1580,7 +1483,6 @@ import { timezonesWidget } from '../components/widgets/TimezonesWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,
@@ -1624,7 +1526,7 @@ After Stage 2, `LEGACY_KINDS` should contain only `['metrics']`. The remaining L
 
 - [ ] **Step 1: Delete LEGACY useState declarations in `useWidgets.ts`**
 
-Remove these 16 useState calls (around lines 54-75):
+Remove these 14 useState calls:
 
 ```
 weatherById, weatherErrById,
@@ -1632,7 +1534,6 @@ marketsById, marketsErrById,
 holidaysById, holidaysErrById,
 dockerById, dockerErrById,
 currencyById, currencyErrById,
-dealsById, dealsErrById,
 rssById, rssErrById, rssRefreshSeq, rssRefreshing,
 ```
 
@@ -1646,7 +1547,7 @@ lastMetricsRef           ← metrics derive support (cpu%/network rate calc)
 
 - [ ] **Step 2: Delete LEGACY useEffect blocks**
 
-Delete all per-widget LEGACY useEffects in `useWidgets.ts`: weather (per-instance), markets, holidays, docker, currency, deals, rss. KEEP: defaultWeather (the "no widget but defaultCity set" effect, ~lines 82-105) and metrics (lines ~260-310).
+Delete all per-widget LEGACY useEffects in `useWidgets.ts`: weather (per-instance), markets, holidays, docker, currency, rss. KEEP: defaultWeather (the "no widget but defaultCity set" effect, ~lines 82-105) and metrics (lines ~260-310).
 
 - [ ] **Step 3: Update `UseWidgetsResult` interface**
 
@@ -1672,8 +1573,6 @@ export interface UseWidgetsResult {
     rssRefreshing: boolean
     currencyById: Record<string, CurrencyResponse | null>
     currencyErrById: Record<string, string | null>
-    dealsById: Record<string, DealsResponse | null>
-    dealsErrById: Record<string, string | null>
     byId: Map<string, WidgetSlice>
 }
 ```
@@ -1810,7 +1709,6 @@ Run dev server. Manually verify EVERY widget kind:
 - [ ] notes (admin and non-admin views)
 - [ ] rss (refresh button works)
 - [ ] currency
-- [ ] deals
 - [ ] timezones (multiple cities tick correctly)
 
 Browser DevTools console must be free of unhandled errors and React warnings.
@@ -1823,7 +1721,7 @@ git commit -m "$(cat <<'EOF'
 refactor(widgets): drop LEGACY paths — registry is the sole source
 
 stage 3 finalises the C2 refactor:
-- useWidgets.ts: 536 → ~250 lines (drop 8 duplicated effects + 18 useState)
+- useWidgets.ts: shrink to ~250 lines (drop 7 duplicated effects + 16 useState)
 - GroupBlock.tsx: 531 → ~360 lines (drop the if-else chain)
 - WidgetDataContext: 21 fields → 4 (byId Map + 2 carve-out fields each
   for defaultWeather and metrics)
@@ -1939,7 +1837,7 @@ cd web && npm run check:widgets
 Expected output:
 
 ```
-✓ widget registry OK (9 widgets)
+✓ widget registry OK (8 widgets)
 ```
 
 If the script fails (e.g., `tsx` can't import `.ts` from a `.mjs`, or `assert { type: 'json' }` syntax issue on the Node version), simplify the script to read the JSON files via `fs.readFileSync` + `JSON.parse` instead of import assertions. The intent is a smoke check, not a polished tool — keep it minimal.

@@ -2,10 +2,11 @@ package widgets
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,27 +21,70 @@ type MarketQuote struct {
 	Symbol       string    `json:"symbol"`
 	Kind         string    `json:"kind"` // "stock" | "crypto"
 	Name         string    `json:"name,omitempty"`
-	PriceUSD     float64   `json:"priceUsd"`
+	Price        float64   `json:"price"`
+	PriceUSD     float64   `json:"priceUsd,omitempty"` // compatibility alias, only for USD quotes
+	Currency     string    `json:"currency"`
+	ObservedAt   int64     `json:"observedAt"`
+	FetchedAt    int64     `json:"fetchedAt"`
+	Source       string    `json:"source"`
+	Error        string    `json:"error,omitempty"`
+	Stale        bool      `json:"stale,omitempty"`
+	Pending      bool      `json:"pending,omitempty"`
 	ChangePct24h float64   `json:"changePct24h"`
 	Series       []float64 `json:"series"`
 	TotalSlots   int       `json:"totalSlots,omitempty"` // full trading day slot count (for partial charts)
 }
 
 type MarketsResponse struct {
+	DataStatus
 	FetchedAt int64         `json:"fetchedAt"`
 	Items     []MarketQuote `json:"items"`
 }
 
 type MarketSymbol struct {
 	Symbol string `json:"symbol"`
-	Kind   string `json:"kind"`   // "stock" | "crypto"
+	Kind   string `json:"kind"` // "stock" | "crypto"
 	Name   string `json:"name"`
 	Market string `json:"market"` // "US" | "HK" | "" (crypto has no market)
 }
 
 var defaultMarketSymbols = []string{"BTC", "ETH", "AAPL", "MSFT"}
 
-var marketsTTLCache = cache.New[MarketsResponse](5 * time.Minute)
+var marketsTTLCache = newMarketsCache()
+
+func newMarketsCache() *cache.Cache[MarketQuote] {
+	c := cache.New[MarketQuote](5 * time.Minute)
+	c.SetMaxStale(24 * time.Hour)
+	c.SetLoadTimeout(financialLoadTimeout)
+	return c
+}
+
+func newFinancialSearchCache[T any]() *cache.Cache[T] {
+	c := cache.New[T](10 * time.Minute)
+	c.SetMaxStale(24 * time.Hour)
+	c.SetLoadTimeout(12 * time.Second)
+	return c
+}
+
+var yahooSearchTTLCache = newFinancialSearchCache[[]MarketSymbol]()
+var coinGeckoSearchTTLCache = newFinancialSearchCache[[]coinGeckoSearchCoin]()
+
+type coinGeckoAPIKeyContextKey struct{}
+
+// WithCoinGeckoAPIKey enables CoinGecko's optional Demo plan, without changing
+// the account-free Yahoo primary or the account-free CoinGecko fallback.
+func WithCoinGeckoAPIKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, coinGeckoAPIKeyContextKey{}, strings.TrimSpace(key))
+}
+
+func coinGeckoAPIKey(ctx context.Context) string {
+	key, _ := ctx.Value(coinGeckoAPIKeyContextKey{}).(string)
+	return key
+}
+
+func coinGeckoScope(ctx context.Context) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(coinGeckoAPIKey(ctx))))
+}
 
 type coinGeckoSymbolEntry struct {
 	ID   string
@@ -84,10 +128,6 @@ func normalizeSymbols(in []string) []string {
 		out = append(out, defaultMarketSymbols[len(out)%len(defaultMarketSymbols)])
 	}
 	return out
-}
-
-func marketsCacheKey(symbols []string) string {
-	return strings.Join(symbols, "|")
 }
 
 var popularCryptoSymbols = map[string]bool{
@@ -137,6 +177,14 @@ var cryptoFullNames = map[string]string{
 // yahooFinanceSearch searches Yahoo Finance for stock/ETF symbols by query.
 // Returns results with full company name, exchange info, and normalized symbol.
 func yahooFinanceSearch(ctx context.Context, query string, limit int) ([]MarketSymbol, error) {
+	key := strings.ToLower(strings.TrimSpace(query)) + ":" + strconv.Itoa(limit)
+	items, state, err := yahooSearchTTLCache.Load(ctx, key, func(ctx context.Context) ([]MarketSymbol, error) {
+		return loadYahooFinanceSearch(ctx, query, limit)
+	})
+	return items, errors.Join(err, state.Err)
+}
+
+func loadYahooFinanceSearch(ctx context.Context, query string, limit int) ([]MarketSymbol, error) {
 	if limit <= 0 {
 		limit = 8
 	}
@@ -152,35 +200,32 @@ func yahooFinanceSearch(ctx context.Context, query string, limit int) ([]MarketS
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := DefaultClient.Do(req)
+	body, _, status, err := financialRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("yahoo search: status=%d", resp.StatusCode)
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("yahoo search: status=%d", status)
 	}
 
 	var payload struct {
 		Quotes []struct {
-			Symbol   string `json:"symbol"`
-			LongName string `json:"longname"`
+			Symbol    string `json:"symbol"`
+			LongName  string `json:"longname"`
 			ShortName string `json:"shortname"`
-			Exchange string `json:"exchange"`
-			ExchDisp string `json:"exchDisp"`
+			Exchange  string `json:"exchange"`
+			ExchDisp  string `json:"exchDisp"`
 			QuoteType string `json:"quoteType"`
 		} `json:"quotes"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
+	if payload.Quotes == nil {
+		return nil, errors.New("yahoo search: missing quotes")
+	}
 
-	var results []MarketSymbol
+	results := make([]MarketSymbol, 0)
 	for _, q := range payload.Quotes {
 		if q.QuoteType != "EQUITY" && q.QuoteType != "ETF" {
 			continue
@@ -256,13 +301,8 @@ func isCryptoSymbol(symUpper string) bool {
 
 func stripCryptoPrefix(symUpper string) string {
 	s := strings.TrimSpace(strings.ToUpper(symUpper))
-	if strings.HasPrefix(s, "CRYPTO:") {
-		return strings.TrimSpace(strings.TrimPrefix(s, "CRYPTO:"))
-	}
-	if strings.HasSuffix(s, "-USD") {
-		return strings.TrimSuffix(s, "-USD")
-	}
-	return s
+	s = strings.TrimSpace(strings.TrimPrefix(s, "CRYPTO:"))
+	return strings.TrimSuffix(s, "-USD")
 }
 
 // Yahoo Finance rate limiter: ensures minimum interval between requests.
@@ -271,14 +311,25 @@ var yahooLimiter struct {
 	last time.Time
 }
 
-func yahooRateWait() {
-	yahooLimiter.mu.Lock()
-	defer yahooLimiter.mu.Unlock()
+func yahooRateWait(ctx context.Context) error {
 	const minInterval = 200 * time.Millisecond
-	if elapsed := time.Since(yahooLimiter.last); elapsed < minInterval {
-		time.Sleep(minInterval - elapsed)
+	for {
+		yahooLimiter.mu.Lock()
+		wait := time.Until(yahooLimiter.last.Add(minInterval))
+		if wait <= 0 {
+			yahooLimiter.last = time.Now()
+			yahooLimiter.mu.Unlock()
+			return ctx.Err()
+		}
+		yahooLimiter.mu.Unlock()
+		timer := time.NewTimer(wait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
 	}
-	yahooLimiter.last = time.Now()
 }
 
 // toYahooSymbol converts internal symbol to Yahoo Finance format.
@@ -297,20 +348,23 @@ func toYahooSymbol(sym string, isCrypto bool) string {
 
 // fetchYahooChart fetches price and historical data from Yahoo Finance chart API.
 func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQuote, error) {
-	yahooRateWait()
+	if err := yahooRateWait(ctx); err != nil {
+		return MarketQuote{}, err
+	}
 
 	yahooSym := toYahooSymbol(symbol, isCrypto)
-	// Use 5-day range with 15-minute intervals. During off-market hours,
-	// range=1d returns very few data points (3-5), making the sparkline
-	// a flat line. 5d always has 100+ points for a smooth chart.
-	// chartPreviousClose still reflects the previous trading day close,
-	// so the daily change % remains correct.
-	chartRange := "5d"
-	interval := "15m"
-
+	// Stocks need prior sessions across weekends; crypto needs a rolling 24h
+	// window, not five days labeled as a daily chart.
 	q := url.Values{}
-	q.Set("range", chartRange)
-	q.Set("interval", interval)
+	if isCrypto {
+		now := time.Now()
+		q.Set("period1", strconv.FormatInt(now.Add(-48*time.Hour).Unix(), 10))
+		q.Set("period2", strconv.FormatInt(now.Unix(), 10))
+	} else {
+		q.Set("range", "5d")
+	}
+	q.Set("interval", "15m")
+	q.Set("includePrePost", "false")
 	endpoint := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?%s",
 		url.PathEscape(yahooSym), q.Encode())
 
@@ -320,33 +374,29 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
 
-	resp, err := DefaultClient.Do(req)
+	body, _, status, err := financialRequest(ctx, req)
 	if err != nil {
 		return MarketQuote{}, err
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return MarketQuote{}, err
+	if status != http.StatusOK {
+		return MarketQuote{}, fmt.Errorf("yahoo chart: status=%d", status)
 	}
-	if resp.StatusCode != http.StatusOK {
-		preview := string(body)
-		if len(preview) > 256 {
-			preview = preview[:256]
-		}
-		return MarketQuote{}, fmt.Errorf("yahoo chart: status=%d body=%s", resp.StatusCode, strings.TrimSpace(preview))
-	}
+	return decodeYahooChart(body, symbol, isCrypto, time.Now())
+}
 
+func decodeYahooChart(body []byte, symbol string, isCrypto bool, now time.Time) (MarketQuote, error) {
 	var payload struct {
 		Chart struct {
 			Result []struct {
 				Meta struct {
-					Symbol             string `json:"symbol"`
-					ShortName          string `json:"shortName"`
-					LongName           string `json:"longName"`
-					RegularMarketPrice float64 `json:"regularMarketPrice"`
-					ChartPreviousClose float64 `json:"chartPreviousClose"`
+					Symbol               string  `json:"symbol"`
+					ShortName            string  `json:"shortName"`
+					LongName             string  `json:"longName"`
+					RegularMarketPrice   float64 `json:"regularMarketPrice"`
+					RegularMarketTime    int64   `json:"regularMarketTime"`
+					Currency             string  `json:"currency"`
+					PreviousClose        float64 `json:"previousClose"`
+					ChartPreviousClose   float64 `json:"chartPreviousClose"`
 					CurrentTradingPeriod struct {
 						Regular struct {
 							Start int64 `json:"start"`
@@ -382,6 +432,19 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 	meta := result.Meta
 
 	price := meta.RegularMarketPrice
+	currency := strings.ToUpper(strings.TrimSpace(meta.Currency))
+	unitScale := 1.0
+	switch strings.TrimSpace(meta.Currency) {
+	case "GBp", "GBX":
+		currency, unitScale = "GBP", 0.01
+	case "ZAc":
+		currency, unitScale = "ZAR", 0.01
+	case "ILA":
+		currency, unitScale = "ILS", 0.01
+	}
+	if !validFinancialValue(price) || !validCurrencyCode(currency) {
+		return MarketQuote{}, errors.New("yahoo chart: missing valid price or currency")
+	}
 
 	name := strings.TrimSpace(meta.LongName)
 	if name == "" {
@@ -400,184 +463,224 @@ func fetchYahooChart(ctx context.Context, symbol string, isCrypto bool) (MarketQ
 		}
 	}
 
-	// Extract close prices, filtering by trading session for stocks.
-	// - During market hours: show today's data (in-progress, partial chart)
-	// - Pre-market or post-market: show last complete trading day
-	// - Crypto trades 24/7: use all data points
 	timestamps := result.Timestamp
 	var allCloses []*float64
 	if len(result.Indicators.Quote) > 0 {
 		allCloses = result.Indicators.Quote[0].Close
 	}
 
+	type point struct {
+		time  int64
+		price float64
+	}
+	points := make([]point, 0, len(timestamps))
+	for i, ts := range timestamps {
+		if i < len(allCloses) && allCloses[i] != nil && validFinancialValue(*allCloses[i]) && ts > 0 && ts <= now.Unix() {
+			points = append(points, point{ts, *allCloses[i]})
+		}
+	}
+	if len(points) == 0 {
+		return MarketQuote{}, errors.New("yahoo chart: missing timestamped series")
+	}
+	observedAt := meta.RegularMarketTime
+	if observedAt <= 0 {
+		observedAt = points[len(points)-1].time
+	}
 	var closes []float64
-	var totalSlots int // 0 = chart fills full width (default)
-
-	if isCrypto || len(timestamps) == 0 {
-		// Crypto: use all data points (24/7 trading).
-		for _, v := range allCloses {
-			if v != nil && *v > 0 {
-				closes = append(closes, *v)
+	var totalSlots int
+	prevClose := meta.PreviousClose
+	if isCrypto {
+		cutoff := observedAt - 24*3600
+		prevClose = 0
+		for _, p := range points {
+			if p.time <= cutoff {
+				prevClose = p.price
 			}
+			if p.time >= cutoff && p.time <= observedAt {
+				closes = append(closes, p.price)
+			}
+		}
+		if !validFinancialValue(prevClose) {
+			return MarketQuote{}, errors.New("yahoo chart: missing 24h baseline")
 		}
 	} else {
+		// Yahoo's 5d chartPreviousClose is the start of the chart, not
+		// necessarily yesterday. Prefer explicit previousClose, then the
+		// actual close of the session preceding the quote's session.
+		sessions := [][]point{{points[0]}}
+		for _, p := range points[1:] {
+			last := sessions[len(sessions)-1]
+			if p.time-last[0].time >= 12*3600 {
+				sessions = append(sessions, []point{p})
+			} else {
+				sessions[len(sessions)-1] = append(last, p)
+			}
+		}
+		latest := sessions[len(sessions)-1]
+		for _, p := range latest {
+			closes = append(closes, p.price)
+		}
+		if !validFinancialValue(prevClose) && len(sessions) > 1 {
+			prior := sessions[len(sessions)-2]
+			prevClose = prior[len(prior)-1].price
+		}
+		if !validFinancialValue(prevClose) {
+			prevClose = meta.ChartPreviousClose
+		}
 		regStart := meta.CurrentTradingPeriod.Regular.Start
 		regEnd := meta.CurrentTradingPeriod.Regular.End
-
-		// Extract the last complete trading day's data (before today's session).
-		var lastCompleteDay []float64
-		var lastDayStartIdx int
-		for i, ts := range timestamps {
-			if i >= len(allCloses) || allCloses[i] == nil || *allCloses[i] <= 0 {
-				continue
-			}
-			if ts >= regStart {
-				break
-			}
-			// Detect day boundary (gap > 12 hours).
-			if len(lastCompleteDay) > 0 && ts-timestamps[lastDayStartIdx] > 12*3600 {
-				lastCompleteDay = nil
-			}
-			if len(lastCompleteDay) == 0 {
-				lastDayStartIdx = i
-			}
-			lastCompleteDay = append(lastCompleteDay, *allCloses[i])
-		}
-
-		// Extract today's regular session data.
-		var todaySession []float64
-		for i, ts := range timestamps {
-			if ts >= regStart && i < len(allCloses) {
-				if allCloses[i] != nil && *allCloses[i] > 0 {
-					todaySession = append(todaySession, *allCloses[i])
-				}
-			}
-		}
-
-		now := time.Now().Unix()
-		isMarketOpen := now >= regStart && now <= regEnd
-
-		if isMarketOpen {
-			// During market hours: show only today's data.
-			// Set totalSlots to the full day's expected point count so the
-			// chart occupies only a portion of the width, growing over time.
-			closes = todaySession
-			fullDaySlots := int((regEnd - regStart) / 900) // 15-min intervals
-			if fullDaySlots < 1 {
-				fullDaySlots = 26
-			}
-			totalSlots = fullDaySlots
-		} else {
-			// Pre-market or post-market: show last complete trading day.
-			closes = lastCompleteDay
+		if now.Unix() >= regStart && now.Unix() < regEnd && latest[0].time >= regStart {
+			totalSlots = int((regEnd - regStart) / 900)
 		}
 	}
-
-	// Fallback: if session filtering produced no data, use all valid closes.
-	if len(closes) == 0 {
-		for _, v := range allCloses {
-			if v != nil && *v > 0 {
-				closes = append(closes, *v)
-			}
-		}
-		totalSlots = 0
+	if len(closes) == 0 || !validFinancialValue(prevClose) {
+		return MarketQuote{}, errors.New("yahoo chart: missing series or previous close")
 	}
-
-	changePct := 0.0
-	prevClose := meta.ChartPreviousClose
-	if prevClose > 0 && price > 0 {
-		changePct = (price - prevClose) / prevClose * 100
+	changePct := (price - prevClose) / prevClose * 100
+	series := sampleFinancialSeries(closes, 30)
+	// Yahoo occasionally quotes minor units; expose ISO major units, never
+	// relabel pence as pounds (or convert foreign currency to USD).
+	price *= unitScale
+	for i := range series {
+		series[i] *= unitScale
 	}
-
-	maxPoints := 30
-	series := downsampleTail(closes, maxPoints)
-	if totalSlots > 0 && maxPoints > 0 && totalSlots > len(series) {
-		// Scale totalSlots down proportionally if series was downsampled.
-		totalSlots = int(float64(totalSlots) * float64(len(series)) / float64(len(closes)))
+	if totalSlots > 0 {
+		totalSlots = int(math.Ceil(float64(totalSlots) * float64(len(series)) / float64(len(closes))))
 		if totalSlots < len(series) {
 			totalSlots = len(series)
 		}
+	}
+	legacyUSD := 0.0
+	if currency == "USD" {
+		legacyUSD = price
 	}
 
 	return MarketQuote{
 		Symbol:       displaySym,
 		Kind:         kind,
 		Name:         name,
-		PriceUSD:     price,
+		Price:        price,
+		PriceUSD:     legacyUSD,
+		Currency:     currency,
+		ObservedAt:   observedAt,
+		FetchedAt:    now.Unix(),
+		Source:       "yahoo",
 		ChangePct24h: changePct,
 		Series:       series,
 		TotalSlots:   totalSlots,
 	}, nil
 }
 
+func fetchMarketQuote(ctx context.Context, symbol string, crypto, force bool) (MarketQuote, error) {
+	if !crypto {
+		return fetchYahooChart(ctx, symbol, false)
+	}
+	// Keep at least half of a short loader budget available to CoinGecko.
+	// Cancel only Yahoo's child: the fallback still needs the original context.
+	yahooTimeout := 5 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		yahooTimeout = min(yahooTimeout, time.Until(deadline)/2)
+	}
+	yahooCtx, cancelYahoo := context.WithTimeout(ctx, yahooTimeout)
+	quote, yahooErr := fetchYahooChart(yahooCtx, symbol, true)
+	cancelYahoo()
+	if yahooErr == nil {
+		return quote, nil
+	}
+	items, cgErr := fetchCoinGecko(ctx, []string{symbol}, force)
+	if cgErr != nil {
+		return MarketQuote{}, errors.Join(yahooErr, cgErr)
+	}
+	if len(items) != 1 {
+		return MarketQuote{}, errors.New("coingecko: missing requested quote")
+	}
+	return items[0], nil
+}
+
 // FetchMarkets fetches market data from Yahoo Finance (primary) with CoinGecko
 // fallback for crypto. Results are cached for ~5 minutes.
-func FetchMarkets(ctx context.Context, symbols []string) (MarketsResponse, error) {
+func FetchMarkets(ctx context.Context, symbols []string, force ...bool) (MarketsResponse, error) {
 	symbols = normalizeSymbols(symbols)
-
-	key := marketsCacheKey(symbols)
-	if cached, ok := marketsTTLCache.Get(key); ok {
-		return cached, nil
-	}
-
-	getAnyCached := func() (MarketsResponse, bool) {
-		return marketsTTLCache.GetStale(key)
-	}
-
-	items := make([]MarketQuote, len(symbols))
-	var failedCrypto []int
-
+	forced := len(force) > 0 && force[0]
+	out := MarketsResponse{Items: make([]MarketQuote, len(symbols))}
+	loads := make([]financialLoad[MarketQuote], len(symbols))
 	for i, s := range symbols {
 		crypto := isCryptoSymbol(s)
-		quote, err := fetchYahooChart(ctx, s, crypto)
-		if err != nil {
-			if crypto {
-				failedCrypto = append(failedCrypto, i)
-			} else {
-				items[i] = MarketQuote{Symbol: strings.ToUpper(s), Kind: "stock"}
-			}
+		kind, display := "stock", s
+		if crypto {
+			kind, display = "crypto", stripCryptoPrefix(s)
+		}
+		out.Items[i] = MarketQuote{Symbol: display, Kind: kind}
+		if !validMarketSymbol(s) {
+			out.Items[i].Error = "invalid market symbol"
 			continue
 		}
-		items[i] = quote
-	}
-
-	// Fallback to CoinGecko for failed crypto symbols.
-	if len(failedCrypto) > 0 {
-		cryptoSyms := make([]string, len(failedCrypto))
-		for j, idx := range failedCrypto {
-			cryptoSyms[j] = symbols[idx]
+		key := kind + ":" + toYahooSymbol(s, crypto)
+		if crypto {
+			key += ":" + coinGeckoScope(ctx)
 		}
-		if cgItems, err := fetchCoinGecko(ctx, cryptoSyms); err == nil {
-			cgMap := map[string]MarketQuote{}
-			for _, it := range cgItems {
-				cgMap[strings.ToUpper(it.Symbol)] = it
-			}
-			for _, idx := range failedCrypto {
-				sym := strings.ToUpper(symbols[idx])
-				if it, ok := cgMap[sym]; ok {
-					items[idx] = it
-				} else {
-					items[idx] = MarketQuote{Symbol: stripCryptoPrefix(sym), Kind: "crypto"}
-				}
-			}
-		} else {
-			if cached, ok := getAnyCached(); ok {
-				return cached, nil
-			}
-			for _, idx := range failedCrypto {
-				items[idx] = MarketQuote{
-					Symbol: stripCryptoPrefix(strings.ToUpper(symbols[idx])),
-					Kind:   "crypto",
-				}
-			}
+		loads[i] = financialLoad[MarketQuote]{
+			key: key,
+			loader: func(ctx context.Context) (MarketQuote, error) {
+				return fetchMarketQuote(ctx, s, crypto, forced)
+			},
 		}
 	}
+	results := loadFinancialRows(ctx, marketsTTLCache, loads, func(row MarketQuote) bool {
+		return validFinancialValue(row.Price)
+	}, forced)
 
-	out := MarketsResponse{FetchedAt: time.Now().Unix(), Items: items}
-
-	marketsTTLCache.Set(key, out)
-
+	available := 0
+	var warnings []string
+	for i, result := range results {
+		row := out.Items[i]
+		if validFinancialValue(result.value.Price) {
+			symbol := row.Symbol
+			row = result.value
+			row.Symbol = symbol
+		}
+		if result.err != nil {
+			row.Error = result.err.Error()
+		} else if result.state.Err != nil {
+			row.Error = result.state.Err.Error()
+		}
+		row.Stale = result.state.Stale
+		row.Pending = result.pending && !validFinancialValue(row.Price)
+		out.Items[i] = row
+		status := statusFromCache(result.state)
+		out.Stale = out.Stale || status.Stale
+		out.Refreshing = out.Refreshing || status.Refreshing
+		if row.Error != "" {
+			warnings = append(warnings, row.Symbol+": "+row.Error)
+		}
+		if validFinancialValue(row.Price) {
+			available++
+			if out.FetchedAt == 0 || row.FetchedAt < out.FetchedAt {
+				out.FetchedAt = row.FetchedAt
+			}
+		}
+	}
+	out.Warning = strings.Join(warnings, "; ")
+	if available == 0 {
+		return out, errors.New("markets: all requested symbols are unavailable")
+	}
 	return out, nil
+}
+
+func validMarketSymbol(s string) bool {
+	if s == "" || len(s) > 40 {
+		return false
+	}
+	for _, c := range s {
+		if (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strings.ContainsRune(".-:^=", c) {
+			continue
+		}
+		return false
+	}
+	if isCryptoSymbol(s) && stripCryptoPrefix(s) == "" {
+		return false
+	}
+	return true
 }
 
 func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]MarketSymbol, error) {
@@ -639,7 +742,8 @@ func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]Market
 	}()
 
 	// Collect results: Yahoo (stocks) first, then CoinGecko (crypto)
-	if yr := <-yahooCh; yr.err == nil {
+	yr, gr := <-yahooCh, <-geckoCh
+	if len(yr.items) > 0 {
 		for _, m := range yr.items {
 			push(m)
 			if len(results) >= limit {
@@ -647,7 +751,7 @@ func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]Market
 			}
 		}
 	}
-	if gr := <-geckoCh; gr.err == nil {
+	if len(gr.coins) > 0 {
 		for _, c := range gr.coins {
 			push(MarketSymbol{Symbol: strings.ToUpper(c.Symbol), Kind: "crypto", Name: c.Name})
 			if len(results) >= limit {
@@ -659,7 +763,7 @@ func SearchMarketSymbols(ctx context.Context, query string, limit int) ([]Market
 	if len(results) > limit {
 		results = results[:limit]
 	}
-	return results, nil
+	return results, errors.Join(yr.err, gr.err)
 }
 
 type coinGeckoSearchCoin struct {
@@ -668,7 +772,7 @@ type coinGeckoSearchCoin struct {
 	Symbol string
 }
 
-func coinGeckoSearch(ctx context.Context, query string, limit int) ([]coinGeckoSearchCoin, error) {
+func coinGeckoSearch(ctx context.Context, query string, limit int, force ...bool) ([]coinGeckoSearchCoin, error) {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, errors.New("query required")
@@ -676,26 +780,20 @@ func coinGeckoSearch(ctx context.Context, query string, limit int) ([]coinGeckoS
 	if limit <= 0 {
 		limit = 10
 	}
+	key := coinGeckoScope(ctx) + ":" + strings.ToLower(q)
+	coins, state, err := coinGeckoSearchTTLCache.Load(ctx, key, func(ctx context.Context) ([]coinGeckoSearchCoin, error) {
+		return loadCoinGeckoSearch(ctx, q)
+	}, force...)
+	if len(coins) > limit {
+		coins = coins[:limit]
+	}
+	return coins, errors.Join(err, state.Err)
+}
 
+func loadCoinGeckoSearch(ctx context.Context, query string) ([]coinGeckoSearchCoin, error) {
 	params := url.Values{}
-	params.Set("query", q)
+	params.Set("query", query)
 	endpoint := "https://api.coingecko.com/api/v3/search?" + params.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("coingecko search: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
 	var payload struct {
 		Coins []struct {
 			ID     string `json:"id"`
@@ -703,24 +801,117 @@ func coinGeckoSearch(ctx context.Context, query string, limit int) ([]coinGeckoS
 			Symbol string `json:"symbol"`
 		} `json:"coins"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := coinGeckoGet(ctx, endpoint, &payload); err != nil {
 		return nil, err
 	}
+	if payload.Coins == nil {
+		return nil, errors.New("coingecko search: missing coins")
+	}
 
-	out := make([]coinGeckoSearchCoin, 0, limit)
+	out := make([]coinGeckoSearchCoin, 0, len(payload.Coins))
 	for _, c := range payload.Coins {
-		if strings.TrimSpace(c.Symbol) == "" {
+		if strings.TrimSpace(c.Symbol) == "" || strings.TrimSpace(c.ID) == "" {
 			continue
 		}
 		out = append(out, coinGeckoSearchCoin{ID: strings.TrimSpace(c.ID), Name: strings.TrimSpace(c.Name), Symbol: strings.TrimSpace(c.Symbol)})
-		if len(out) >= limit {
-			break
-		}
 	}
 	return out, nil
 }
 
-func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, error) {
+type coinGeckoCooldown struct {
+	until time.Time
+	err   error
+}
+
+var coinGeckoBackoff = struct {
+	sync.Mutex
+	items map[string]coinGeckoCooldown
+}{items: make(map[string]coinGeckoCooldown)}
+
+func coinGeckoCooldownError(scope string) error {
+	coinGeckoBackoff.Lock()
+	cooldown := coinGeckoBackoff.items[scope]
+	coinGeckoBackoff.Unlock()
+	if time.Now().Before(cooldown.until) {
+		return cooldown.err
+	}
+	return nil
+}
+
+func coinGeckoGet(ctx context.Context, endpoint string, dst any) error {
+	scope := coinGeckoScope(ctx)
+	if err := coinGeckoCooldownError(scope); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "Hearth/1.0")
+	if key := coinGeckoAPIKey(ctx); key != "" {
+		req.Header.Set("X-CG-Demo-API-Key", key)
+	}
+	body, headers, status, err := financialRequest(ctx, req, func() error {
+		return coinGeckoCooldownError(scope)
+	})
+	if err != nil {
+		return err
+	}
+	backoff := time.Duration(0)
+	if status < 200 || status >= 300 {
+		err = fmt.Errorf("coingecko: status=%d", status)
+		switch status {
+		case http.StatusTooManyRequests:
+			backoff = time.Minute
+			if seconds, e := strconv.Atoi(headers.Get("Retry-After")); e == nil && seconds > 0 {
+				backoff = time.Duration(min(seconds, 86400)) * time.Second
+			} else if until, e := http.ParseTime(headers.Get("Retry-After")); e == nil && time.Until(until) > 0 {
+				backoff = min(time.Until(until), 24*time.Hour)
+			}
+			backoff = max(backoff, time.Minute)
+			err = fmt.Errorf("coingecko: rate limited (429); retry after %s", backoff.Round(time.Second))
+		case http.StatusUnauthorized, http.StatusForbidden:
+			backoff = 5 * time.Minute
+			err = fmt.Errorf("coingecko: API key or access rejected (status=%d)", status)
+		}
+	} else {
+		var failure struct {
+			Status struct {
+				Code int `json:"error_code"`
+			} `json:"status"`
+			Error string `json:"error"`
+		}
+		// Successful market responses are arrays; only object-shaped payloads
+		// can be CoinGecko's HTTP-200 application errors.
+		if json.Unmarshal(body, &failure) == nil && (failure.Status.Code != 0 || failure.Error != "") {
+			err = fmt.Errorf("coingecko: provider rejected request (code=%d)", failure.Status.Code)
+			backoff = 5 * time.Minute
+		}
+	}
+	if backoff > 0 {
+		coinGeckoBackoff.Lock()
+		if len(coinGeckoBackoff.items) >= 64 {
+			for key, item := range coinGeckoBackoff.items {
+				if time.Now().After(item.until) {
+					delete(coinGeckoBackoff.items, key)
+				}
+			}
+		}
+		if _, exists := coinGeckoBackoff.items[scope]; exists || len(coinGeckoBackoff.items) < 64 {
+			coinGeckoBackoff.items[scope] = coinGeckoCooldown{time.Now().Add(backoff), err}
+		}
+		coinGeckoBackoff.Unlock()
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, dst); err != nil {
+		return fmt.Errorf("coingecko: invalid response: %w", err)
+	}
+	return nil
+}
+
+func fetchCoinGecko(ctx context.Context, symbolsUpper []string, force ...bool) ([]MarketQuote, error) {
 	ids := make([]string, 0, len(symbolsUpper))
 	idToSymbol := map[string]string{}
 	idToName := map[string]string{}
@@ -728,14 +919,14 @@ func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, 
 	for _, symRaw := range symbolsUpper {
 		sym := stripCryptoPrefix(symRaw)
 		if sym == "" {
-			continue
+			return nil, errors.New("coingecko: empty crypto symbol")
 		}
-		id, name, err := coinGeckoResolveSymbol(ctx, sym)
+		id, name, err := coinGeckoResolveSymbol(ctx, sym, force...)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		ids = append(ids, id)
-		idToSymbol[id] = strings.ToUpper(symRaw)
+		idToSymbol[id] = sym
 		idToName[id] = name
 	}
 	if len(ids) == 0 {
@@ -749,34 +940,18 @@ func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, 
 	q.Set("price_change_percentage", "24h")
 
 	endpoint := "https://api.coingecko.com/api/v3/coins/markets?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("coingecko markets: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
 	var payload []struct {
-		ID         string  `json:"id"`
-		Symbol     string  `json:"symbol"`
-		Name       string  `json:"name"`
-		Price      float64 `json:"current_price"`
-		ChangePct  float64 `json:"price_change_percentage_24h"`
+		ID         string   `json:"id"`
+		Symbol     string   `json:"symbol"`
+		Name       string   `json:"name"`
+		Price      float64  `json:"current_price"`
+		ChangePct  *float64 `json:"price_change_percentage_24h"`
+		UpdatedAt  string   `json:"last_updated"`
 		Sparkline7 struct {
 			Price []float64 `json:"price"`
 		} `json:"sparkline_in_7d"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := coinGeckoGet(ctx, endpoint, &payload); err != nil {
 		return nil, err
 	}
 
@@ -784,110 +959,99 @@ func fetchCoinGecko(ctx context.Context, symbolsUpper []string) ([]MarketQuote, 
 	for _, row := range payload {
 		symbol := idToSymbol[row.ID]
 		if symbol == "" {
-			// Fallback to api-provided symbol.
-			symbol = strings.ToUpper(row.Symbol)
+			continue
 		}
 		name := strings.TrimSpace(row.Name)
 		if name == "" {
 			name = strings.TrimSpace(idToName[row.ID])
 		}
-		series := downsampleTail(row.Sparkline7.Price, 24)
+		observedAt, err := time.Parse(time.RFC3339Nano, row.UpdatedAt)
+		if err != nil || observedAt.Unix() <= 0 || !validFinancialValue(row.Price) || row.ChangePct == nil || math.IsNaN(*row.ChangePct) || math.IsInf(*row.ChangePct, 0) {
+			return nil, fmt.Errorf("coingecko: invalid quote for %s", symbol)
+		}
+		// CoinGecko's seven-day sparkline is hourly. Take only its trailing
+		// 24h, then sample; never compress a seven-day chart into a 24h label.
+		prices := row.Sparkline7.Price
+		if len(prices) > 24 {
+			prices = prices[len(prices)-24:]
+		}
+		if len(prices) == 0 {
+			return nil, fmt.Errorf("coingecko: missing series for %s", symbol)
+		}
+		for _, price := range prices {
+			if !validFinancialValue(price) {
+				return nil, fmt.Errorf("coingecko: invalid series for %s", symbol)
+			}
+		}
+		series := sampleFinancialSeries(prices, 30)
 		out = append(out, MarketQuote{
 			Symbol:       symbol,
 			Kind:         "crypto",
 			Name:         name,
+			Price:        row.Price,
 			PriceUSD:     row.Price,
-			ChangePct24h: row.ChangePct,
+			Currency:     "USD",
+			ObservedAt:   observedAt.Unix(),
+			FetchedAt:    time.Now().Unix(),
+			Source:       "coingecko",
+			ChangePct24h: *row.ChangePct,
 			Series:       series,
 		})
+	}
+	if len(out) != len(ids) {
+		return nil, errors.New("coingecko: missing requested quotes")
 	}
 	return out, nil
 }
 
-func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string) (id string, name string, err error) {
+func coinGeckoResolveSymbol(ctx context.Context, symbolUpper string, force ...bool) (id string, name string, err error) {
 	sym := strings.TrimSpace(strings.ToUpper(symbolUpper))
 	if sym == "" {
 		return "", "", errors.New("symbol required")
 	}
 
-	if v, ok := coinGeckoSymbolTTLCache.Get(sym); ok && v.ID != "" {
+	key := coinGeckoScope(ctx) + ":" + sym
+	if v, ok := coinGeckoSymbolTTLCache.Get(key); ok && v.ID != "" {
 		return v.ID, v.Name, nil
 	}
 
-	q := url.Values{}
-	q.Set("query", sym)
-	endpoint := "https://api.coingecko.com/api/v3/search?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	coins, err := coinGeckoSearch(ctx, sym, 250, force...)
 	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", "", fmt.Errorf("coingecko search: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var payload struct {
-		Coins []struct {
-			ID     string `json:"id"`
-			Name   string `json:"name"`
-			Symbol string `json:"symbol"`
-		} `json:"coins"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return "", "", err
 	}
 
 	pickedID := ""
 	pickedName := ""
-	for _, c := range payload.Coins {
+	for _, c := range coins {
 		if strings.EqualFold(strings.TrimSpace(c.Symbol), sym) {
 			pickedID = strings.TrimSpace(c.ID)
 			pickedName = strings.TrimSpace(c.Name)
 			break
 		}
 	}
-	if pickedID == "" && len(payload.Coins) > 0 {
-		pickedID = strings.TrimSpace(payload.Coins[0].ID)
-		pickedName = strings.TrimSpace(payload.Coins[0].Name)
-	}
 	if pickedID == "" {
 		return "", "", fmt.Errorf("coingecko: no match for %s", sym)
 	}
 
-	coinGeckoSymbolTTLCache.Set(sym, coinGeckoSymbolEntry{ID: pickedID, Name: pickedName})
+	coinGeckoSymbolTTLCache.Set(key, coinGeckoSymbolEntry{ID: pickedID, Name: pickedName})
 
 	return pickedID, pickedName, nil
 }
 
-func downsampleTail(series []float64, maxN int) []float64 {
+func sampleFinancialSeries(series []float64, maxN int) []float64 {
 	if maxN <= 0 {
 		return nil
 	}
 	if len(series) <= maxN {
-		out := make([]float64, 0, len(series))
-		for _, v := range series {
-			if v == 0 {
-				continue
-			}
-			out = append(out, v)
-		}
-		return out
+		return append([]float64(nil), series...)
 	}
-	start := len(series) - maxN
-	out := make([]float64, 0, maxN)
-	for _, v := range series[start:] {
-		if v == 0 {
-			continue
-		}
-		out = append(out, v)
+	if maxN == 1 {
+		return []float64{series[len(series)-1]}
+	}
+	out := make([]float64, maxN)
+	for i := range out {
+		idx := i * (len(series) - 1) / (maxN - 1)
+		out[i] = series[idx]
 	}
 	return out
 }

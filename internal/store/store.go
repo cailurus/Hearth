@@ -186,6 +186,18 @@ func (s *Store) Migrate() error {
 	if err := s.addColumnIfMissing("users", "must_change_password", `INTEGER NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := removeRetiredWidgetApps(tx); err != nil {
+		return fmt.Errorf("remove retired widgets: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	// Migrate legacy default system group names.
 	_, _ = s.db.Exec(`UPDATE groups SET kind = 'system' WHERE name IN ('系统组件', 'System Tools', 'System Widgets')`)
 

@@ -4,7 +4,7 @@
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { apiGet, apiPost, apiPut } from '../api'
-import type { AppItem, IconResolve } from '../types'
+import type { AppItem, GeocodeResult, IconResolve, WeatherSettings } from '../types'
 import {
     normalizeCountryCodes,
     widgetKindFromUrl,
@@ -15,8 +15,9 @@ import {
     DEFAULT_MARKET_SYMBOLS,
 } from '../utils'
 import { useCitySearch } from './useCitySearch'
+import { weatherCoordinates, weatherLocation } from '../utils/weatherLocation'
 
-type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | 'deals' | null
+type WidgetKind = 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | null
 
 interface UseWidgetEditorOptions {
     isAdmin: boolean
@@ -67,8 +68,9 @@ export interface WidgetEditorResult {
     // Weather
     wCity: string
     setWCity: (v: string) => void
+    pickWCity: (v: string, option?: GeocodeResult) => void
     setCityQuery: (v: string) => void
-    cityOptions: string[]
+    cityOptions: GeocodeResult[]
     // Metrics
     mRefreshSec: 1 | 5 | 10
     setMRefreshSec: (v: 1 | 5 | 10) => void
@@ -106,9 +108,6 @@ export interface WidgetEditorResult {
     // Currency
     cPairs: string[]
     setCPairs: React.Dispatch<React.SetStateAction<string[]>>
-    // Deals
-    dlRegion: string
-    setDlRegion: (v: string) => void
     // Opener
     openEditItem: (item: AppItem) => void
 }
@@ -132,7 +131,7 @@ export function useWidgetEditor({
     const [editIconUrl, setEditIconUrl] = useState('')
     const [editLucideIcon, setEditLucideIcon] = useState<string | null>(null)
     const [iconResolving, setIconResolving] = useState(false)
-    const [widgetSaving] = useState(false)
+    const [widgetSaving, setWidgetSaving] = useState(false)
 
     // Fetch-icon state (for "auto" mode manual refresh)
     const [fetchingIcon, setFetchingIcon] = useState(false)
@@ -141,7 +140,10 @@ export function useWidgetEditor({
     const fetchIconSeqRef = useRef(0)
 
     const [widgetKind, setWidgetKind] = useState<WidgetKind>(null)
-    const [wCity, setWCity] = useState('')
+    const [wLocation, setWLocation] = useState<WeatherSettings>({ city: '' })
+    const wCity = wLocation.city
+    const setWCity = useCallback((city: string) => setWLocation(weatherLocation(city)), [])
+    const pickWCity = useCallback((city: string, option?: GeocodeResult) => setWLocation(weatherLocation(city, option)), [])
     const [cityQuery, setCityQuery] = useState('')
 
     const [mkSymbols, setMkSymbols] = useState<string[]>([...DEFAULT_MARKET_SYMBOLS])
@@ -167,15 +169,11 @@ export function useWidgetEditor({
     // Currency
     const [cPairs, setCPairs] = useState<string[]>(['USD-CNY', 'EUR-JPY', 'GBP-USD', 'EUR-USD'])
 
-    // Deals
-    const [dlRegion, setDlRegion] = useState('us')
-
     // ── refs ───────────────────────────────────────────────────────
     const widgetLastSavedDescRef = useRef<string>('')
     const widgetAutoSaveTimerRef = useRef<number | null>(null)
     const widgetSaveSeqRef = useRef(0)
     const tzNormalizeSeqRef = useRef(0)
-    const wNormalizeSeqRef = useRef(0)
 
     // ── city search ───────────────────────────────────────────────
     const citySearchLang = widgetKind === 'timezones' ? 'en' as const : lang
@@ -186,16 +184,6 @@ export function useWidgetEditor({
     })
 
     // ── helpers ───────────────────────────────────────────────────
-    const resolveCityToTimezone = useCallback(async (city: string) => {
-        const res = await apiGet<{ timezone: string; city?: string }>(
-            `/api/widgets/timezone?${new URLSearchParams({ city, lang }).toString()}`,
-        )
-        return {
-            city: String(res.city || city).trim() || city,
-            timezone: String(res.timezone || '').trim(),
-        }
-    }, [lang])
-
     const resolveCityToTimezoneEn = useCallback(async (city: string) => {
         const res = await apiGet<{ timezone: string; city?: string }>(
             `/api/widgets/timezone?${new URLSearchParams({ city, lang: 'en' }).toString()}`,
@@ -267,7 +255,7 @@ export function useWidgetEditor({
             const cfg = safeParseJSON(item.description)
             if (widgetType === 'weather') {
                 const city = String(cfg?.city ?? '').trim()
-                setWCity(city || 'Shanghai, Shanghai, China')
+                setWLocation({ city: city || 'Shanghai, Shanghai, China', ...weatherCoordinates(cfg) })
                 setCityQuery(city || '')
             }
             if (widgetType === 'timezones') {
@@ -331,9 +319,6 @@ export function useWidgetEditor({
                 const pairs = Array.isArray(cfg?.pairs) ? (cfg?.pairs as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean) : ['USD-CNY', 'EUR-CNY']
                 setCPairs(pairs)
             }
-            if (widgetType === 'deals') {
-                setDlRegion(String(cfg?.region ?? 'us').trim())
-            }
             if (widgetType === 'rss') {
                 const feeds = Array.isArray(cfg?.feeds) ? (cfg?.feeds as unknown[]).map((x) => String(x ?? '').trim()).filter(Boolean) : []
                 setRssFeeds(feeds)
@@ -356,33 +341,6 @@ export function useWidgetEditor({
         widgetLastSavedDescRef.current = String(desc ?? '')
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editDialogOpen, editItemId])
-
-    // Weather city normalization on modal open
-    useEffect(() => {
-        if (!isAdmin) return
-        if (!editDialogOpen || widgetKind !== 'weather') return
-
-        const snapshot = String(wCity || '').trim()
-        if (!snapshot) return
-
-        const seq = ++wNormalizeSeqRef.current
-
-        const run = async () => {
-            try {
-                const r = await resolveCityToTimezone(snapshot)
-                if (wNormalizeSeqRef.current !== seq) return
-                if (!editDialogOpen || widgetKind !== 'weather') return
-                if (String(wCity || '').trim() !== snapshot) return
-                if (r.city && r.city !== snapshot) setWCity(r.city)
-            } catch {
-                // ignore
-            }
-        }
-
-        void run()
-        // Only run when modal opens or the item changes.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAdmin, editDialogOpen, editItemId, widgetKind])
 
     // Timezone city normalization on modal open
     useEffect(() => {
@@ -463,8 +421,6 @@ export function useWidgetEditor({
                         description = JSON.stringify({ countries })
                     } else if (widgetKind === 'docker') {
                         description = JSON.stringify({ refreshSec: dRefreshSec })
-                    } else if (widgetKind === 'deals') {
-                        description = JSON.stringify({ region: dlRegion })
                     }
 
                     if (description == null) return
@@ -509,7 +465,6 @@ export function useWidgetEditor({
         mRefreshSec,
         hCountryCodes,
         dRefreshSec,
-        dlRegion,
         reload,
     ])
 
@@ -520,13 +475,14 @@ export function useWidgetEditor({
 
         const snapshot = { ...editItem }
         const kind = widgetKind
-        const citySnapshot = wCity
+        const locationSnapshot = { ...wLocation, city: wCity.trim() }
         const symbolsSnapshot = [...mkSymbols]
         const clocksSnapshot = tzClocks.map((c) => ({ ...c }))
         const cPairsSnapshot = [...cPairs]
         const rssFeedsSnapshot = [...rssFeeds]
         const rssSizeSnapshot = rssSize
-        closeEditDialog()
+        setWidgetSaving(true)
+        setEditErr(null)
 
         const itemId = snapshot.id
 
@@ -534,7 +490,7 @@ export function useWidgetEditor({
             let description: string | null = null
 
             if (kind === 'weather') {
-                description = JSON.stringify({ city: citySnapshot.trim() })
+                description = JSON.stringify(locationSnapshot)
             } else if (kind === 'markets') {
                 const symbols = ensureFourMarketSymbols(symbolsSnapshot)
                 description = JSON.stringify({ symbols })
@@ -586,10 +542,13 @@ export function useWidgetEditor({
 
             widgetLastSavedDescRef.current = description
             await reload()
-        } catch {
-            // Save failed silently; the dialog is already closed.
+            closeEditDialog()
+        } catch (error) {
+            setEditErr(error instanceof Error ? error.message : 'failed')
+        } finally {
+            setWidgetSaving(false)
         }
-    }, [editItem, widgetKind, wCity, mkSymbols, tzClocks, closeEditDialog, reload])
+    }, [editItem, widgetKind, wCity, wLocation, mkSymbols, tzClocks, cPairs, rssFeeds, rssSize, closeEditDialog, reload])
 
     // ── saveItem (form submit for non-widget or widget form) ──────
     const saveItem = useCallback(async (e: FormEvent) => {
@@ -608,6 +567,7 @@ export function useWidgetEditor({
         if (isWidget && widgetKind) {
             if (widgetKind === 'weather') {
                 description = JSON.stringify({
+                    ...wLocation,
                     city: wCity.trim(),
                 })
             } else if (widgetKind === 'timezones') {
@@ -691,7 +651,7 @@ export function useWidgetEditor({
         } catch (e2) {
             setEditErr(e2 instanceof Error ? e2.message : 'failed')
         }
-    }, [isAdmin, editItem, editName, editDesc, editUrl, editIconMode, editIconUrl, editLucideIcon, fetchedIconResult, widgetKind, wCity, tzClocks, mShowCpu, mShowMem, mShowDisk, mShowNet, mRefreshSec, updateApp, closeEditDialog])
+    }, [isAdmin, editItem, editName, editDesc, editUrl, editIconMode, editIconUrl, editLucideIcon, fetchedIconResult, widgetKind, wCity, wLocation, tzClocks, mShowCpu, mShowMem, mShowDisk, mShowNet, mRefreshSec, updateApp, closeEditDialog])
 
     // ── return ────────────────────────────────────────────────────
     return {
@@ -719,6 +679,7 @@ export function useWidgetEditor({
         widgetSaving,
         wCity,
         setWCity,
+        pickWCity,
         setCityQuery,
         cityOptions: citySearch.options,
         mRefreshSec,
@@ -751,8 +712,6 @@ export function useWidgetEditor({
         setRssSize,
         cPairs,
         setCPairs,
-        dlRegion,
-        setDlRegion,
         openEditItem,
     }
 }

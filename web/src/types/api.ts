@@ -33,6 +33,8 @@ export interface IconResolve {
  */
 export interface GeocodeResult {
     displayName: string
+    lat?: number
+    lon?: number
 }
 
 export interface GeocodeResponse {

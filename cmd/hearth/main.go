@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morezhou/hearth/internal/server"
+	"github.com/morezhou/hearth/internal/widgets"
 )
 
 func main() {
@@ -22,6 +23,9 @@ func main() {
 	log.Printf("config storage (DataDir): %s", absDataDir)
 	log.Printf("icons cache: %s", filepath.Join(absDataDir, "icons"))
 	log.Printf("background cache: %s", filepath.Join(absDataDir, "cache"))
+	if err := widgets.ConfigurePersistence(filepath.Join(absDataDir, "widget-cache")); err != nil {
+		log.Fatalf("widget cache init: %v", err)
+	}
 
 	srv, err := server.New(cfg)
 	if err != nil {

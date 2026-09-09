@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui'
-import type { BackgroundProvider, Settings } from '../../types'
+import type { BackgroundProvider, Settings, WeatherSettings } from '../../types'
+import { CityPicker } from '../pickers/CityPicker'
+import { useCitySearch } from '../../hooks/useCitySearch'
+import { weatherLocation } from '../../utils/weatherLocation'
 
 interface CreateAppData {
     groupId: string | null
@@ -44,7 +47,12 @@ export function OnboardingWizard({
     )
     const [appName, setAppName] = useState('')
     const [appUrl, setAppUrl] = useState('')
-    const [weatherCity, setWeatherCity] = useState(settings?.weather?.city || '')
+    const [weather, setWeather] = useState<WeatherSettings>(settings?.weather || { city: '' })
+    const citySearch = useCitySearch({
+        enabled: open && step === 'weatherCity',
+        query: weather.city,
+        lang: language,
+    })
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -55,7 +63,7 @@ export function OnboardingWizard({
         if (!settings) return
         setLanguage((prev) => (prev === settings.language ? prev : settings.language === 'en' ? 'en' : 'zh'))
         setBgProvider((prev) => (prev === settings.background?.provider ? prev : settings.background?.provider || 'default'))
-        setWeatherCity((prev) => (prev ? prev : settings.weather?.city || ''))
+        setWeather((prev) => prev.city ? prev : settings.weather || { city: '' })
     }, [settings])
 
     const isLast = stepIdx === STEPS.length - 1
@@ -106,11 +114,11 @@ export function OnboardingWizard({
                     break
                 }
                 case 'weatherCity': {
-                    const city = weatherCity.trim()
-                    if (city && city !== settings.weather?.city) {
+                    const city = weather.city.trim()
+                    if (city) {
                         await onSaveSettings({
                             ...settings,
-                            weather: { ...(settings.weather ?? { city: '' }), city },
+                            weather: { ...weather, city },
                         })
                     }
                     break
@@ -211,12 +219,12 @@ export function OnboardingWizard({
                 <StepShell title={t('onboardingWeatherTitle')} hint={t('onboardingWeatherHint')}>
                     <label className="block text-sm">
                         <div className="mb-1 text-white/70">{t('onboardingWeatherCity')}</div>
-                        <input
-                            value={weatherCity}
-                            onChange={(e) => setWeatherCity(e.target.value)}
+                        <CityPicker
+                            value={weather.city}
+                            onChange={(city) => setWeather(weatherLocation(city))}
+                            onPick={(city, option) => setWeather(weatherLocation(city, option))}
+                            options={citySearch.options}
                             placeholder={t('onboardingWeatherPlaceholder')}
-                            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                            autoComplete="off"
                         />
                     </label>
                 </StepShell>

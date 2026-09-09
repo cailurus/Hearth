@@ -40,7 +40,6 @@
 - 📈 **Market Ticker** - US stocks, HK stocks, and crypto prices with intraday sparkline charts (Yahoo Finance)
 - 💱 **Currency Exchange** - Up to 4 currency pairs with 30-day history sparklines and flag emojis (Frankfurter API)
 - 📰 **RSS Feed** - Aggregate up to 10 RSS/Atom feeds with manual refresh, resizable height
-- 🎮 **Game Deals** - PC (CheapShark/Steam) and iOS (App Store) deals with prices, ratings, and direct store links
 - 🕐 **World Clock** - Up to 4 configurable timezone clocks
 - 📊 **System Metrics** - CPU, memory, disk, and network monitoring with historical charts (7-day retention)
 - 🐳 **Docker Monitoring** - Container status, resource usage, start/stop/restart actions
@@ -48,7 +47,7 @@
 - 📝 **Notes** - Quick notes and memos
 
 ### Personalization
-- 👋 **Greeting & Daily Quote** - Time-based greeting with a daily inspirational quote (ZenQuotes)
+- 👋 **Greeting & Daily Quote** - Time-based greeting with daily quotes (Hitokoto in Chinese, ZenQuotes in English)
 - 🗓️ **Solar Terms** - Optional Chinese 24 solar terms display next to date (toggleable)
 - 🎨 **Dynamic Backgrounds** - Bing daily, random, Unsplash, Picsum, or video backgrounds
 - 🌓 **Bilingual UI** - Chinese and English with full i18n
@@ -69,7 +68,7 @@ docker run -d \
   cailurus/hearth:latest
 ```
 
-Open `http://localhost:8787` and login with `admin` / `admin`.
+Open `http://localhost:8787` and log in as `admin`. Use `HEARTH_INITIAL_PASSWORD` if configured; otherwise find the generated first-run password in `docker logs hearth`.
 
 > The Docker socket mount (`-v /var/run/docker.sock:...`) is **optional** — it enables the Docker monitoring widget. Without it, all other features work normally.
 
@@ -115,11 +114,22 @@ docker logs hearth | head -20
 | `HEARTH_COOKIE_SECURE` | `auto` | Secure cookie flag (`auto` / `true` / `false`) |
 | `HEARTH_DOCKER_SOCKET` | auto-detect | Docker socket path (auto-detects common paths) |
 | `HEARTH_INITIAL_PASSWORD` | _(unset)_ | Initial admin password. If unset, a 16-char random password is generated and printed to stdout (visible via `docker logs`). |
+| `HEARTH_COINGECKO_API_KEY` | _(unset)_ | Optional CoinGecko Demo API key for crypto fallback/search. Kept on the server, never returned to the browser. Without it the existing anonymous fallback remains best-effort. Observe your provider quota; 429 responses are backed off rather than retried aggressively. |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated allowed cross-origin URLs. The default permits the bundled Vite dev server only; production deployments serve the frontend from the same origin and need no override unless using a separate domain. |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(unset)_ | Comma-separated regex allowlist for container names that may receive `start`/`stop`/`restart` actions. Empty = allow any container the daemon exposes. Example: `^(jellyfin|sonarr|radarr)$`. Mismatches are denied with 403 and recorded to the audit log. |
 | `HEARTH_DOCKER_LABEL_INTERVAL` | `30s` | Poll interval for `hearth.*`/`homepage.*` label discovery. `0s` (or `0`) disables the loop entirely. |
 | `HEARTH_TRUSTED_PROXY_HEADER` | _(unset)_ | Name of the header carrying the authenticated username when Hearth sits behind a forward-auth proxy (Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`). Common values: `X-Remote-User`, `Remote-User`. Requires `HEARTH_TRUSTED_PROXY_NETWORKS` to also be set; Hearth refuses to start otherwise. |
 | `HEARTH_TRUSTED_PROXY_NETWORKS` | _(unset)_ | Comma-separated CIDR list naming the proxy's source IPs. The proxy header is honored only when the request arrives from one of these networks — bypassing the proxy and hitting Hearth directly cannot forge the header. Example: `10.0.0.0/8,172.20.0.0/16`. |
+
+### Widget data and offline behavior
+
+- Widgets load independently. A failed refresh retains usable previous data and displays a warning instead of turning a provider failure into a zero price or an endless loading placeholder.
+- Weather, resolved locations, reference exchange rates, RSS metadata, annual holiday data and quotes use bounded snapshots under `$HEARTH_DATA_DIR/widget-cache`. The existing Docker data volume preserves them across restarts. Expired but usable snapshots are displayed while one background refresh runs; data beyond the retention limit is not presented as current.
+- A first visit without any usable snapshot still needs a successful provider response. Timeouts, partial results, pending refreshes and source timestamps are shown explicitly. Manual RSS refresh bypasses the fresh cache.
+- Picking a weather city saves its coordinates. Existing city-only configurations remain supported through a bounded, cached lookup that does not fetch timezone data before weather.
+- Frankfurter v1 provides working-day **reference rates**, not bank buy/sell quotes. Market prices retain their actual currency and provider observation time; they are not guaranteed live trading data. Yahoo/CoinGecko prices remain memory-only, and deployments must comply with provider data-use terms.
+- A verified 2026 Chinese holiday calendar is included for offline startup, with its source license and provenance. Annual data is updated in the background; unpublished future holidays are not invented.
+- Chinese daily quotes use Hitokoto; English quotes use ZenQuotes. Provider attribution remains visible. No paid provider or shared API credential is enabled automatically.
 
 <details>
 <summary><b>NAS Docker Monitoring Setup</b> (fnOS, Synology, etc.)</summary>

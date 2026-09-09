@@ -8,12 +8,13 @@ import { Modal } from '../ui/Modal'
 import { Spinner } from '../ui/Spinner'
 import { TimezonePicker } from '../pickers/TimezonePicker'
 import { apiPost, apiDownload } from '../../api'
-import type { Settings } from '../../types'
+import type { WeatherSettings } from '../../types'
+import type { SiteDraft } from '../../hooks/useSettingsDraft'
+import { CityPicker } from '../pickers/CityPicker'
+import { useCitySearch } from '../../hooks/useCitySearch'
+import { weatherLocation } from '../../utils/weatherLocation'
 
 type SettingsTab = 'general' | 'time' | 'background' | 'account' | 'data'
-
-// Use the same type as HomePage: Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language'>
-type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language' | 'greeting'>
 
 interface SettingsDialogProps {
     open: boolean
@@ -53,8 +54,19 @@ export function SettingsDialog({
     latestVersion,
     hasUpdate,
 }: SettingsDialogProps) {
-    const { t } = useTranslation(['settings', 'common'])
+    const { t } = useTranslation(['settings', 'common', 'widgets'])
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
+    const citySearch = useCitySearch({
+        enabled: open && settingsTab === 'general',
+        query: siteDraft?.weather.city || '',
+        lang: siteDraft?.language === 'en' ? 'en' : 'zh',
+    })
+    const changeWeather = (weather: WeatherSettings, timing: 'now' | 'debounce') => {
+        if (!siteDraft) return
+        const next = { ...siteDraft, weather }
+        setSiteDraft(next)
+        schedulePersistSiteDraft(next, timing)
+    }
 
     // Password change state (managed internally)
     const [oldPassword, setOldPassword] = useState('')
@@ -186,6 +198,17 @@ export function SettingsDialog({
                                     <option value="zh">{t('settings:languageChinese')}</option>
                                     <option value="en">{t('settings:languageEnglish')}</option>
                                 </select>
+                            </label>
+
+                            <label className="block text-sm">
+                                <div className="mb-1 text-white/70">{t('widgets:defaultWeatherCity')}</div>
+                                <CityPicker
+                                    value={siteDraft?.weather.city || ''}
+                                    onChange={(city) => changeWeather(weatherLocation(city), 'debounce')}
+                                    onPick={(city, option) => changeWeather(weatherLocation(city, option), 'now')}
+                                    options={citySearch.options}
+                                    placeholder={t('widgets:weatherCityPlaceholder')}
+                                />
                             </label>
 
                             <label className="flex items-center gap-2 text-sm text-white/80">

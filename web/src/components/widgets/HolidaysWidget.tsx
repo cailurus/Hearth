@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { HolidaysResponse } from '../../types'
 import { Spinner } from '../ui/Spinner'
+import { getWidgetStatus } from '../../utils/widgetStatus'
 
 interface HolidaysWidgetProps {
     data: HolidaysResponse | null
@@ -16,7 +17,7 @@ export function HolidaysWidget({ data, error }: HolidaysWidgetProps) {
 
     if (!data) {
         const msg = String(error || '').trim()
-        if (msg) return <div className="flex h-full items-center justify-center text-sm text-white/60">{msg}</div>
+        if (msg) return <div className="flex h-full items-center justify-center text-xs text-white/60">{t('unavailable')}</div>
         return <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
     }
 
@@ -32,6 +33,7 @@ export function HolidaysWidget({ data, error }: HolidaysWidgetProps) {
                 const label = (lang === 'zh' ? String(it.localName || '').trim() : '') || String(it.name || '').trim() || '—'
                 const country = String(it.country || '').trim().toUpperCase()
                 const date = String(it.date || '').trim()
+                const { source, sourceUrl } = getWidgetStatus(it)
                 const daysLabel =
                     days == null
                         ? '—'
@@ -43,7 +45,13 @@ export function HolidaysWidget({ data, error }: HolidaysWidgetProps) {
                     <div key={`${country}-${date}-${idx}`} className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                             <div className="truncate text-[11px] sm:text-[12px] font-medium leading-tight text-white/90">
-                                {label}
+                                {sourceUrl ? (
+                                    <a href={sourceUrl} target="_blank" rel="noopener noreferrer"
+                                        className="hover:underline focus-visible:underline"
+                                        title={source ? t('dataSource', { source }) : undefined}>
+                                        {label}
+                                    </a>
+                                ) : label}
                                 {country ? <span className="font-normal text-white/50"> · {country}</span> : null}
                             </div>
                         </div>
@@ -89,7 +97,7 @@ export const holidaysWidget = defineWidget<HolidaysConfig, HolidaysResponse>({
         const raw = Array.isArray(cfg.countries) ? cfg.countries : []
         const countries = normalizeCountryCodes(raw.map((x) => String(x ?? '')))
         if (countries.length === 0) {
-            return null as unknown as HolidaysResponse
+            return { fetchedAt: 0, items: [] }
         }
         const qs = new URLSearchParams({ countries: countries.join(',') })
         return apiGet<HolidaysResponse>(`/api/widgets/holidays?${qs.toString()}`, { signal })

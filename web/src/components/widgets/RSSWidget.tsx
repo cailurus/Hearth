@@ -29,6 +29,7 @@ function timeAgo(ts: number, lang: 'zh' | 'en'): string {
 }
 
 export function RSSWidget({ data, error, lang }: RSSWidgetProps) {
+    const { t } = useTranslation('widgets')
     if (!data && !error) {
         return (
             <div className="flex h-full items-center justify-center">
@@ -40,7 +41,7 @@ export function RSSWidget({ data, error, lang }: RSSWidgetProps) {
     if (error && !data) {
         return (
             <div className="flex h-full items-center justify-center text-xs text-white/40">
-                {error}
+                {t('unavailable')}
             </div>
         )
     }
@@ -101,7 +102,7 @@ export const rssWidget = defineWidget<RSSConfig, RSSResponse>({
     labelKey: 'widgets:rss',
     defaultConfig: RSS_DEFAULT_CONFIG,
     pollIntervalMs: 15 * 60 * 1000,
-    fetchData: async (cfg, signal) => {
+    fetchData: async (cfg, signal, options) => {
         const raw = Array.isArray(cfg.feeds) ? cfg.feeds : []
         const feeds = raw.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
         if (feeds.length === 0) {
@@ -109,6 +110,7 @@ export const rssWidget = defineWidget<RSSConfig, RSSResponse>({
         }
         const qs = new URLSearchParams()
         for (const f of feeds) qs.append('feed', f)
+        if (options?.force) qs.set('nocache', '1')
         return apiGet<RSSResponse>(`/api/widgets/rss?${qs.toString()}`, { signal })
     },
     Component: RSSView,

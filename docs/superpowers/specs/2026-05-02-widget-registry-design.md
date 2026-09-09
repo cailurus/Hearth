@@ -8,10 +8,10 @@
 
 ## 背景
 
-Hearth 前端目前有 10 种 widget kind(weather / metrics / timezones / markets / holidays / docker / notes / rss / currency / deals)。其中 8 种走网络拉取(weather / markets / holidays / metrics / docker / currency / deals / rss),累积形成 8 段几乎一样的 fetch 模板;timezones / notes 是无 fetch 的本地展示。它们以"复制粘贴扩展"的方式累积起来:
+Hearth 前端目前有 9 种 widget kind(weather / metrics / timezones / markets / holidays / docker / notes / rss / currency)。其中 7 种走网络拉取(weather / markets / holidays / metrics / docker / currency / rss),累积形成 7 段几乎一样的 fetch 模板;timezones / notes 是无 fetch 的本地展示。它们以"复制粘贴扩展"的方式累积起来:
 
 - `web/src/utils/constants.ts`:`WIDGET_KINDS` 字面量 union + `WIDGET_LABEL_KEYS` 手抄 i18n key 映射
-- `web/src/hooks/useWidgets.ts`:**8 段几乎一样的 fetch 模板**(filter→useState→useEffect→Promise.all→setState),共 ~536 行,绝大部分是结构性重复
+- `web/src/hooks/useWidgets.ts`:**7 段几乎一样的 fetch 模板**(filter→useState→useEffect→Promise.all→setState),绝大部分是结构性重复
 - `web/src/contexts/WidgetDataContext.tsx`:暴露 21 个独立字段(weatherById / weatherErrById / marketsById / marketsErrById / ...),每加一个 widget 就多 2-4 个字段
 - `web/src/components/layout/GroupBlock.tsx:328-395`:widget 渲染 if-else 长链,~70 行
 - `web/src/hooks/useWidgetEditor.ts:19`:`WidgetKind` union 又重复一遍
@@ -82,7 +82,7 @@ C2 解决这两个问题:把 widget 抽象成一份注册声明,让"加 widget"�
 
 ### 边界划分
 
-**进 registry**:weather / markets / holidays / docker / currency / deals / rss / notes / timezones — 共 9 个
+**进 registry**:weather / markets / holidays / docker / currency / rss / notes / timezones — 共 8 个
 
 **不进 registry,留 `useWidgets` 顶层**:
 - **defaultWeather**:用户没加 weather widget 但配了 `defaultCity` 时仍要拉的默认天气(现有行为保留)
@@ -103,13 +103,12 @@ C2 解决这两个问题:把 widget 抽象成一份注册声明,让"加 widget"�
   web/src/components/widgets/HolidaysWidget.tsx
   web/src/components/widgets/DockerWidget.tsx
   web/src/components/widgets/CurrencyWidget.tsx
-  web/src/components/widgets/DealsWidget.tsx
   web/src/components/widgets/RSSWidget.tsx
   web/src/components/widgets/NotesWidget.tsx
   web/src/components/widgets/TimezonesWidget.tsx
 
 修改(核心改造):
-  web/src/hooks/useWidgets.ts             # 8 段重复 fetch 模板 → 1 段通用循环 + 2 个例外
+  web/src/hooks/useWidgets.ts             # 7 段重复 fetch 模板 → 1 段通用循环 + 2 个例外
   web/src/contexts/WidgetDataContext.tsx  # 21 字段 → 4 字段(byId Map / defaultWeather / metrics / netRate)
   web/src/components/layout/GroupBlock.tsx # widget 渲染 if-else 链 → registry dispatch + metrics 特例
   web/src/utils/constants.ts              # WIDGET_KINDS / WIDGET_LABEL_KEYS 改为从 registry 推导
@@ -242,7 +241,6 @@ import { marketsWidget } from '../components/widgets/MarketsWidget'
 import { holidaysWidget } from '../components/widgets/HolidaysWidget'
 import { dockerWidget } from '../components/widgets/DockerWidget'
 import { currencyWidget } from '../components/widgets/CurrencyWidget'
-import { dealsWidget } from '../components/widgets/DealsWidget'
 import { rssWidget } from '../components/widgets/RSSWidget'
 import { notesWidget } from '../components/widgets/NotesWidget'
 import { timezonesWidget } from '../components/widgets/TimezonesWidget'
@@ -253,7 +251,6 @@ export const WIDGET_REGISTRY = [
   holidaysWidget,
   dockerWidget,
   currencyWidget,
-  dealsWidget,
   rssWidget,
   notesWidget,
   timezonesWidget,
@@ -446,7 +443,7 @@ catch (e) {
 
 | 维度 | 旧 | 新 | 评估 |
 |---|---|---|---|
-| useEffect 数量 | 8 个独立 | 1 通用 + 2 例外 | 更少 |
+| useEffect 数量 | 7 个独立 | 1 通用 + 2 例外 | 更少 |
 | Map 写操作 | 每 widget setObj({...}) | `new Map(prev).set(...)` | 8-15 实例量级 O(n) clone < 1ms,可忽略 |
 | Context value 引用稳定性 | 21 字段独立 useState,变化只波及 4 个 | byId Map 任一 slice 变化触发 Context 全消费方重渲染 | **退化点**(下文处理) |
 | GroupBlock 重渲染 | 21 props 任一变化触发 | byId Map 变化触发(配 React.memo + memo() 子组件减小波及面) | 持平或略好 |
@@ -471,22 +468,22 @@ return spec as unknown as WidgetSpec
 
 **总策略**:渐进迁移(LEGACY 路径与 registry 路径并存,逐个 widget 切过去,最后一笔删 LEGACY)
 
-### 阶段 1:基础设施 + 首刀(currency + deals)
+### 阶段 1:基础设施 + 首刀(currency)
 
 **单次 commit / 单个 PR**:
 1. 新建 `web/src/widgets/types.ts`(WidgetSpec + defineWidget 工厂)
-2. 新建 `web/src/widgets/registry.ts`(初始 tuple 含 currency + deals)+ `getWidget()` + `WIDGET_KINDS` 类型推导
+2. 新建 `web/src/widgets/registry.ts`(初始 tuple 含 currency)+ `getWidget()` + `WIDGET_KINDS` 类型推导
 3. 改 `web/src/api/index.ts`:`apiGet` 加 `{ signal?: AbortSignal }` 选项透传给 fetch(~10 行)
-4. 改 `useWidgets.ts`:加新的通用 useEffect(只处理 registry 命中的实例),旧的 currency/deals useEffect 加 early return(`if getWidget(kind) skip`),`UseWidgetsResult` 加 `byId` 字段(向上加,不删旧字段)
+4. 改 `useWidgets.ts`:加新的通用 useEffect(只处理 registry 命中的实例),旧的 currency useEffect 加 early return(`if getWidget(kind) skip`),`UseWidgetsResult` 加 `byId` 字段(向上加,不删旧字段)
 5. 改 `WidgetDataContext.tsx`:value 加 `byId` 字段,加 `useWidgetSlice(widgetId)` 辅助 hook
-6. 改 `CurrencyWidget.tsx` / `DealsWidget.tsx`:props 收敛到 4 个标准字段 + export `currencyWidget` / `dealsWidget` 的 `defineWidget` 结果
+6. 改 `CurrencyWidget.tsx`:props 收敛到 4 个标准字段 + export `currencyWidget` 的 `defineWidget` 结果
 7. 改 `GroupBlock.tsx`:加 `if (getWidget(widget)) return <spec.Component .../>` 优先于 if-else 链
 8. 改 `constants.ts`:`WIDGET_KINDS` / `WIDGET_LABEL_KEYS` 改为 `[...REGISTRY 推导, ...LEGACY_KINDS]` 合并形态
 
 **评估检查点**:
 - 实际 diff 大小:预期 ~+450 / -100,**> +700 时回 brainstorming 调整**
-- 真跑前端验证 currency / deals widget 仍正常显示
-- 编辑现有 currency / deals widget 配置后仍能保存(EditDialog 走旧路径,`description` JSON 应能被新 fetchData 读)
+- 真跑前端验证 currency widget 仍正常显示
+- 编辑现有 currency widget 配置后仍能保存(EditDialog 走旧路径,`description` JSON 应能被新 fetchData 读)
 - 浏览器 console 无未捕获错误
 
 ### 阶段 2:剩余 7 个 widget 逐个迁移
@@ -495,7 +492,7 @@ return spec as unknown as WidgetSpec
 
 | 顺序 | widget | 难度 | 备注 |
 |---|---|---|---|
-| 1 | holidays | 简单 | 形状跟 currency/deals 一致 |
+| 1 | holidays | 简单 | 形状跟 currency 一致 |
 | 2 | markets | 中 | 5 分钟轮询 + symbols 参数组装 |
 | 3 | docker | 中 | `pollIntervalMs: cfg => cfg.refreshSec * 1000` |
 | 4 | weather | 中 | per-instance fetch 走 registry,defaultWeather 留顶层 |

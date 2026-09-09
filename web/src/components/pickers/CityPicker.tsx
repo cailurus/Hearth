@@ -1,10 +1,11 @@
 import { ComboBox } from './ComboBox'
+import type { GeocodeResult } from '../../types'
 
 export interface CityPickerProps {
     value: string
     onChange: (v: string) => void
-    onPick?: (v: string) => void
-    options: string[]
+    onPick?: (v: string, option?: GeocodeResult) => void
+    options: Array<string | GeocodeResult>
     placeholder?: string
 }
 
@@ -19,15 +20,16 @@ export function CityPicker({
     placeholder,
 }: CityPickerProps) {
     return (
-        <ComboBox<string>
+        <ComboBox<string | GeocodeResult>
             value={value}
             onChange={onChange}
             options={options}
             placeholder={placeholder}
-            getOptionLabel={(s) => s}
+            getOptionLabel={(s) => typeof s === 'string' ? s : s.displayName}
             onPick={(s) => {
-                onChange(s)
-                onPick?.(s)
+                const label = typeof s === 'string' ? s : s.displayName
+                onChange(label)
+                onPick?.(label, typeof s === 'string' ? undefined : s)
             }}
         />
     )

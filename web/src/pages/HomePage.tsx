@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from '../i18n'
-import { apiPost, apiPut } from '../api'
+import { apiPost } from '../api'
 import { Cog, Search } from 'lucide-react'
 import type { Group, IconResolve, QuoteResponse } from '../types'
 import { apiGet } from '../api'
@@ -22,6 +22,7 @@ import { SettingsDialog, LoginDialog, CreateGroupDialog, AddItemDialog, ChangePa
 import { WidgetDataProvider } from '../contexts/WidgetDataContext'
 import { VpnModeProvider } from '../contexts/VpnModeContext'
 import { EditItemDialog } from '../components/dialogs/EditItemDialog'
+import { getWidgetStatus } from '../utils/widgetStatus'
 
 const ONBOARDED_KEY = 'hearth_onboarded_v1'
 import { SnowEffect } from '../components/effects/SnowEffect'
@@ -118,14 +119,61 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
     }
 
     // ── Daily quote ────────────────────────────────────────────
-    const [quote, setQuote] = useState<QuoteResponse | null>(null)
+    const [quoteState, setQuoteState] = useState<{ lang: 'zh' | 'en'; data: QuoteResponse | null; error: string | null; refreshing: boolean }>({
+        lang, data: null, error: null, refreshing: false,
+    })
+    const [quoteRefresh, setQuoteRefresh] = useState(0)
+    const quoteEnabled = !!settings && settings.greeting?.enabled !== false
+    const quote = quoteState.lang === lang ? quoteState.data : null
     useEffect(() => {
-        let cancelled = false
-        apiGet<QuoteResponse>('/api/widgets/quote')
-            .then((q) => { if (!cancelled) setQuote(q) })
-            .catch(() => {})
-        return () => { cancelled = true }
-    }, [])
+        if (!quoteEnabled) return
+        let disposed = false
+        let controller: AbortController | undefined
+        let pollTimer: number | undefined
+        let requestTimer: number | undefined
+        const load = async (force = false) => {
+            controller = new AbortController()
+            let timedOut = false
+            requestTimer = window.setTimeout(() => { timedOut = true; controller?.abort() }, 20_000)
+            setQuoteState((previous) => ({
+                lang, data: previous.lang === lang ? previous.data : null,
+                error: previous.lang === lang ? previous.error : null, refreshing: true,
+            }))
+            let delay = 60 * 60 * 1000
+            try {
+                const response = await apiGet<QuoteResponse>(`/api/widgets/quote?lang=${lang}${force ? '&refresh=1' : ''}`, { signal: controller.signal })
+                if (disposed) return
+                if (!response || typeof response.text !== 'string' || !response.text.trim()) {
+                    throw new Error(i18n.getFixedT(lang, 'widgets')('unavailable'))
+                }
+                const data = {
+                    ...response,
+                    source: response.source || (lang === 'zh' ? 'Hitokoto' : 'ZenQuotes'),
+                    sourceUrl: response.sourceUrl || (lang === 'zh' ? 'https://hitokoto.cn/' : 'https://zenquotes.io/'),
+                }
+                setQuoteState({ lang, data, error: null, refreshing: false })
+                const status = getWidgetStatus(data)
+                if (status.refreshing) delay = 2_000
+                else if (status.stale || status.warning) delay = 15_000
+            } catch (error) {
+                if (disposed) return
+                const message = timedOut ? i18n.getFixedT(lang, 'widgets')('requestTimeout')
+                    : error instanceof Error ? error.message : i18n.getFixedT(lang, 'widgets')('requestFailed')
+                setQuoteState((previous) => ({ lang, data: previous.lang === lang ? previous.data : null, error: message, refreshing: false }))
+                delay = 15_000
+            } finally {
+                window.clearTimeout(requestTimer)
+                if (!disposed) pollTimer = window.setTimeout(load, delay)
+            }
+        }
+        void load(quoteRefresh > 0)
+        return () => {
+            disposed = true
+            controller?.abort()
+            window.clearTimeout(requestTimer)
+            window.clearTimeout(pollTimer)
+        }
+    }, [lang, quoteEnabled, quoteRefresh])
 
     const systemTimezone = useMemo(() => {
         try {
@@ -140,7 +188,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         settings,
         isAdmin,
         systemTimezone,
-        onSave: async (s) => { await apiPut('/api/settings', s) },
+        onSave: actions.updateSettings,
     })
     const { draft: siteDraft, setDraft: setSiteDraft, saveError: siteSaveErr, saveDraft: schedulePersistSiteDraft } = settingsDraft
 
@@ -167,6 +215,8 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
         apps,
         lang,
         defaultCity: settings?.weather?.city,
+        defaultLat: settings?.weather?.lat,
+        defaultLon: settings?.weather?.lon,
     })
 
     // Background refresh favicons for custom apps in auto mode.
@@ -440,7 +490,11 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                                     >
                                         <h1 className="text-4xl font-semibold tracking-tight">{title}</h1>
                                         {settings?.greeting?.enabled !== false ? (
-                                            <Greeting now={now} username={me?.username} lang={lang} quote={quote} />
+                                            <Greeting now={now} username={me?.username} lang={lang} quote={quote}
+                                                quoteError={quoteState.lang === lang ? quoteState.error : null}
+                                                quoteRefreshing={quoteState.lang === lang && quoteState.refreshing}
+                                                refreshQuote={() => setQuoteRefresh((previous) => previous + 1)}
+                                            />
                                         ) : null}
                                         {settings?.time?.enabled ? (
                                             <div className="mt-3 flex items-center justify-center gap-3">
@@ -634,6 +688,7 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
                 onClose={() => closeDialog('addItem')}
                 groupId={addItemGroupId}
                 groupKind={addItemGroupKind}
+                defaultWeather={settings?.weather}
                 onSubmit={async (data) => {
                     await actions.createApp(data)
                 }}
@@ -656,7 +711,10 @@ export default function HomePage({ initialDialog }: { initialDialog?: 'login' } 
             <OnboardingWizard
                 open={onboardingOpen}
                 settings={settings}
-                onSaveSettings={actions.updateSettings}
+                onSaveSettings={async (next) => {
+                    await actions.updateSettings(next)
+                    setSiteDraft(null)
+                }}
                 onCreateApp={async (data) => { await actions.createApp(data) }}
                 onClose={dismissOnboarding}
             />

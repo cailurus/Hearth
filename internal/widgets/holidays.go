@@ -2,38 +2,56 @@ package widgets
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/morezhou/hearth/internal/cache"
 )
 
 type NextHoliday struct {
-	FetchedAt int64  `json:"fetchedAt"`
-	Country   string `json:"country"`
-	Date      string `json:"date"` // YYYY-MM-DD
-	Name      string `json:"name"`
-	LocalName string `json:"localName"`
-	DaysUntil int    `json:"daysUntil"`
+	DataStatus
+	FetchedAt    int64             `json:"fetchedAt"`
+	Country      string            `json:"country"`
+	Date         string            `json:"date"`
+	Name         string            `json:"name"`
+	LocalName    string            `json:"localName"`
+	DaysUntil    int               `json:"daysUntil"`
+	Source       string            `json:"source"`
+	SourceURL    string            `json:"sourceUrl"`
+	SourceErrors []FeedSourceError `json:"sourceErrors,omitempty"`
 }
 
 type HolidayItem struct {
 	Country   string `json:"country"`
-	Date      string `json:"date"` // YYYY-MM-DD
+	Date      string `json:"date"`
 	Name      string `json:"name"`
 	LocalName string `json:"localName"`
 	DaysUntil int    `json:"daysUntil"`
+	Source    string `json:"source"`
+	SourceURL string `json:"sourceUrl"`
+}
+
+type HolidaySource struct {
+	Source    string `json:"source"`
+	SourceURL string `json:"sourceUrl"`
 }
 
 type HolidaysResponse struct {
-	FetchedAt int64         `json:"fetchedAt"`
-	Items     []HolidayItem `json:"items"`
+	DataStatus
+	FetchedAt    int64             `json:"fetchedAt"`
+	Items        []HolidayItem     `json:"items"`
+	Sources      []HolidaySource   `json:"sources"`
+	SourceErrors []FeedSourceError `json:"sourceErrors,omitempty"`
 }
 
 type HolidayCountry struct {
@@ -47,22 +65,56 @@ type nagerHoliday struct {
 	Name      string `json:"name"`
 }
 
-var holidaysTTLCache = cache.New[[]nagerHoliday](12 * time.Hour)
+type holidayYearData struct {
+	Items     []nagerHoliday `json:"items"`
+	Published bool           `json:"published"`
+	HolidaySource
+}
 
-var holidayCountriesTTLCache = cache.New[[]HolidayCountry](7 * 24 * time.Hour)
+//go:embed data/holiday-cn/2026.json data/holiday-cn/LICENSE data/holiday-cn/provenance.json
+var bundledChinaHolidays embed.FS
+
+var holidayYearCache = newHolidayYearCache()
+var holidayCountriesTTLCache = newFeedCache[[]HolidayCountry](7*24*time.Hour, 365*24*time.Hour)
+var holidayFetchSlots = make(chan struct{}, 4)
+var bundledCalendarMu sync.Mutex
+
+func newHolidayYearCache() *cache.Cache[holidayYearData] {
+	return newFeedCache[holidayYearData](12*time.Hour, 2*365*24*time.Hour)
+}
+
+func ensureBundledChinaYear(year int) (bool, error) {
+	return seedChinaHolidayYear(holidayYearCache, bundledChinaHolidays, year)
+}
+
+func seedChinaHolidayYear(c *cache.Cache[holidayYearData], assets fs.FS, year int) (bool, error) {
+	if year != 2026 {
+		return false, nil
+	}
+	bundledCalendarMu.Lock()
+	defer bundledCalendarMu.Unlock()
+	if _, ok := c.GetStale(holidayYearKey("CN", year)); ok {
+		return false, nil
+	}
+	// Read persisted data first, then use the verified offline snapshot.
+	body, err := fs.ReadFile(assets, "data/holiday-cn/2026.json")
+	if err != nil {
+		return false, fmt.Errorf("read bundled China calendar: %w", err)
+	}
+	data, err := parseChinaHolidayYear(body, year)
+	if err != nil {
+		return false, fmt.Errorf("parse bundled China calendar: %w", err)
+	}
+	c.Set(holidayYearKey("CN", year), data)
+	return true, nil
+}
 
 func normalizeCountryCodes(codes []string) []string {
 	out := make([]string, 0, len(codes))
 	seen := map[string]bool{}
 	for _, raw := range codes {
 		c := strings.ToUpper(strings.TrimSpace(raw))
-		if len(c) != 2 {
-			continue
-		}
-		if c[0] < 'A' || c[0] > 'Z' || c[1] < 'A' || c[1] > 'Z' {
-			continue
-		}
-		if seen[c] {
+		if len(c) != 2 || c[0] < 'A' || c[0] > 'Z' || c[1] < 'A' || c[1] > 'Z' || seen[c] {
 			continue
 		}
 		seen[c] = true
@@ -72,23 +124,7 @@ func normalizeCountryCodes(codes []string) []string {
 }
 
 func parseISODateUTC(s string) (time.Time, error) {
-	parts := strings.Split(strings.TrimSpace(s), "-")
-	if len(parts) != 3 {
-		return time.Time{}, errors.New("invalid date")
-	}
-	y, err := time.Parse("2006", parts[0])
-	if err != nil {
-		return time.Time{}, errors.New("invalid year")
-	}
-	m, err := time.Parse("01", parts[1])
-	if err != nil {
-		return time.Time{}, errors.New("invalid month")
-	}
-	d, err := time.Parse("02", parts[2])
-	if err != nil {
-		return time.Time{}, errors.New("invalid day")
-	}
-	return time.Date(y.Year(), m.Month(), d.Day(), 0, 0, 0, 0, time.UTC), nil
+	return time.Parse("2006-01-02", strings.TrimSpace(s))
 }
 
 type chinaHolidayCN struct {
@@ -99,16 +135,6 @@ type chinaHolidayCN struct {
 		IsOffDay bool   `json:"isOffDay"`
 	} `json:"days"`
 }
-
-type holidayCandidate struct {
-	Country   string
-	Date      string
-	Name      string
-	LocalName string
-	Day       time.Time
-}
-
-var chinaOffDaysTTLCache = cache.New[[]nagerHoliday](30 * 24 * time.Hour)
 
 func chinaHolidayEnglishName(local string) string {
 	switch strings.TrimSpace(local) {
@@ -131,63 +157,104 @@ func chinaHolidayEnglishName(local string) string {
 	}
 }
 
-func fetchChinaOffDays(ctx context.Context, year int) ([]nagerHoliday, error) {
-	if year <= 0 {
-		return nil, errors.New("invalid year")
-	}
+func holidayYearKey(country string, year int) string {
+	return fmt.Sprintf("%s|%d", country, year)
+}
 
-	key := fmt.Sprintf("%d", year)
-	if cached, ok := chinaOffDaysTTLCache.Get(key); ok && len(cached) > 0 {
-		return cached, nil
+func holidayAttribution(country string) HolidaySource {
+	if country == "CN" {
+		return HolidaySource{"holiday-cn", "https://github.com/NateScarlet/holiday-cn"}
 	}
+	return HolidaySource{"Nager.Date", "https://date.nager.at/"}
+}
 
-	endpoint := fmt.Sprintf("https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/%d.json", year)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("holiday-cn: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
+func parseChinaHolidayYear(body []byte, year int) (holidayYearData, error) {
 	var payload chinaHolidayCN
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Year != year || payload.Days == nil {
+		return holidayYearData{}, errors.New("holiday-cn: invalid annual calendar")
 	}
-
-	out := make([]nagerHoliday, 0, len(payload.Days))
-	for _, d := range payload.Days {
-		if !d.IsOffDay {
-			continue
+	out := holidayYearData{Items: make([]nagerHoliday, 0), HolidaySource: holidayAttribution("CN")}
+	for _, day := range payload.Days {
+		date, err := parseISODateUTC(day.Date)
+		local := strings.TrimSpace(day.Name)
+		if err != nil || date.Year() < year-1 || date.Year() > year+1 || local == "" {
+			return holidayYearData{}, errors.New("holiday-cn: invalid holiday date or name")
 		}
-		local := strings.TrimSpace(d.Name)
-		date := strings.TrimSpace(d.Date)
-		if local == "" || date == "" {
-			continue
+		if day.IsOffDay {
+			out.Items = append(out.Items, nagerHoliday{
+				Date: date.Format("2006-01-02"), LocalName: local, Name: chinaHolidayEnglishName(local),
+			})
 		}
-		out = append(out, nagerHoliday{Date: date, LocalName: local, Name: chinaHolidayEnglishName(local)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Date < out[j].Date })
-
-	chinaOffDaysTTLCache.Set(key, out)
-
+	out.Published = len(out.Items) > 0
+	sort.Slice(out.Items, func(i, j int) bool { return out.Items[i].Date < out.Items[j].Date })
 	return out, nil
 }
 
-// UpcomingPublicHolidays returns the next N upcoming public holidays
-// across all provided countries, sorted by date.
+func fetchHolidayJSON(ctx context.Context, endpoint, source string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid provider URL", source)
+	}
+	req.Header.Set("User-Agent", "Hearth/1.0")
+	req.Header.Set("Accept", "application/json")
+	resp, err := DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: request failed", source)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: HTTP %d", source, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("%s: could not read response", source)
+	}
+	return body, nil
+}
+
+func fetchHolidayYear(ctx context.Context, country string, year int) (holidayYearData, error) {
+	if err := acquireFeedSlot(ctx, holidayFetchSlots); err != nil {
+		return holidayYearData{}, errors.New("calendar: request timed out")
+	}
+	defer func() { <-holidayFetchSlots }()
+	source := holidayAttribution(country)
+	endpoint := fmt.Sprintf("https://date.nager.at/api/v3/PublicHolidays/%d/%s", year, country)
+	if country == "CN" {
+		endpoint = fmt.Sprintf("https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/%d.json", year)
+	}
+	body, err := fetchHolidayJSON(ctx, endpoint, source.Source)
+	if err != nil {
+		return holidayYearData{}, err
+	}
+	if country == "CN" {
+		return parseChinaHolidayYear(body, year)
+	}
+	var items []nagerHoliday
+	if err := json.Unmarshal(body, &items); err != nil || items == nil {
+		return holidayYearData{}, errors.New("Nager.Date: invalid annual calendar")
+	}
+	for i := range items {
+		day, err := parseISODateUTC(items[i].Date)
+		items[i].Name = strings.TrimSpace(items[i].Name)
+		items[i].LocalName = strings.TrimSpace(items[i].LocalName)
+		if err != nil || day.Year() < year-1 || day.Year() > year+1 || (items[i].Name == "" && items[i].LocalName == "") {
+			return holidayYearData{}, errors.New("Nager.Date: invalid holiday date or name")
+		}
+		items[i].Date = day.Format("2006-01-02")
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Date < items[j].Date })
+	return holidayYearData{Items: items, Published: len(items) > 0, HolidaySource: source}, nil
+}
+
+// UpcomingPublicHolidays derives countdowns from annual snapshots on every call.
 func UpcomingPublicHolidays(ctx context.Context, countryCodes []string, now time.Time, limit int) (HolidaysResponse, error) {
 	cc := normalizeCountryCodes(countryCodes)
 	if len(cc) == 0 {
 		return HolidaysResponse{}, errors.New("countries required")
+	}
+	if len(cc) > 20 {
+		return HolidaysResponse{}, errors.New("at most 20 holiday countries supported")
 	}
 	if limit <= 0 {
 		limit = 3
@@ -195,242 +262,145 @@ func UpcomingPublicHolidays(ctx context.Context, countryCodes []string, now time
 	if limit > 10 {
 		limit = 10
 	}
-
 	nowUTC := now.UTC()
 	today := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
-	years := []int{today.Year(), today.Year() + 1}
-
-	cands := make([]holidayCandidate, 0, 64)
-
+	loads := make([]feedLoad[holidayYearData], 0, len(cc)*2)
 	for _, country := range cc {
-		for _, year := range years {
-			var list []nagerHoliday
-			var err error
+		for _, year := range []int{today.Year(), today.Year() + 1} {
+			seeded := false
 			if country == "CN" {
-				list, err = fetchChinaOffDays(ctx, year)
-			} else {
-				list, err = fetchNagerPublicHolidays(ctx, year, country)
-			}
-			if err != nil {
-				continue
-			}
-			for _, h := range list {
-				day, err := parseISODateUTC(h.Date)
+				var err error
+				seeded, err = ensureBundledChinaYear(year)
 				if err != nil {
-					continue
+					slog.Warn("cannot load bundled holiday calendar", "year", year, "error", err)
 				}
-				if day.Before(today) {
-					continue
-				}
-				cands = append(cands, holidayCandidate{Country: country, Date: h.Date, Name: h.Name, LocalName: h.LocalName, Day: day})
 			}
+			loads = append(loads, feedLoad[holidayYearData]{
+				key:     holidayYearKey(country, year),
+				source:  fmt.Sprintf("%s (%s %d)", holidayAttribution(country).Source, country, year),
+				refresh: seeded,
+				loader: func(ctx context.Context) (holidayYearData, error) {
+					data, err := fetchHolidayYear(ctx, country, year)
+					if err == nil && !data.Published {
+						if old, ok := holidayYearCache.GetStale(holidayYearKey(country, year)); ok && old.Published {
+							return holidayYearData{}, errors.New("annual calendar not yet published")
+						}
+					}
+					return data, err
+				},
+			})
 		}
 	}
-
-	if len(cands) == 0 {
-		return HolidaysResponse{}, errors.New("no upcoming holiday")
-	}
-
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].Day.Equal(cands[j].Day) {
-			if cands[i].Country == cands[j].Country {
-				if cands[i].Name == cands[j].Name {
-					return cands[i].LocalName < cands[j].LocalName
-				}
-				return cands[i].Name < cands[j].Name
-			}
-			return cands[i].Country < cands[j].Country
+	results := loadFeedSources(ctx, holidayYearCache, loads, false)
+	out := HolidaysResponse{Items: make([]HolidayItem, 0), Sources: make([]HolidaySource, 0)}
+	candidates := make([]HolidayItem, 0, 64)
+	seenSources := map[string]bool{}
+	anyOK := false
+	for i, result := range results {
+		mergeFeedStatus(&out.DataStatus, &out.FetchedAt, result.state)
+		source := holidayAttribution(cc[i/2])
+		if !seenSources[source.Source] {
+			out.Sources = append(out.Sources, source)
+			seenSources[source.Source] = true
 		}
-		return cands[i].Day.Before(cands[j].Day)
+		err := result.err
+		if result.state.Err != nil {
+			err = result.state.Err
+		}
+		if !result.state.FetchedAt.IsZero() {
+			if !result.value.Published {
+				err = errors.New("annual calendar not yet published")
+			} else {
+				anyOK = true
+			}
+			for _, holiday := range result.value.Items {
+				day, parseErr := parseISODateUTC(holiday.Date)
+				if parseErr != nil || day.Before(today) {
+					continue
+				}
+				candidates = append(candidates, HolidayItem{
+					Country: cc[i/2], Date: holiday.Date, Name: holiday.Name, LocalName: holiday.LocalName,
+					DaysUntil: int(day.Sub(today).Hours() / 24), Source: source.Source, SourceURL: source.SourceURL,
+				})
+			}
+		}
+		if err != nil {
+			out.SourceErrors = append(out.SourceErrors, FeedSourceError{loads[i].source, err.Error()})
+		}
+	}
+	if len(out.SourceErrors) > 0 {
+		out.Warning = "some annual calendars are unavailable"
+	}
+	if !anyOK {
+		return out, errors.New("no usable annual calendars")
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if a.Date != b.Date {
+			return a.Date < b.Date
+		}
+		if a.Country != b.Country {
+			return a.Country < b.Country
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.LocalName < b.LocalName
 	})
-
-	// De-dup by holiday event per country (country+name/localName):
-	// keeps the earliest upcoming date for each event (important for multi-day holidays).
+	// Keep the earliest upcoming day of each event, including multi-day holidays.
 	seen := map[string]bool{}
-	out := HolidaysResponse{FetchedAt: time.Now().Unix(), Items: make([]HolidayItem, 0, limit)}
-	for _, c := range cands {
-		k := c.Country + "|" + c.Name + "|" + c.LocalName
-		if seen[k] {
+	for _, candidate := range candidates {
+		key := candidate.Country + "|" + candidate.Name + "|" + candidate.LocalName
+		if seen[key] {
 			continue
 		}
-		seen[k] = true
-		days := int(c.Day.Sub(today).Hours() / 24)
-		if days < 0 {
-			days = 0
-		}
-		out.Items = append(out.Items, HolidayItem{
-			Country:   c.Country,
-			Date:      c.Date,
-			Name:      c.Name,
-			LocalName: c.LocalName,
-			DaysUntil: days,
-		})
+		seen[key] = true
+		out.Items = append(out.Items, candidate)
 		if len(out.Items) >= limit {
 			break
 		}
 	}
-
 	if len(out.Items) == 0 {
-		return HolidaysResponse{}, errors.New("no upcoming holiday")
+		return out, errors.New("no upcoming holiday in available calendars")
 	}
 	return out, nil
 }
 
-// ListHolidayCountries returns available country codes (cached).
 func ListHolidayCountries(ctx context.Context) ([]HolidayCountry, error) {
-	const cacheKey = "countries"
-	if cached, ok := holidayCountriesTTLCache.Get(cacheKey); ok && len(cached) > 0 {
-		return cached, nil
-	}
-
-	endpoint := "https://date.nager.at/api/v3/AvailableCountries"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("nagerdate countries: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var payload []struct {
-		CountryCode string `json:"countryCode"`
-		Name        string `json:"name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	out := make([]HolidayCountry, 0, len(payload))
-	for _, c := range payload {
-		code := strings.ToUpper(strings.TrimSpace(c.CountryCode))
-		name := strings.TrimSpace(c.Name)
-		if len(code) != 2 {
-			continue
+	list, _, err := holidayCountriesTTLCache.Load(ctx, "countries", func(ctx context.Context) ([]HolidayCountry, error) {
+		body, err := fetchHolidayJSON(ctx, "https://date.nager.at/api/v3/AvailableCountries", "Nager.Date")
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, HolidayCountry{Code: code, Name: name})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Code == out[j].Code {
-			return out[i].Name < out[j].Name
+		var payload []struct {
+			CountryCode string `json:"countryCode"`
+			Name        string `json:"name"`
 		}
-		return out[i].Code < out[j].Code
+		if err := json.Unmarshal(body, &payload); err != nil || len(payload) == 0 {
+			return nil, errors.New("Nager.Date: invalid country list")
+		}
+		out := make([]HolidayCountry, 0, len(payload))
+		for _, country := range payload {
+			codes := normalizeCountryCodes([]string{country.CountryCode})
+			if len(codes) != 1 || strings.TrimSpace(country.Name) == "" {
+				return nil, errors.New("Nager.Date: invalid country")
+			}
+			out = append(out, HolidayCountry{Code: codes[0], Name: strings.TrimSpace(country.Name)})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+		return out, nil
 	})
-
-	holidayCountriesTTLCache.Set(cacheKey, out)
-
-	return out, nil
+	return list, err
 }
 
-// NextPublicHoliday returns the next upcoming public holiday.
-// When multiple countries are provided, returns the earliest upcoming holiday among them.
 func NextPublicHoliday(ctx context.Context, countryCodes []string, now time.Time) (NextHoliday, error) {
-	cc := normalizeCountryCodes(countryCodes)
-	if len(cc) == 0 {
-		return NextHoliday{}, errors.New("countries required")
-	}
-
-	nowUTC := now.UTC()
-	today := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
-	years := []int{today.Year(), today.Year() + 1}
-
-	type candidate struct {
-		Country string
-		H       nagerHoliday
-		Day     time.Time
-	}
-	var best *candidate
-
-	for _, country := range cc {
-		for _, year := range years {
-			var list []nagerHoliday
-			var err error
-			if country == "CN" {
-				list, err = fetchChinaOffDays(ctx, year)
-			} else {
-				list, err = fetchNagerPublicHolidays(ctx, year, country)
-			}
-			if err != nil {
-				continue
-			}
-			for _, h := range list {
-				day, err := parseISODateUTC(h.Date)
-				if err != nil {
-					continue
-				}
-				if day.Before(today) {
-					continue
-				}
-				if best == nil || day.Before(best.Day) {
-					copyH := h
-					copyCountry := country
-					best = &candidate{Country: copyCountry, H: copyH, Day: day}
-				}
-			}
-		}
-	}
-
-	if best == nil {
-		return NextHoliday{}, errors.New("no upcoming holiday")
-	}
-
-	days := int(best.Day.Sub(today).Hours() / 24)
-	if days < 0 {
-		days = 0
-	}
-
-	return NextHoliday{
-		FetchedAt: time.Now().Unix(),
-		Country:   best.Country,
-		Date:      best.H.Date,
-		Name:      best.H.Name,
-		LocalName: best.H.LocalName,
-		DaysUntil: days,
-	}, nil
-}
-
-func fetchNagerPublicHolidays(ctx context.Context, year int, country string) ([]nagerHoliday, error) {
-	country = strings.ToUpper(strings.TrimSpace(country))
-	if country == "" || year <= 0 {
-		return nil, errors.New("invalid country/year")
-	}
-	key := fmt.Sprintf("%s|%d", country, year)
-
-	if cached, ok := holidaysTTLCache.Get(key); ok && len(cached) > 0 {
-		return cached, nil
-	}
-
-	endpoint := fmt.Sprintf("https://date.nager.at/api/v3/PublicHolidays/%d/%s", year, country)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	result, err := UpcomingPublicHolidays(ctx, countryCodes, now, 1)
+	out := NextHoliday{DataStatus: result.DataStatus, FetchedAt: result.FetchedAt, SourceErrors: result.SourceErrors}
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	req.Header.Set("User-Agent", "Hearth/0.1")
-
-	resp, err := DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("nagerdate: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	var list []nagerHoliday
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, err
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Date < list[j].Date })
-
-	holidaysTTLCache.Set(key, list)
-
-	return list, nil
+	item := result.Items[0]
+	out.Country, out.Date, out.Name, out.LocalName = item.Country, item.Date, item.Name, item.LocalName
+	out.DaysUntil, out.Source, out.SourceURL = item.DaysUntil, item.Source, item.SourceURL
+	return out, nil
 }

@@ -4,6 +4,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { apiGet } from '../api'
+import type { GeocodeResult, GeocodeResponse } from '../types'
+import { weatherCoordinates } from '../utils/weatherLocation'
 
 interface UseCitySearchOptions {
     enabled: boolean
@@ -13,7 +15,7 @@ interface UseCitySearchOptions {
 }
 
 interface UseCitySearchResult {
-    options: string[]
+    options: GeocodeResult[]
     loading: boolean
     clear: () => void
 }
@@ -24,36 +26,44 @@ export function useCitySearch({
     lang,
     debounceMs = 250,
 }: UseCitySearchOptions): UseCitySearchResult {
-    const [options, setOptions] = useState<string[]>([])
+    const [options, setOptions] = useState<GeocodeResult[]>([])
     const [loading, setLoading] = useState(false)
     const seqRef = useRef(0)
 
     useEffect(() => {
+        const seq = ++seqRef.current
         if (!enabled) {
             setOptions([])
-            seqRef.current = 0
+            setLoading(false)
             return
         }
 
         const trimmed = (query || '').trim()
         if (!trimmed) {
             setOptions([])
+            setLoading(false)
             return
         }
 
-        const seq = ++seqRef.current
+        const controller = new AbortController()
         setLoading(true)
 
         const timer = window.setTimeout(async () => {
             try {
-                const res = await apiGet<{ results: Array<{ displayName: string }> }>(
-                    `/api/widgets/geocode?${new URLSearchParams({ query: trimmed, lang }).toString()}`
+                const res = await apiGet<GeocodeResponse>(
+                    `/api/widgets/geocode?${new URLSearchParams({ query: trimmed, lang }).toString()}`,
+                    { signal: controller.signal },
                 )
 
                 if (seq !== seqRef.current) return
 
-                const next = (res?.results || []).map((x) => x.displayName).filter(Boolean)
-                setOptions(Array.from(new Set(next)).slice(0, 12))
+                const unique = new Map<string, GeocodeResult>()
+                for (const result of res?.results || []) {
+                    if (result.displayName && !unique.has(result.displayName)) {
+                        unique.set(result.displayName, { displayName: result.displayName, ...weatherCoordinates(result) })
+                    }
+                }
+                setOptions([...unique.values()].slice(0, 12))
             } catch {
                 if (seq !== seqRef.current) return
                 setOptions([])
@@ -64,12 +74,17 @@ export function useCitySearch({
             }
         }, debounceMs)
 
-        return () => window.clearTimeout(timer)
+        return () => {
+            window.clearTimeout(timer)
+            controller.abort()
+            seqRef.current++
+        }
     }, [enabled, query, lang, debounceMs])
 
     const clear = () => {
         setOptions([])
-        seqRef.current = 0
+        setLoading(false)
+        seqRef.current++
     }
 
     return { options, loading, clear }

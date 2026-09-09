@@ -1,5 +1,29 @@
 # Hearth Code Fix - Progress Tracker
 
+## 2026-09-09 数据加载可靠性与组件精简
+
+- [x] 删除已退役组件的全部入口、实现、类型、翻译和文档，处理旧数据与备份兼容。
+- [x] 实现请求合并、有界后台刷新、可持久化的有效缓存和明确的过期/错误状态。
+- [x] 修复天气坐标复用、地理编码等待与错误传播。
+- [x] 修复汇率/行情错误处理、币种、数据时间和请求调度。
+- [x] 改进 RSS 分源缓存与手动刷新、假日本地数据、一言语言和来源署名。
+- [x] 完成前后端状态展示与配置对接，保留免 Key 默认使用方式。
+- [x] 通过 Go 测试、前端构建/现有检查及慢请求浏览器验证。
+- [ ] 提交并正常推送当前分支，检查远端一致；不直接改动线上部署。
+
+### 验收标准
+
+已有有效缓存时不等待外部请求即可显示；首次无缓存失败须明确报错，不能把零值或空列表当成成功。各组件独立加载，部分失败保留可用数据。旧配置升级和导入后不能重新出现已退役组件。所有新增数据状态必须有中英文本，并保留数据源要求的署名。
+
+### 验收记录
+
+- `go test -race ./internal/cache ./internal/widgets ./internal/store ./internal/server` 通过。
+- 前端 build、i18n parity、widget registry（8 个注册项 + 独立系统监控）、显示/坐标和网络 smoke tests、定向 ESLint 通过。
+- 浏览器确认刷新失败保留天气、可重试、港股显示 HKD、失败货币对明确不可用、RSS 强制刷新以及添加菜单中的组件精简。
+- 独立本机实例实测：重启后天气快照约 70ms，真实 USD-CNY 请求约 1.4s，内置中国假日约 24ms。
+- 复核已修正参考汇率周末起始日归一化、备用行情源的超时预算、重试按钮状态和系统指标时间单位。
+- 仅保留旧协议标识的迁移/拒绝兼容代码和回归测试，不保留已退役功能实现。未改动线上部署，也未创建发布标签。
+
 ---
 
 ## 2026-05-03 会话恢复指引(下次进来先看这里)
@@ -15,7 +39,7 @@
 | `WidgetDataContext` 字段 | 21 个 | 4 个(byId Map + 2 carve-out) |
 | 加新 widget 改动面 | 7 处 / 4 文件 | 1 新文件 + registry 加 1 行 |
 
-**架构**:`widgets/registry.ts` 是 9 个 widget 的 `as const` tuple;`metrics` 走 GroupBlock 内联渲染 carve-out;`defaultWeather` 走 useWidgets 顶层 carve-out。新增 `npm run check:widgets` lint 脚本。
+**架构**:`widgets/registry.ts` 是 8 个 widget 的 `as const` tuple;`metrics` 走 GroupBlock 内联渲染 carve-out;`defaultWeather` 走 useWidgets 顶层 carve-out。新增 `npm run check:widgets` lint 脚本。
 
 **还剩 5 项**(按推荐 ROI 排序):
 
@@ -225,7 +249,7 @@
 ## C. 前端架构 (重构,不紧急但越拖越贵)
 
 - [x] **C1** 🟠 · `L` · `web/src/pages/HomePage.tsx`(~640 行)、`web/src/hooks/useWidgets.ts`
-  - HomePage 充当"全局数据总线",把 weather/markets/docker/rss/currency/deals 等 ~20 个数据对象 props 钻透到 `GroupBlock`(props 接口约 59 个字段)。任何 widget 数据变化都会重渲染整棵树。
+  - HomePage 充当"全局数据总线",把 weather/markets/docker/rss/currency 等数据对象 props 钻透到 `GroupBlock`。任何 widget 数据变化都会重渲染整棵树。
   - 拆出 `WidgetDataContext`(或 Zustand 单 store),按 widget id 切片;`GroupBlock` 用 `React.memo`。
 
 - [x] **C2** 🟠 · `L` · `web/src/components/layout/GroupBlock.tsx:203-520`
@@ -439,8 +463,8 @@
 - **B4** SQLite 单连接模式扩展注释:解释 WAL 单写者语义 + 链接 SQLite 文档,防止后续 PR 误改成连接池
 - **B2** Schema-evolution helper:`Store.hasColumn(table, column)` 用 `PRAGMA table_info` 查询;`addColumnIfMissing(table, column, def)` 替代 3 处 `strings.Contains(err.Error(), "duplicate")` 字符串匹配
 - **B1** 路由超时分级:删全局 `r.Use(middleware.Timeout(30s))`(`context.WithTimeout` 只能缩短不能延长,所以全局短上限会让慢路由卡住)。改成两个 chi.Router.Group:fast=10s(SQLite CRUD、缓存读、Docker socket、metrics history),slow=60s(所有 widgets/* + icon/resolve + background/refresh)
-- **B3** 外部 API 参数白名单:新建 `internal/server/validation.go` 提供 `validLang`(`^[a-z]{2}(-[A-Z]{2})?$`)和 `validRegion`(`^[a-z]{2}$`)。weather 三个 handler 的 `lang`、deals `region` 走白名单,非法值返回到 fallback 而非透传给上游
-- **A7** 全局 slog 统一:`internal/server/handlers_background.go`(15+ 处)、`handlers_metrics.go`、`handlers_feeds.go`、`internal/widgets/deals.go` 的 `log.Printf` 全部替换为 `slog.Warn/Debug/Info`,且都带结构化字段(provider、source、url、error)。可被 Loki/ELK 按级别过滤
+- **B3** 外部 API 参数白名单:新建 `internal/server/validation.go` 提供 `validLang`(`^[a-z]{2}(-[A-Z]{2})?$`)。weather 三个 handler 的 `lang` 走白名单,非法值返回到 fallback 而非透传给上游
+- **A7** 全局 slog 统一:`internal/server/handlers_background.go`(15+ 处)、`handlers_metrics.go`、`handlers_feeds.go` 的 `log.Printf` 全部替换为 `slog.Warn/Debug/Info`,且都带结构化字段(provider、source、url、error)。可被 Loki/ELK 按级别过滤
 - **A6** 背景图 stale-cache 兜底:重写 `handleGetBackgroundImage`,缓存到期时把过期文件路径记到 `staleFile`,后续 `resolveBackgroundURL`/`FetchToFile` 任一失败即调 `serveStaleOrDefault`(优先 stale,再退到 bundled default)。Bing/Unsplash 抖动时用户看到的是昨天的照片而不是占位图
 
 ### 已知偏离/待跟进 (更新)

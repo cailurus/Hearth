@@ -5,7 +5,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import type { Settings } from '../types'
 
-export type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language' | 'greeting'>
+export type SiteDraft = Pick<Settings, 'siteTitle' | 'background' | 'time' | 'language' | 'greeting' | 'weather'>
 
 interface UseSettingsDraftOptions {
     settings: Settings | null
@@ -56,6 +56,7 @@ export function useSettingsDraft({
             background: { ...settings.background, provider, interval },
             time: settings.time ? { ...settings.time, timezone: systemTimezone } : settings.time,
             greeting: settings.greeting ?? { enabled: true },
+            weather: settings.weather ?? { city: '' },
         })
     }, [settings, draft, systemTimezone])
 
@@ -82,6 +83,7 @@ export function useSettingsDraft({
                     background: draftToSave.background,
                     time: normalizedTime,
                     greeting: draftToSave.greeting,
+                    weather: { ...draftToSave.weather, city: draftToSave.weather.city.trim() },
                 }
 
                 await onSave(next)

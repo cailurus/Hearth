@@ -44,9 +44,11 @@ func (s *Server) handleGetMarkets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	symbols := splitCSVish(raw)
-	res, err := widgets.FetchMarkets(r.Context(), symbols)
+	ctx := widgets.WithCoinGeckoAPIKey(r.Context(), s.cfg.CoinGeckoAPIKey)
+	force := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("nocache") == "1"
+	res, err := widgets.FetchMarkets(ctx, symbols, force)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
@@ -57,10 +59,14 @@ func (s *Server) handleSearchMarkets(w http.ResponseWriter, r *http.Request) {
 	if q == "" {
 		q = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
-	list, err := widgets.SearchMarketSymbols(r.Context(), q, 12)
+	ctx := widgets.WithCoinGeckoAPIKey(r.Context(), s.cfg.CoinGeckoAPIKey)
+	list, err := widgets.SearchMarketSymbols(ctx, q, 12)
 	if err != nil {
-		// Search should be resilient; return empty results on upstream failures.
-		writeJSON(w, http.StatusOK, map[string]any{"results": []any{}})
+		if len(list) == 0 {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": list, "warning": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": list})

@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiGet } from '../api'
+import i18n from '../i18n'
 import type { AppItem, Weather, HostMetrics } from '../types'
 import { safeParseJSON, widgetKindFromUrl } from '../utils'
 import { getWidget } from '../widgets/registry'
 import type { WidgetSlice } from '../widgets/types'
+import { getWidgetStatus } from '../utils/widgetStatus'
 
 export interface UseWidgetsResult {
-    /** Per-instance fetch state for all registry widgets. */
     byId: Map<string, WidgetSlice>
-    /** Default-city weather (when user configured defaultCity but added no weather widget). */
     weather: Weather | null
     weatherErr: string | null
-    /** Host metrics — shared across all metrics widget instances. */
     metrics: HostMetrics | null
-    /** Network rate derived from metrics samples. */
+    metricsErr: string | null
     netRate: { upBps: number; downBps: number } | null
 }
 
@@ -21,213 +20,219 @@ interface UseWidgetsOptions {
     apps: AppItem[]
     lang: 'zh' | 'en'
     defaultCity?: string
+    defaultLat?: number
+    defaultLon?: number
 }
 
-/**
- * Hook for managing widget data fetching.
- *
- * The 8 LEGACY per-widget useEffects (weather/markets/holidays/docker/
- * currency/deals/rss) are gone — the generic registry loop replaces them
- * for any kind in WIDGET_REGISTRY. Two carve-outs remain:
- *  - defaultWeather: pulls weather for `defaultCity` even when the user
- *    has no weather widget instance.
- *  - metrics: shared-interval polling + cpu%/network-rate derivation.
- *    Stays inline because metrics is rendered as inline JSX in
- *    GroupBlock, not as a registry component.
- */
-export function useWidgets({ apps, lang, defaultCity }: UseWidgetsOptions): UseWidgetsResult {
-    const [byId, setById] = useState<Map<string, WidgetSlice>>(() => new Map())
+interface ActiveWidget {
+    key: string
+    configKey: string
+    dispose: () => void
+}
 
+function configObject(value: unknown): object {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+export function useWidgets({ apps, lang, defaultCity, defaultLat, defaultLon }: UseWidgetsOptions): UseWidgetsResult {
+    const [byId, setById] = useState<Map<string, WidgetSlice>>(() => new Map())
+    const activeRef = useRef(new Map<string, ActiveWidget>())
     const [weather, setWeather] = useState<Weather | null>(null)
     const [weatherErr, setWeatherErr] = useState<string | null>(null)
-
     const [metrics, setMetrics] = useState<HostMetrics | null>(null)
+    const [metricsErr, setMetricsErr] = useState<string | null>(null)
     const [netRate, setNetRate] = useState<{ upBps: number; downBps: number } | null>(null)
     const lastMetricsRef = useRef<HostMetrics | null>(null)
 
-    // Generic registry-driven fetch loop. Handles every widget kind in
-    // WIDGET_REGISTRY (currently 9 of the 10 kinds — metrics is the
-    // carve-out further down).
     useEffect(() => {
-        const controllers = new Map<string, AbortController>()
-        const timers = new Map<string, number>()
+        const active = activeRef.current
+        const liveIDs = new Set<string>()
 
-        type Inst = { id: string; kind: string; spec: NonNullable<ReturnType<typeof getWidget>>; cfg: unknown }
-        const instances: Inst[] = []
-        for (const a of apps) {
-            const kind = widgetKindFromUrl(a.url)
-            if (!kind) continue
-            const spec = getWidget(kind)
-            if (!spec) continue
-            const cfg = { ...(spec.defaultConfig as object), ...((safeParseJSON(a.description) as object | null) ?? {}) }
-            instances.push({ id: a.id, kind, spec, cfg })
-        }
+        for (const app of apps) {
+            const kind = widgetKindFromUrl(app.url)
+            const spec = kind ? getWidget(kind) : undefined
+            if (!kind || !spec?.fetchData) continue
+            const fetchData = spec.fetchData
+            liveIDs.add(app.id)
+            const cfg = { ...configObject(spec.defaultConfig), ...configObject(safeParseJSON(app.description)) }
+            const configKey = JSON.stringify([kind, cfg])
+            const key = `${lang}:${configKey}`
+            const previous = active.get(app.id)
+            if (previous?.key === key) continue
+            previous?.dispose()
 
-        // Drop any byId entries for apps that no longer exist.
-        setById((prev) => {
-            const liveIds = new Set(instances.map((i) => i.id))
-            let dirty = false
-            const next = new Map(prev)
-            for (const id of prev.keys()) {
-                if (!liveIds.has(id)) {
-                    next.delete(id)
-                    dirty = true
-                }
-            }
-            return dirty ? next : prev
-        })
+            let disposed = false
+            let controller: AbortController | null = null
+            let timer: number | undefined
+            const rawInterval = spec.pollIntervalMs
+            const interval = typeof rawInterval === 'function' ? rawInterval(cfg) : rawInterval
+            const baseInterval = typeof interval === 'number' && interval > 0 ? interval : undefined
 
-        for (const inst of instances) {
-            const fetchOnce = async () => {
-                if (!inst.spec.fetchData) return
-                controllers.get(inst.id)?.abort()
-                const ctrl = new AbortController()
-                controllers.set(inst.id, ctrl)
+            const load = async (force = false) => {
+                if (disposed || (controller && !force)) return
+                if (timer !== undefined) window.clearTimeout(timer)
+                controller?.abort()
+                const current = new AbortController()
+                controller = current
+                let timedOut = false
+                let nextInterval = baseInterval
+                const timeout = window.setTimeout(() => {
+                    timedOut = true
+                    current.abort()
+                }, 25000)
+
+                setById((prev) => {
+                    const slice = prev.get(app.id)
+                    if (!slice) return prev
+                    const next = new Map(prev)
+                    next.set(app.id, { ...slice, loading: slice.data == null, refreshing: slice.data != null })
+                    return next
+                })
+
                 try {
-                    const data = await inst.spec.fetchData(inst.cfg, ctrl.signal)
+                    const data = await fetchData(cfg, current.signal, { force, lang })
+                    if (disposed || current.signal.aborted || controller !== current) return
+                    const status = getWidgetStatus(data)
+                    if (status.refreshing) nextInterval = 2000
+                    else if (status.warning) nextInterval = Math.min(baseInterval ?? 60000, 15000)
                     setById((prev) => {
                         const next = new Map(prev)
-                        next.set(inst.id, {
-                            kind: inst.kind,
-                            data,
-                            error: null,
-                            refresh: fetchOnce,
+                        next.set(app.id, {
+                            kind, data, error: null, refresh: () => { void load(true) },
+                            loading: false, refreshing: status.refreshing,
                         })
                         return next
                     })
-                } catch (e) {
-                    if (ctrl.signal.aborted) return
+                } catch (error) {
+                    if (disposed || controller !== current || (current.signal.aborted && !timedOut)) return
+                    nextInterval = Math.min(baseInterval ?? 60000, 15000)
                     setById((prev) => {
+                        const slice = prev.get(app.id)
+                        if (!slice) return prev
                         const next = new Map(prev)
-                        next.set(inst.id, {
-                            kind: inst.kind,
-                            data: null,
-                            error: e instanceof Error ? e.message : 'failed',
-                            refresh: fetchOnce,
+                        next.set(app.id, {
+                            ...slice,
+                            error: timedOut ? i18n.t('widgets:requestTimeout')
+                                : error instanceof Error ? error.message : i18n.t('common:widgetError'),
+                            loading: false, refreshing: false,
                         })
                         return next
                     })
+                } finally {
+                    window.clearTimeout(timeout)
+                    if (!disposed && controller === current) {
+                        controller = null
+                        if (nextInterval !== undefined) timer = window.setTimeout(() => { void load() }, nextInterval)
+                    }
                 }
             }
 
-            // Seed a placeholder slice so consumers see refresh() immediately.
+            active.set(app.id, {
+                key, configKey,
+                dispose: () => {
+                    disposed = true
+                    controller?.abort()
+                    if (timer !== undefined) window.clearTimeout(timer)
+                },
+            })
             setById((prev) => {
-                if (prev.has(inst.id)) return prev
+                const old = previous?.configKey === configKey ? prev.get(app.id) : undefined
                 const next = new Map(prev)
-                next.set(inst.id, {
-                    kind: inst.kind,
-                    data: null,
-                    error: null,
-                    refresh: fetchOnce,
+                next.set(app.id, {
+                    kind, data: old?.data ?? null, error: null,
+                    refresh: () => { void load(true) }, loading: old?.data == null, refreshing: old?.data != null,
                 })
                 return next
             })
+            void load()
+        }
 
-            void fetchOnce()
-
-            const intervalRaw = inst.spec.pollIntervalMs
-            const intervalMs = typeof intervalRaw === 'function'
-                ? intervalRaw(inst.cfg)
-                : intervalRaw
-            if (typeof intervalMs === 'number' && intervalMs > 0) {
-                const t = window.setInterval(fetchOnce, intervalMs)
-                timers.set(inst.id, t)
+        for (const [id, widget] of active) {
+            if (!liveIDs.has(id)) {
+                widget.dispose()
+                active.delete(id)
             }
         }
+        setById((prev) => {
+            if ([...prev.keys()].every((id) => liveIDs.has(id))) return prev
+            return new Map([...prev].filter(([id]) => liveIDs.has(id)))
+        })
+    }, [apps, lang])
 
-        return () => {
-            controllers.forEach((c) => c.abort())
-            timers.forEach((t) => window.clearInterval(t))
-        }
-    }, [apps])
-
-    // Carve-out 1: default weather (no widget instance, just defaultCity).
     useEffect(() => {
-        if (!defaultCity) return
-        let cancelled = false
-
-        void (async () => {
-            try {
-                const qs = new URLSearchParams({ city: defaultCity, lang })
-                const wx = await apiGet<Weather>(`/api/widgets/weather?${qs.toString()}`)
-                if (!cancelled) {
-                    setWeather(wx)
-                    setWeatherErr(null)
-                }
-            } catch (e) {
-                if (!cancelled) {
-                    setWeather(null)
-                    setWeatherErr(e instanceof Error ? e.message : 'failed')
-                }
-            }
-        })()
-
+        const active = activeRef.current
         return () => {
-            cancelled = true
+            active.forEach((widget) => widget.dispose())
+            active.clear()
         }
-    }, [defaultCity, lang])
+    }, [])
 
-    // Carve-out 2: host metrics. Shared interval across all metrics widget
-    // instances (interval is the min refreshSec across all instances, or
-    // 5s when there are no metrics widgets at all). Network rate is
-    // derived from successive samples.
+    const hasWeatherWidget = apps.some((app) => widgetKindFromUrl(app.url) === 'weather')
     useEffect(() => {
-        let cancelled = false
+        setWeather(null)
+        setWeatherErr(null)
+        if (!defaultCity || hasWeatherWidget) return
+        const controller = new AbortController()
+        const query = new URLSearchParams({ city: defaultCity, lang })
+        if (defaultLat !== undefined && defaultLon !== undefined) {
+            query.set('lat', String(defaultLat))
+            query.set('lon', String(defaultLon))
+        }
+        void apiGet<Weather>(`/api/widgets/weather?${query}`, { signal: controller.signal })
+            .then((value) => { if (!controller.signal.aborted) setWeather(value) })
+            .catch((error: unknown) => {
+                if (!controller.signal.aborted) {
+                    setWeatherErr(error instanceof Error ? error.message : i18n.t('common:widgetError'))
+                }
+            })
+        return () => controller.abort()
+    }, [defaultCity, defaultLat, defaultLon, hasWeatherWidget, lang])
 
-        const metricsWidgets = apps.filter((a) => widgetKindFromUrl(a.url) === 'metrics')
-        const intervalMs = (() => {
-            if (metricsWidgets.length === 0) return 5000
-            let best = 1000
-            for (const a of metricsWidgets) {
-                const cfg = safeParseJSON(a.description)
-                const rs = Number(cfg?.refreshSec)
-                const ms = (rs === 5 || rs === 10 ? rs : 1) * 1000
-                best = Math.min(best, ms)
-            }
-            return best
-        })()
-
-        const run = async () => {
+    const metricIntervals = apps.filter((app) => widgetKindFromUrl(app.url) === 'metrics').map((app) => {
+        const seconds = Number(safeParseJSON(app.description)?.refreshSec)
+        return (seconds === 5 || seconds === 10 ? seconds : 1) * 1000
+    })
+    const metricsInterval = metricIntervals.length > 0 ? Math.min(...metricIntervals) : null
+    useEffect(() => {
+        if (metricsInterval === null) {
+            setMetrics(null)
+            setMetricsErr(null)
+            setNetRate(null)
+            lastMetricsRef.current = null
+            return
+        }
+        let disposed = false
+        let timer: number | undefined
+        let controller: AbortController | null = null
+        const load = async () => {
+            controller = new AbortController()
             try {
-                const m = await apiGet<HostMetrics>('/api/metrics/host')
-                if (cancelled) return
-                const prev = lastMetricsRef.current
-                if (
-                    prev &&
-                    typeof prev.collectedAt === 'number' &&
-                    typeof m.collectedAt === 'number' &&
-                    m.collectedAt > prev.collectedAt
-                ) {
-                    const dt = (m.collectedAt - prev.collectedAt) / 1000
-                    if (dt > 0) {
-                        const sentDiff = Math.max(0, m.netBytesSent - prev.netBytesSent)
-                        const recvDiff = Math.max(0, m.netBytesRecv - prev.netBytesRecv)
-                        setNetRate({ upBps: sentDiff / dt, downBps: recvDiff / dt })
-                    }
+                const value = await apiGet<HostMetrics>('/api/metrics/host', { signal: controller.signal })
+                if (disposed) return
+                const previous = lastMetricsRef.current
+                if (previous && value.collectedAt > previous.collectedAt) {
+                    const seconds = (value.collectedAt - previous.collectedAt) / 1000
+                    setNetRate({
+                        upBps: Math.max(0, value.netBytesSent - previous.netBytesSent) / seconds,
+                        downBps: Math.max(0, value.netBytesRecv - previous.netBytesRecv) / seconds,
+                    })
                 }
-                lastMetricsRef.current = m
-                setMetrics(m)
-            } catch {
-                if (!cancelled) {
-                    setMetrics(null)
-                    setNetRate(null)
-                }
+                lastMetricsRef.current = value
+                setMetrics(value)
+                setMetricsErr(null)
+            } catch (error) {
+                if (!disposed) setMetricsErr(error instanceof Error ? error.message : i18n.t('common:widgetError'))
+            } finally {
+                if (!disposed) timer = window.setTimeout(load, metricsInterval)
             }
         }
-
-        void run()
-        const id = window.setInterval(run, intervalMs)
+        void load()
         return () => {
-            cancelled = true
-            window.clearInterval(id)
+            disposed = true
+            controller?.abort()
+            if (timer !== undefined) window.clearTimeout(timer)
         }
-    }, [apps])
+    }, [metricsInterval])
 
-    return {
-        byId,
-        weather,
-        weatherErr,
-        metrics,
-        netRate,
-    }
+    return { byId, weather, weatherErr, metrics, metricsErr, netRate }
 }

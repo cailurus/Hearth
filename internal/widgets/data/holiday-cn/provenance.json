@@ -1,0 +1,11 @@
+{
+  "project": "NateScarlet/holiday-cn",
+  "license": "MIT",
+  "retrievedOn": "2026-09-09",
+  "year": 2026,
+  "upstreamCommit": "dcecbce230a57639cc8967ec9e2465e744880fd8",
+  "upstreamURL": "https://raw.githubusercontent.com/NateScarlet/holiday-cn/dcecbce230a57639cc8967ec9e2465e744880fd8/2026.json",
+  "officialNotice": "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm",
+  "modifications": "Whitespace only. All holiday and compensating workday records are preserved.",
+  "coverage": "2026 only. No dates are inferred for unpublished future calendars."
+}

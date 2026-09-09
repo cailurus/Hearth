@@ -155,8 +155,10 @@ func translateChineseQuery(query string) string {
 	return query
 }
 
-// fetchNominatim queries the Nominatim API with retry for rate limiting
+// fetchNominatim makes one bounded request; retries must not block weather loading.
 func fetchNominatim(ctx context.Context, query string, limit int, language string) ([]nominatimResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("format", "json")
@@ -170,57 +172,25 @@ func fetchNominatim(ctx context.Context, query string, limit int, language strin
 
 	endpoint := "https://nominatim.openstreetmap.org/search?" + params.Encode()
 
-	// Retry up to 3 times with exponential backoff for rate limiting
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			// Wait before retry (1s, 2s)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt) * time.Second):
-			}
-		}
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-		if err != nil {
-			return nil, err
-		}
-		// Nominatim requires a valid User-Agent
-		req.Header.Set("User-Agent", "Hearth/1.0 (https://github.com/morezhou/hearth)")
-
-		resp, err := DefaultClient.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		// Check for rate limiting (429) or server errors (5xx)
-		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-			resp.Body.Close()
-			lastErr = fmt.Errorf("nominatim: status=%d", resp.StatusCode)
-			continue
-		}
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
-			return nil, fmt.Errorf("nominatim: status=%d body=%s", resp.StatusCode, string(body))
-		}
-
-		var results []nominatimResult
-		err = json.NewDecoder(resp.Body).Decode(&results)
-		resp.Body.Close()
-		if err != nil {
-			return nil, err
-		}
-		return results, nil
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
 	}
-
-	if lastErr != nil {
-		return nil, lastErr
+	req.Header.Set("User-Agent", "Hearth/1.0 (https://github.com/morezhou/hearth)")
+	resp, err := DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("nominatim: max retries exceeded")
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("nominatim: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	var results []nominatimResult
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&results); err != nil {
+		return nil, fmt.Errorf("nominatim: %w", err)
+	}
+	return results, nil
 }
 
 // SearchCitiesNominatim searches for cities using Nominatim (OpenStreetMap) API
@@ -229,14 +199,6 @@ func SearchCitiesNominatim(ctx context.Context, query string, count int, languag
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, errors.New("city required")
-	}
-
-	// Extract just the city name if user types "City, State, Country"
-	if i := strings.IndexAny(q, ",，"); i >= 0 {
-		q = strings.TrimSpace(q[:i])
-		if q == "" {
-			return nil, errors.New("city required")
-		}
 	}
 
 	if count <= 0 {
@@ -255,15 +217,9 @@ func SearchCitiesNominatim(ctx context.Context, query string, count int, languag
 
 	// If query is in Chinese, translate to English for search
 	// Nominatim doesn't support Chinese input well, but returns Chinese output fine
-	searchQuery := q
-	if containsCJKNominatim(q) {
-		if translated := translateChineseQuery(q); translated != q {
-			searchQuery = translated
-		} else {
-			// If we don't have a translation, try the original query anyway
-			// It might be an international city name in Chinese characters
-		}
-	}
+	parts := strings.Split(strings.ReplaceAll(q, "，", ","), ",")
+	parts[0] = translateChineseQuery(strings.TrimSpace(parts[0]))
+	searchQuery := strings.Join(parts, ",")
 
 	// Fetch from Nominatim
 	results, err := fetchNominatim(ctx, searchQuery, count*2, acceptLang)
@@ -280,7 +236,7 @@ func SearchCitiesNominatim(ctx context.Context, query string, count int, languag
 	}
 
 	if len(results) == 0 {
-		return nil, errors.New("city not found")
+		return nil, ErrCityNotFound
 	}
 
 	// Filter and format results
@@ -299,11 +255,17 @@ func SearchCitiesNominatim(ctx context.Context, query string, count int, languag
 		seen[r.PlaceID] = true
 
 		// Parse coordinates
-		lat, _ := strconv.ParseFloat(r.Lat, 64)
-		lon, _ := strconv.ParseFloat(r.Lon, 64)
+		lat, latErr := strconv.ParseFloat(r.Lat, 64)
+		lon, lonErr := strconv.ParseFloat(r.Lon, 64)
+		if latErr != nil || lonErr != nil || !ValidCoordinates(lat, lon) {
+			continue
+		}
 
 		// Build display name from structured address
 		displayName := buildDisplayName(r, langNorm)
+		if strings.TrimSpace(displayName) == "" {
+			continue
+		}
 
 		out = append(out, GeoPoint{
 			Lat:         lat,
@@ -314,7 +276,7 @@ func SearchCitiesNominatim(ctx context.Context, query string, count int, languag
 	}
 
 	if len(out) == 0 {
-		return nil, errors.New("city not found")
+		return nil, errors.New("nominatim: invalid location data")
 	}
 
 	return out, nil
@@ -375,7 +337,7 @@ func GeocodeCityNominatim(ctx context.Context, city string, language string) (Ge
 		return GeoPoint{}, err
 	}
 	if len(list) == 0 {
-		return GeoPoint{}, errors.New("city not found")
+		return GeoPoint{}, ErrCityNotFound
 	}
 
 	pt := list[0]

@@ -3,6 +3,8 @@ import { MiniSparkline } from './MiniSparkline'
 import { Spinner } from '../ui/Spinner'
 import { defineWidget } from '../../widgets/types'
 import { apiGet } from '../../api'
+import { useTranslation } from 'react-i18next'
+import { financialRowState } from '../../utils/financialDisplay'
 
 const CURRENCY_FLAGS: Record<string, string> = {
     USD: '\u{1F1FA}\u{1F1F8}', CNY: '\u{1F1E8}\u{1F1F3}', EUR: '\u{1F1EA}\u{1F1FA}',
@@ -18,10 +20,10 @@ const CURRENCY_FLAGS: Record<string, string> = {
     ISK: '\u{1F1EE}\u{1F1F8}', BGN: '\u{1F1E7}\u{1F1EC}', RON: '\u{1F1F7}\u{1F1F4}',
 }
 
-function CurrencyRow({ pair }: { pair?: CurrencyPair }) {
-    const hasData = pair && typeof pair.rate === 'number' && pair.rate > 0
-    const from = pair?.from ?? '???'
-    const to = pair?.to ?? '???'
+function CurrencyRow({ pair, from, to, loading, error }: { pair?: CurrencyPair; from: string; to: string; loading: boolean; error?: string | null }) {
+    const { t } = useTranslation('widgets')
+    const hasData = pair && typeof pair.rate === 'number' && Number.isFinite(pair.rate) && pair.rate > 0
+    const pending = financialRowState(!!hasData, pair, loading, error) === 'pending'
     const rate = hasData
         ? (pair.rate > 100 ? pair.rate.toFixed(2) : pair.rate > 1 ? pair.rate.toFixed(4) : pair.rate.toFixed(6))
         : '—'
@@ -36,7 +38,7 @@ function CurrencyRow({ pair }: { pair?: CurrencyPair }) {
     const toFlag = CURRENCY_FLAGS[to] ?? ''
 
     return (
-        <div className="flex items-center gap-2 text-[10px] sm:text-[11px]">
+        <div className="flex min-w-0 items-center gap-1.5 text-[10px] sm:text-[11px]" aria-busy={pending}>
             {/* Pair label */}
             <div className="w-[86px] sm:w-24 shrink-0">
                 <div className="flex items-center gap-0.5 font-medium text-white/90">
@@ -47,20 +49,28 @@ function CurrencyRow({ pair }: { pair?: CurrencyPair }) {
                     <span>{to}</span>
                     {arrow ? <span className={`ml-0.5 text-[9px] sm:text-[10px] ${pctColor}`}>{arrow}</span> : null}
                 </div>
+                {pair?.date ? (
+                    <div className="truncate text-[8px] text-white/45" title={t('referenceDate', { date: pair.date })}>
+                        {t('referenceDate', { date: pair.date })}
+                    </div>
+                ) : null}
+                {hasData && (pair?.stale || pair?.error) ? <div className="truncate text-[8px] text-amber-200/75" title={pair.error}>{t('cachedData')}</div> : null}
             </div>
 
             {/* Sparkline */}
-            <div className="min-w-[40px] flex-1">
+            <div className="min-w-0 flex-1">
                 {hasData ? (
                     <MiniSparkline series={series} />
-                ) : (
+                ) : pending ? (
                     <div className="h-4 rounded bg-white/5 animate-pulse" />
-                )}
+                ) : null}
             </div>
 
             {/* Rate and change */}
             <div className="w-[60px] sm:w-[68px] shrink-0 text-right">
-                <div className={`tabular-nums ${hasData ? 'text-white/90' : 'text-white/20'}`}>{rate}</div>
+                <div className={`truncate tabular-nums ${hasData ? 'text-white/90' : 'text-white/50'}`} title={pair?.error}>
+                    {hasData ? rate : t(pending ? 'loading' : 'unavailable')}
+                </div>
                 <div className={`tabular-nums text-[9px] sm:text-[10px] ${pctColor}`}>{pctLabel}</div>
             </div>
         </div>
@@ -70,10 +80,13 @@ function CurrencyRow({ pair }: { pair?: CurrencyPair }) {
 interface CurrencyWidgetProps {
     data: CurrencyResponse | null
     error?: string | null
+    pairs?: string[]
 }
 
-export function CurrencyWidget({ data, error }: CurrencyWidgetProps) {
-    if (!data && !error) {
+export function CurrencyWidget({ data, error, pairs }: CurrencyWidgetProps) {
+    const { t } = useTranslation('widgets')
+    const configuredPairs = (pairs || []).map((pair) => pair.trim().toUpperCase()).filter(Boolean).slice(0, 4)
+    if (!data && !error && !configuredPairs.length) {
         return (
             <div className="flex h-full items-center justify-center">
                 <Spinner size="sm" className="border-white/40" />
@@ -81,17 +94,18 @@ export function CurrencyWidget({ data, error }: CurrencyWidgetProps) {
         )
     }
 
-    if (error && !data) {
+    if (error && !data && !configuredPairs.length) {
         return (
             <div className="flex h-full items-center justify-center text-xs text-white/40">
-                {error}
+                {t('unavailable')}
             </div>
         )
     }
 
     const items = data?.items ?? []
+    const displayPairs = configuredPairs.length ? configuredPairs : items.slice(0, 4).map((pair) => `${pair.from}-${pair.to}`)
 
-    if (items.length === 0) {
+    if (displayPairs.length === 0) {
         return (
             <div className="flex h-full items-center justify-center text-xs text-white/40">—</div>
         )
@@ -99,9 +113,11 @@ export function CurrencyWidget({ data, error }: CurrencyWidgetProps) {
 
     return (
         <div className="flex flex-col gap-1.5 sm:gap-2">
-            {items.map((pair, i) => (
-                <CurrencyRow key={`${pair.from}-${pair.to}-${i}`} pair={pair} />
-            ))}
+            {displayPairs.map((key, i) => {
+                const [from, to] = key.split('-')
+                const pair = items.find((item) => item.from === from && item.to === to)
+                return <CurrencyRow key={`${key}-${i}`} pair={pair} from={from} to={to} loading={!data && !error} error={error} />
+            })}
         </div>
     )
 }
@@ -112,14 +128,14 @@ export interface CurrencyConfig {
 
 const CURRENCY_DEFAULT_CONFIG: CurrencyConfig = { pairs: [] }
 
-function CurrencyView({ data, error }: {
+function CurrencyView({ data, error, cfg }: {
     data: CurrencyResponse | null
     error: string | null
     cfg: CurrencyConfig
     refresh: () => void
     isAdmin: boolean
 }) {
-    return <CurrencyWidget data={data} error={error} />
+    return <CurrencyWidget data={data} error={error} pairs={cfg.pairs} />
 }
 
 export const currencyWidget = defineWidget<CurrencyConfig, CurrencyResponse>({
@@ -127,7 +143,7 @@ export const currencyWidget = defineWidget<CurrencyConfig, CurrencyResponse>({
     labelKey: 'widgets:currency',
     defaultConfig: CURRENCY_DEFAULT_CONFIG,
     pollIntervalMs: 5 * 60 * 1000,
-    fetchData: async (cfg, signal) => {
+    fetchData: async (cfg, signal, options) => {
         const pairs = (Array.isArray(cfg.pairs) ? cfg.pairs : [])
             .map((x) => String(x ?? '').trim())
             .filter(Boolean)
@@ -136,7 +152,9 @@ export const currencyWidget = defineWidget<CurrencyConfig, CurrencyResponse>({
             return { fetchedAt: 0, items: [] } as CurrencyResponse
         }
         const qs = new URLSearchParams({ pairs: pairs.join(',') })
-        return apiGet<CurrencyResponse>(`/api/widgets/currency?${qs.toString()}`, { signal })
+        if (options?.force) qs.set('refresh', '1')
+        const response = await apiGet<CurrencyResponse>(`/api/widgets/currency?${qs.toString()}`, { signal })
+        return { ...response, source: response.source || 'Frankfurter', sourceUrl: response.sourceUrl || 'https://frankfurter.dev/' }
     },
     Component: CurrencyView,
 })

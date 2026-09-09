@@ -1,10 +1,16 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/morezhou/hearth/internal/widgets"
 )
 
 const (
@@ -39,14 +45,18 @@ type Settings struct {
 
 	Timezones []string `json:"timezones"`
 
-	Weather struct {
-		City string `json:"city"`
-	} `json:"weather"`
+	Weather WeatherSettings `json:"weather"`
 
 	Time *TimeSettings `json:"time"`
 
-	TitleSortOrder int              `json:"titleSortOrder"` // Position of title block among groups, default 0 (top)
+	TitleSortOrder int               `json:"titleSortOrder"` // Position of title block among groups, default 0 (top)
 	Greeting       *GreetingSettings `json:"greeting"`
+}
+
+type WeatherSettings struct {
+	City string   `json:"city"`
+	Lat  *float64 `json:"lat,omitempty"`
+	Lon  *float64 `json:"lon,omitempty"`
 }
 
 type GreetingSettings struct {
@@ -85,7 +95,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	st.Background.UnsplashQuery = s.getStringSetting(kvBackgroundUnsplashQuery, "")
 	st.Background.Interval = s.getStringSetting(kvBackgroundInterval, "0")
-	st.Weather.City = s.getStringSetting(kvWeatherCity, defaultWeatherCity)
+	st.Weather = s.weatherSettings()
 
 	st.Time = &TimeSettings{}
 	// default enabled=true for fresh installs
@@ -134,8 +144,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Background.Provider == "bing" {
 		req.Background.Provider = "bing_daily"
 	}
+	req.Weather.City = strings.TrimSpace(req.Weather.City)
 	if req.Weather.City == "" {
 		req.Weather.City = defaultWeatherCity
+	}
+	if (req.Weather.Lat == nil) != (req.Weather.Lon == nil) ||
+		(req.Weather.Lat != nil && !widgets.ValidCoordinates(*req.Weather.Lat, *req.Weather.Lon)) {
+		writeError(w, http.StatusBadRequest, "weather requires a valid numeric lat/lon pair")
+		return
 	}
 	if req.Time != nil {
 		req.Time.Timezone = normalizeIanaTimezone(req.Time.Timezone)
@@ -158,10 +174,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if b, err := json.Marshal(req.Timezones); err == nil {
 		setKV(kvTimezones, string(b))
 	}
-	setKV(kvWeatherCity, req.Weather.City)
-	// Keep DB clean: lat/lon are no longer used (city-only weather).
-	setKV(kvWeatherLat, "")
-	setKV(kvWeatherLon, "")
+	if err := s.saveWeatherSettings(req.Weather); err != nil {
+		errs = append(errs, err)
+	}
 	if req.Time != nil {
 		if req.Time.Enabled {
 			setKV(kvTimeEnabled, "true")
@@ -192,6 +207,70 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+type weatherSettingsReader interface {
+	QueryRow(string, ...any) *sql.Row
+}
+
+func readWeatherSettings(db weatherSettingsReader) (WeatherSettings, error) {
+	var city, lat, lon sql.NullString
+	err := db.QueryRow(`SELECT
+		(SELECT value FROM kv WHERE key = ?),
+		(SELECT value FROM kv WHERE key = ?),
+		(SELECT value FROM kv WHERE key = ?)`, kvWeatherCity, kvWeatherLat, kvWeatherLon).Scan(&city, &lat, &lon)
+	if err != nil {
+		return WeatherSettings{}, err
+	}
+	settings := WeatherSettings{City: strings.TrimSpace(city.String)}
+	if settings.City == "" {
+		settings.City = defaultWeatherCity
+	}
+	if latitude, longitude, err := widgets.ParseWeatherCoordinates(lat.String, lon.String); err == nil {
+		settings.Lat, settings.Lon = &latitude, &longitude
+	}
+	return settings, nil
+}
+
+func (s *Server) weatherSettings() WeatherSettings {
+	settings, err := readWeatherSettings(s.db)
+	if err != nil {
+		return WeatherSettings{City: defaultWeatherCity}
+	}
+	return settings
+}
+
+func (s *Server) saveWeatherSettings(settings WeatherSettings) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	previous, err := readWeatherSettings(tx)
+	if err != nil {
+		return err
+	}
+	if settings.Lat == nil && settings.Lon == nil && settings.City == previous.City {
+		// Older clients save only the city; keep a valid selection unless it changed.
+		settings.Lat, settings.Lon = previous.Lat, previous.Lon
+	}
+	lat, lon := "", ""
+	if settings.Lat != nil || settings.Lon != nil {
+		if settings.Lat == nil || settings.Lon == nil || !widgets.ValidCoordinates(*settings.Lat, *settings.Lon) {
+			return errors.New("invalid weather coordinates")
+		}
+		lat = strconv.FormatFloat(*settings.Lat, 'f', -1, 64)
+		lon = strconv.FormatFloat(*settings.Lon, 'f', -1, 64)
+	}
+	// Update the label and its coordinates atomically, so readers never pair
+	// a newly selected city with the previous city's location.
+	for _, entry := range [][2]string{{kvWeatherCity, settings.City}, {kvWeatherLat, lat}, {kvWeatherLon, lon}} {
+		if _, err := tx.Exec(`INSERT INTO kv (key, value) VALUES (?, ?)
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value`, entry[0], entry[1]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Server) getStringSetting(key, def string) string {

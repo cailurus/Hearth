@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ResolveTimezone resolves an IANA timezone name for a given lat/lon using Open-Meteo.
 // It uses timezone=auto and reads the resolved timezone from the response.
 func ResolveTimezone(ctx context.Context, lat, lon string) (string, error) {
-	if lat == "" || lon == "" {
-		return "", errors.New("lat/lon required")
+	if _, _, err := ParseWeatherCoordinates(lat, lon); err != nil {
+		return "", err
 	}
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
 
 	q := url.Values{}
 	q.Set("latitude", lat)
@@ -62,6 +65,9 @@ func ResolveTimezone(ctx context.Context, lat, lon string) (string, error) {
 	}
 	if payload.Timezone == "" {
 		return "", errors.New("timezone not found")
+	}
+	if _, err := time.LoadLocation(payload.Timezone); err != nil {
+		return "", errors.New("open-meteo: invalid timezone")
 	}
 	return payload.Timezone, nil
 }

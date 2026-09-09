@@ -12,7 +12,7 @@ import { HolidayCountryTags } from '../pickers/HolidayCountryTags'
 import { MetricsHistoryPanel } from '../widgets/MetricsHistoryPanel'
 import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
 import { Image as ImageIcon, Loader2 } from 'lucide-react'
-import type { AppItem } from '../../types'
+import type { AppItem, GeocodeResult } from '../../types'
 import { DEFAULT_MARKET_SYMBOLS } from '../../utils'
 
 interface EditItemDialogProps {
@@ -39,15 +39,16 @@ interface EditItemDialogProps {
     onFetchIcon: () => void
     saveItem: (e: FormEvent) => void
     // Widget kind
-    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | 'deals' | null
+    widgetKind: 'weather' | 'timezones' | 'metrics' | 'markets' | 'holidays' | 'docker' | 'notes' | 'rss' | 'currency' | null
     // Widget save callback (for weather, timezones, markets)
     onSaveWidget?: () => Promise<void>
     widgetSaving?: boolean
     // Weather
     wCity: string
     setWCity: (v: string) => void
+    pickWCity: (v: string, option?: GeocodeResult) => void
     setCityQuery: (v: string) => void
-    cityOptions: string[]
+    cityOptions: GeocodeResult[]
     // Metrics
     mRefreshSec: 1 | 5 | 10
     setMRefreshSec: (v: 1 | 5 | 10) => void
@@ -85,9 +86,6 @@ interface EditItemDialogProps {
     // Currency
     cPairs: string[]
     setCPairs: React.Dispatch<React.SetStateAction<string[]>>
-    // Deals
-    dlRegion: string
-    setDlRegion: (v: string) => void
 }
 
 export function EditItemDialog({
@@ -117,6 +115,7 @@ export function EditItemDialog({
     widgetSaving,
     wCity,
     setWCity,
+    pickWCity,
     setCityQuery,
     cityOptions,
     mRefreshSec,
@@ -149,8 +148,6 @@ export function EditItemDialog({
     setRssSize,
     cPairs,
     setCPairs,
-    dlRegion,
-    setDlRegion,
 }: EditItemDialogProps) {
     const { t } = useTranslation(['home', 'common', 'widgets', 'settings'])
 
@@ -216,9 +213,9 @@ export function EditItemDialog({
                                                     setCityQuery(v)
                                                     setWCity(v)
                                                 }}
-                                                onPick={(picked) => {
+                                                onPick={(picked, option) => {
                                                     setCityQuery(picked)
-                                                    setWCity(picked)
+                                                    pickWCity(picked, option)
                                                 }}
                                                 options={cityOptions}
                                                 placeholder={t('widgets:weatherCityPlaceholder')}
@@ -442,25 +439,6 @@ export function EditItemDialog({
                                 >
                                     {widgetSaving ? <Spinner size="sm" /> : t('common:save')}
                                 </button>
-                            </div>
-                        ) : widgetKind === 'deals' ? (
-                            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
-                                <div className="mb-2 text-sm font-semibold text-white/80">{t('widgets:deals')}</div>
-                                <label className="block text-sm">
-                                    <div className="mb-1 text-white/70">{t('widgets:dealsRegion')}</div>
-                                    <select
-                                        value={dlRegion}
-                                        onChange={(e) => setDlRegion(e.target.value)}
-                                        className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none"
-                                    >
-                                        <option value="us">{t('widgets:dealsRegionUS')}</option>
-                                        <option value="cn">{t('widgets:dealsRegionCN')}</option>
-                                        <option value="hk">{t('widgets:dealsRegionHK')}</option>
-                                        <option value="tw">{t('widgets:dealsRegionTW')}</option>
-                                        <option value="jp">{t('widgets:dealsRegionJP')}</option>
-                                        <option value="gb">{t('widgets:dealsRegionGB')}</option>
-                                    </select>
-                                </label>
                             </div>
                         ) : widgetKind === 'notes' ? (
                             <div className="space-y-4">

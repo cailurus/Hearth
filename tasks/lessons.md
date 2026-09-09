@@ -57,3 +57,9 @@
   2. Print **outside** the slog/structured pipeline, so it can't accidentally end up in Loki/ELK aggregators.
   3. Self-document its impermanence ("not logged again, not written to disk").
 - **Process lesson**: when offering options to the user, sample the *non-obvious* good answer too. I gave them a/b/c all involving file persistence, missed "stdout-only". They had to add the option themselves.
+
+## Dashboard loading: measure usable widget content, not just the page shell
+- 2026-09-09: The user clarified that "the page does not display" meant cards staying empty/loading, not a literal white screen. Checking only the title, links, or first paint missed the reported experience.
+- **Rule**: measure each affected card's time to data or error with real browser requests and timed screenshots. Separate shell rendering, widget readiness, and background loading; do not use a fast shell to dismiss slow content.
+- **Finding**: weather requests by city waited 30 seconds and failed, while a direct coordinate request succeeded in about one second. City lookup runs before the weather cache, so an existing weather cache does not remove that upstream dependency.
+- **How to apply**: compare the normal request with a narrowly scoped diagnostic bypass, and distinguish cached follow-up timings from the first successful request. Do not claim that one widget explains every slow card.

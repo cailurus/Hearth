@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -202,6 +203,10 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	app, err := s.store.CreateApp(req.GroupID, req.Name, req.Description, req.URL, req.IconPath, req.IconSource)
 	if err != nil {
+		if errors.Is(err, store.ErrRetiredWidget) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		slog.Error("failed to create app", "error", err, "name", req.Name)
 		writeError(w, http.StatusInternalServerError, "failed to create app")
 		return
@@ -253,6 +258,10 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.store.UpdateApp(id, req.GroupID, req.Name, req.Description, req.URL, req.IconPath, req.IconSource); err != nil {
+		if errors.Is(err, store.ErrRetiredWidget) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		slog.Warn("failed to update app", "error", err, "id", id)
 		writeError(w, http.StatusNotFound, "app not found")
 		return
@@ -414,9 +423,9 @@ func mergeGroupsWithDocker(manual []store.Group, labelApps []docker.LabelApp) []
 	out := make([]store.Group, 0, len(manual)+1)
 	out = append(out, manual...)
 	out = append(out, store.Group{
-		ID:        dockerVirtualGroupID,
-		Name:      dockerVirtualGroupName,
-		Kind:      GroupKindApp,
+		ID:   dockerVirtualGroupID,
+		Name: dockerVirtualGroupName,
+		Kind: GroupKindApp,
 		// Push the virtual group to the end; user groups keep their order.
 		SortOrder: 1 << 30,
 		CreatedAt: 0,

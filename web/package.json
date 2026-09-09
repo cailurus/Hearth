@@ -10,6 +10,7 @@
     "lint:i18n": "node scripts/check-i18n-parity.mjs",
     "check:widgets": "node --import tsx scripts/check-widget-registry.mjs",
     "test:network": "node --import tsx scripts/test-network.mjs",
+    "test:widgets": "node --import tsx scripts/test-widget-display.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -6,28 +6,67 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/morezhou/hearth/internal/cache"
 )
 
-var weatherTTLCache = cache.New[Weather](5 * time.Minute)
+var weatherTTLCache = newWeatherCache()
+
+func newWeatherCache() *cache.Cache[Weather] {
+	c := cache.New[Weather](5 * time.Minute)
+	c.SetMaxStale(24 * time.Hour)
+	c.SetLoadTimeout(8 * time.Second)
+	return c
+}
+
+// ConfigureWeatherPersistence enables independent weather cache namespaces.
+// It is called once at application startup, not when constructing a server.
+func ConfigureWeatherPersistence(root string) error {
+	if err := weatherTTLCache.SetPersistence(filepath.Join(root, "weather")); err != nil {
+		return err
+	}
+	if err := weatherLocationCache.SetPersistence(filepath.Join(root, "weather-locations")); err != nil {
+		return err
+	}
+	return citySearchCache.SetPersistence(filepath.Join(root, "city-search"))
+}
+
+// ValidCoordinates accepts zero coordinates, but never missing or non-finite values.
+func ValidCoordinates(lat, lon float64) bool {
+	return !math.IsNaN(lat) && !math.IsNaN(lon) && !math.IsInf(lat, 0) && !math.IsInf(lon, 0) &&
+		lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+}
+
+func ParseWeatherCoordinates(lat, lon string) (float64, float64, error) {
+	latitude, latErr := strconv.ParseFloat(strings.TrimSpace(lat), 64)
+	longitude, lonErr := strconv.ParseFloat(strings.TrimSpace(lon), 64)
+	if latErr != nil || lonErr != nil || !ValidCoordinates(latitude, longitude) {
+		return 0, 0, errors.New("weather requires valid lat/lon: latitude -90..90, longitude -180..180")
+	}
+	return latitude, longitude, nil
+}
 
 func weatherCacheKey(lat, lon string) string {
 	return strings.TrimSpace(lat) + "," + strings.TrimSpace(lon)
 }
 
 type Weather struct {
+	DataStatus
 	City        string          `json:"city"`
 	Temperature float64         `json:"temperatureC"`
 	WeatherCode int             `json:"weatherCode"`
 	WindSpeed   float64         `json:"windSpeedKph"`
 	FetchedAt   int64           `json:"fetchedAt"`
 	Daily       []DailyForecast `json:"daily"`
+	Source      string          `json:"source"`
+	SourceURL   string          `json:"sourceUrl"`
 }
 
 type DailyForecast struct {
@@ -38,62 +77,47 @@ type DailyForecast struct {
 }
 
 // FetchOpenMeteo uses Open-Meteo current weather (no API key).
-// Uses stale-while-revalidate: if cache is expired but stale data exists,
-// returns stale data immediately and refreshes in the background.
-func FetchOpenMeteo(ctx context.Context, lat, lon, city string) (Weather, error) {
-	if lat == "" || lon == "" {
-		return Weather{}, errors.New("weather lat/lon not configured")
-	}
-
-	key := weatherCacheKey(lat, lon)
-	if key == "," {
-		return Weather{}, errors.New("weather lat/lon invalid")
-	}
-
-	// Fresh cache hit — return immediately.
-	if cached, ok := weatherTTLCache.Get(key); ok {
-		result := cached
-		if strings.TrimSpace(city) != "" {
-			result.City = city
-		}
-		return result, nil
-	}
-
-	// Stale-while-revalidate: if stale data exists, return it and refresh async.
-	if stale, ok := weatherTTLCache.GetStale(key); ok {
-		result := stale
-		if strings.TrimSpace(city) != "" {
-			result.City = city
-		}
-		go fetchAndCacheWeather(key, lat, lon, city)
-		return result, nil
-	}
-
-	// No cached data at all — must fetch synchronously.
-	return fetchWeatherSync(ctx, key, lat, lon, city)
-}
-
-func fetchAndCacheWeather(key, lat, lon, city string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	w, err := fetchWeatherFromAPI(ctx, lat, lon, city)
-	if err != nil {
-		slog.Warn("weather background refresh failed", "error", err)
-		return
-	}
-	weatherTTLCache.Set(key, w)
-}
-
-func fetchWeatherSync(ctx context.Context, key, lat, lon, city string) (Weather, error) {
-	// Use a longer timeout for the synchronous first-load case.
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	w, err := fetchWeatherFromAPI(ctx, lat, lon, city)
+// Stale values return immediately with one bounded refresh; force waits for an attempt.
+func FetchOpenMeteo(ctx context.Context, lat, lon, city string, force ...bool) (Weather, error) {
+	latitude, longitude, err := ParseWeatherCoordinates(lat, lon)
 	if err != nil {
 		return Weather{}, err
 	}
-	weatherTTLCache.Set(key, w)
+	lat = strconv.FormatFloat(latitude, 'f', -1, 64)
+	lon = strconv.FormatFloat(longitude, 'f', -1, 64)
+	w, state, err := weatherTTLCache.Load(ctx, weatherCacheKey(lat, lon), func(ctx context.Context) (Weather, error) {
+		return fetchWeatherFromAPI(ctx, lat, lon, city)
+	}, force...)
+	if err != nil {
+		return Weather{}, err
+	}
+	w.DataStatus = statusFromCache(state)
+	if strings.TrimSpace(city) != "" {
+		w.City = city
+	}
+	w.Source = "Open-Meteo"
+	w.SourceURL = "https://open-meteo.com/"
+	return w, nil
+}
+
+func FetchWeatherForCity(ctx context.Context, city, language string, force ...bool) (Weather, error) {
+	pt, locationStatus, err := ResolveWeatherLocation(ctx, city, language, force...)
+	if err != nil {
+		return Weather{}, err
+	}
+	w, err := FetchOpenMeteo(ctx, strconv.FormatFloat(pt.Lat, 'f', -1, 64),
+		strconv.FormatFloat(pt.Lon, 'f', -1, 64), pt.DisplayName, force...)
+	if err != nil {
+		return Weather{}, err
+	}
+	w.Stale = w.Stale || locationStatus.Stale
+	w.Refreshing = w.Refreshing || locationStatus.Refreshing
+	if locationStatus.Warning != "" {
+		if w.Warning != "" {
+			w.Warning += "; "
+		}
+		w.Warning += "location: " + locationStatus.Warning
+	}
 	return w, nil
 }
 
@@ -136,50 +160,53 @@ func fetchWeatherFromAPI(ctx context.Context, lat, lon, city string) (Weather, e
 	}
 
 	var payload struct {
-		Current struct {
-			Temperature float64 `json:"temperature_2m"`
-			WeatherCode int     `json:"weather_code"`
-			WindSpeed   float64 `json:"wind_speed_10m"`
+		Current *struct {
+			Temperature *float64 `json:"temperature_2m"`
+			WeatherCode *int     `json:"weather_code"`
+			WindSpeed   *float64 `json:"wind_speed_10m"`
 		} `json:"current"`
 		Daily struct {
-			Time []string  `json:"time"`
-			Code []int     `json:"weather_code"`
-			MaxC []float64 `json:"temperature_2m_max"`
-			MinC []float64 `json:"temperature_2m_min"`
+			Time []string   `json:"time"`
+			Code []*int     `json:"weather_code"`
+			MaxC []*float64 `json:"temperature_2m_max"`
+			MinC []*float64 `json:"temperature_2m_min"`
 		} `json:"daily"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return Weather{}, err
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return Weather{}, fmt.Errorf("open-meteo forecast: %w", err)
 	}
-
-	daily := make([]DailyForecast, 0, 7)
-	if len(payload.Daily.Time) > 0 {
-		n := len(payload.Daily.Time)
-		if len(payload.Daily.Code) < n {
-			n = len(payload.Daily.Code)
+	if payload.Current == nil || payload.Current.Temperature == nil ||
+		payload.Current.WeatherCode == nil || payload.Current.WindSpeed == nil {
+		return Weather{}, errors.New("open-meteo forecast: missing current weather")
+	}
+	n := len(payload.Daily.Time)
+	if n == 0 || len(payload.Daily.Code) != n || len(payload.Daily.MaxC) != n || len(payload.Daily.MinC) != n {
+		return Weather{}, errors.New("open-meteo forecast: incomplete daily forecast")
+	}
+	daily := make([]DailyForecast, 0, n)
+	for i := 0; i < n; i++ {
+		if payload.Daily.Code[i] == nil || payload.Daily.MaxC[i] == nil || payload.Daily.MinC[i] == nil {
+			return Weather{}, errors.New("open-meteo forecast: missing daily values")
 		}
-		if len(payload.Daily.MaxC) < n {
-			n = len(payload.Daily.MaxC)
+		if _, err := time.Parse("2006-01-02", payload.Daily.Time[i]); err != nil {
+			return Weather{}, errors.New("open-meteo forecast: invalid forecast date")
 		}
-		if len(payload.Daily.MinC) < n {
-			n = len(payload.Daily.MinC)
-		}
-		for i := 0; i < n; i++ {
-			daily = append(daily, DailyForecast{
-				Date:     payload.Daily.Time[i],
-				Code:     payload.Daily.Code[i],
-				TempMaxC: payload.Daily.MaxC[i],
-				TempMinC: payload.Daily.MinC[i],
-			})
-		}
+		daily = append(daily, DailyForecast{
+			Date:     payload.Daily.Time[i],
+			Code:     *payload.Daily.Code[i],
+			TempMaxC: *payload.Daily.MaxC[i],
+			TempMinC: *payload.Daily.MinC[i],
+		})
 	}
 
 	return Weather{
 		City:        city,
-		Temperature: payload.Current.Temperature,
-		WeatherCode: payload.Current.WeatherCode,
-		WindSpeed:   payload.Current.WindSpeed,
+		Temperature: *payload.Current.Temperature,
+		WeatherCode: *payload.Current.WeatherCode,
+		WindSpeed:   *payload.Current.WindSpeed,
 		FetchedAt:   time.Now().Unix(),
 		Daily:       daily,
+		Source:      "Open-Meteo",
+		SourceURL:   "https://open-meteo.com/",
 	}, nil
 }

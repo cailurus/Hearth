@@ -37,6 +37,26 @@ export interface TimeSettings {
 
 export interface WeatherSettings {
     city: string
+    lat?: number
+    lon?: number
+}
+
+export interface DataStatus {
+    stale?: boolean
+    refreshing?: boolean
+    warning?: string
+    source?: string
+    sourceUrl?: string
+}
+
+export interface DataSource {
+    source: string
+    sourceUrl?: string
+}
+
+export interface SourceError {
+    source: string
+    error: string
 }
 
 /**
@@ -82,7 +102,7 @@ export interface BackgroundInfo {
 /**
  * 天气数据
  */
-export interface Weather {
+export interface Weather extends DataStatus {
     city: string
     temperatureC: number
     weatherCode: number
@@ -123,13 +143,21 @@ export interface MarketQuote {
     symbol: string
     kind: MarketKind
     name?: string
-    priceUsd: number
+    price?: number
+    priceUsd?: number
+    currency?: string
+    observedAt?: number
+    fetchedAt?: number
+    source?: string
+    error?: string
+    stale?: boolean
+    pending?: boolean
     changePct24h: number
     series: number[]
     totalSlots?: number
 }
 
-export interface MarketsResponse {
+export interface MarketsResponse extends DataStatus {
     fetchedAt: number
     items: MarketQuote[]
 }
@@ -143,11 +171,15 @@ export interface HolidayItem {
     name: string
     localName: string
     daysUntil: number
+    source?: string
+    sourceUrl?: string
 }
 
-export interface HolidaysResponse {
+export interface HolidaysResponse extends DataStatus {
     fetchedAt: number
     items: HolidayItem[]
+    sources?: DataSource[]
+    sourceErrors?: SourceError[]
 }
 
 export interface HolidayCountry {
@@ -208,14 +240,15 @@ export interface RSSItem {
     publishedAt: number
 }
 
-export interface RSSResponse {
+export interface RSSResponse extends DataStatus {
     fetchedAt: number
     items: RSSItem[]
+    sourceErrors?: SourceError[]
 }
 
 // ============ 每日一言 ============
 
-export interface QuoteResponse {
+export interface QuoteResponse extends DataStatus {
     text: string
     author: string
     fetchedAt: number
@@ -229,31 +262,16 @@ export interface CurrencyPair {
     rate: number
     change: number
     series: number[]
+    date?: string
+    fetchedAt?: number
+    error?: string
+    stale?: boolean
+    pending?: boolean
 }
 
-export interface CurrencyResponse {
+export interface CurrencyResponse extends DataStatus {
     fetchedAt: number
     items: CurrencyPair[]
-}
-
-// ============ 游戏折扣 ============
-
-export interface GameDeal {
-    title: string
-    thumbnail: string
-    normalPrice: string
-    salePrice: string
-    discountPct: number
-    rating: number
-    ratingCount: number
-    platform: 'pc' | 'ios'
-    storeUrl: string
-    storeName: string
-}
-
-export interface DealsResponse {
-    fetchedAt: number
-    items: GameDeal[]
 }
 
 // ============ 枚举类型 ============

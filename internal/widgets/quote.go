@@ -4,73 +4,103 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/morezhou/hearth/internal/cache"
 )
 
 type QuoteResponse struct {
+	DataStatus
 	Text      string `json:"text"`
 	Author    string `json:"author"`
+	Source    string `json:"source"`
+	SourceURL string `json:"sourceUrl"`
 	FetchedAt int64  `json:"fetchedAt"`
 }
 
-var quoteTTLCache = cache.New[QuoteResponse](24 * time.Hour)
+var quoteTTLCache = newFeedCache[QuoteResponse](24*time.Hour, 7*24*time.Hour)
 
-const quoteKey = "daily"
-
-// FetchDailyQuote fetches the quote of the day from ZenQuotes with 24h cache.
-func FetchDailyQuote(ctx context.Context) (QuoteResponse, error) {
-	if cached, ok := quoteTTLCache.Get(quoteKey); ok {
-		return cached, nil
+// FetchDailyQuote caches one provider response per language for 24 hours.
+// Omitting language retains the original English provider.
+func FetchDailyQuote(ctx context.Context, language ...string) (QuoteResponse, error) {
+	lang := "en"
+	if len(language) > 0 && strings.HasPrefix(strings.ToLower(strings.TrimSpace(language[0])), "zh") {
+		lang = "zh"
 	}
+	return loadDailyQuote(ctx, lang, false)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://zenquotes.io/api/today", nil)
+func RefreshDailyQuote(ctx context.Context, language string) (QuoteResponse, error) {
+	return loadDailyQuote(ctx, normalizeGeoLanguage(language), true)
+}
+
+func loadDailyQuote(ctx context.Context, lang string, force bool) (QuoteResponse, error) {
+	result, state, err := quoteTTLCache.Load(ctx, lang, func(ctx context.Context) (QuoteResponse, error) {
+		return fetchQuote(ctx, lang)
+	}, force)
+	result.DataStatus = statusFromCache(state)
+	if !state.FetchedAt.IsZero() {
+		result.FetchedAt = state.FetchedAt.Unix()
+	}
+	return result, err
+}
+
+func fetchQuote(ctx context.Context, language string) (QuoteResponse, error) {
+	endpoint, source, sourceURL := "https://zenquotes.io/api/today", "ZenQuotes", "https://zenquotes.io/"
+	if language == "zh" {
+		endpoint, source, sourceURL = "https://v1.hitokoto.cn/?c=i", "Hitokoto", "https://hitokoto.cn/"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return staleQuote(err)
+		return QuoteResponse{}, errors.New("quote: invalid provider URL")
 	}
 	req.Header.Set("User-Agent", "Hearth/1.0")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := DefaultClient.Do(req)
 	if err != nil {
-		return staleQuote(err)
+		return QuoteResponse{}, fmt.Errorf("%s: request failed", source)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
-		return staleQuote(err)
+		return QuoteResponse{}, fmt.Errorf("%s: could not read response", source)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return staleQuote(errors.New("zenquotes: status " + resp.Status))
+		return QuoteResponse{}, fmt.Errorf("%s: HTTP %d", source, resp.StatusCode)
 	}
 
-	var items []struct {
-		Q string `json:"q"`
-		A string `json:"a"`
+	result := QuoteResponse{Source: source, SourceURL: sourceURL}
+	if language == "zh" {
+		var item struct {
+			Text    string `json:"hitokoto"`
+			From    string `json:"from"`
+			FromWho string `json:"from_who"`
+		}
+		if err := json.Unmarshal(body, &item); err != nil {
+			return QuoteResponse{}, errors.New("Hitokoto: invalid response")
+		}
+		result.Text = strings.TrimSpace(item.Text)
+		result.Author = strings.TrimSpace(item.FromWho)
+		if result.Author == "" {
+			result.Author = strings.TrimSpace(item.From)
+		}
+	} else {
+		var items []struct {
+			Q string `json:"q"`
+			A string `json:"a"`
+		}
+		if err := json.Unmarshal(body, &items); err != nil || len(items) == 0 {
+			return QuoteResponse{}, errors.New("ZenQuotes: invalid or empty response")
+		}
+		result.Text = strings.TrimSpace(items[0].Q)
+		result.Author = strings.TrimSpace(items[0].A)
 	}
-	if err := json.Unmarshal(body, &items); err != nil {
-		return staleQuote(err)
+	if result.Text == "" || result.Author == "" {
+		return QuoteResponse{}, fmt.Errorf("%s: missing quote text or attribution", source)
 	}
-	if len(items) == 0 {
-		return staleQuote(errors.New("zenquotes: empty response"))
-	}
-
-	result := QuoteResponse{
-		Text:      strings.TrimSpace(items[0].Q),
-		Author:    strings.TrimSpace(items[0].A),
-		FetchedAt: time.Now().Unix(),
-	}
-	quoteTTLCache.Set(quoteKey, result)
 	return result, nil
-}
-
-func staleQuote(err error) (QuoteResponse, error) {
-	if cached, ok := quoteTTLCache.GetStale(quoteKey); ok {
-		return cached, nil
-	}
-	return QuoteResponse{}, err
 }

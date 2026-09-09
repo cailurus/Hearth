@@ -16,7 +16,6 @@
 
 import type { WidgetSpec } from './types'
 import { currencyWidget } from '../components/widgets/CurrencyWidget'
-import { dealsWidget } from '../components/widgets/DealsWidget'
 import { holidaysWidget } from '../components/widgets/HolidaysWidget'
 import { marketsWidget } from '../components/widgets/MarketsWidget'
 import { dockerWidget } from '../components/widgets/DockerWidget'
@@ -27,7 +26,6 @@ import { timezonesWidget } from '../components/widgets/TimezonesWidget'
 
 export const WIDGET_REGISTRY = [
     currencyWidget,
-    dealsWidget,
     holidaysWidget,
     marketsWidget,
     dockerWidget,

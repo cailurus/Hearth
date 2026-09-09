@@ -27,6 +27,9 @@ func (s *Store) ListApps() ([]AppItem, error) {
 }
 
 func (s *Store) CreateApp(groupID *string, name string, description *string, url string, iconPath, iconSource *string) (AppItem, error) {
+	if isRetiredWidgetURL(url) {
+		return AppItem{}, ErrRetiredWidget
+	}
 	now := time.Now().Unix()
 	id := uuid.NewString()
 
@@ -43,6 +46,9 @@ func (s *Store) CreateApp(groupID *string, name string, description *string, url
 }
 
 func (s *Store) UpdateApp(id string, groupID *string, name string, description *string, url string, iconPath, iconSource *string) error {
+	if isRetiredWidgetURL(url) {
+		return ErrRetiredWidget
+	}
 	res, err := s.db.Exec(`UPDATE apps SET group_id = ?, name = ?, description = ?, url = ?, icon_path = ?, icon_source = ? WHERE id = ?`, groupID, name, description, url, iconPath, iconSource, id)
 	if err != nil {
 		return err

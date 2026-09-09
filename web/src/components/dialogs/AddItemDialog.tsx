@@ -2,10 +2,13 @@ import { useState, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../ui'
 import { apiPost } from '../../api'
-import type { WidgetKind, IconResolve } from '../../types'
+import type { WidgetKind, IconResolve, WeatherSettings } from '../../types'
 import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 import { Loader2, Image as ImageIcon } from 'lucide-react'
 import { IconPicker, LucideIconDisplay } from '../ui/IconPicker'
+import { CityPicker } from '../pickers/CityPicker'
+import { useCitySearch } from '../../hooks/useCitySearch'
+import { weatherLocation } from '../../utils/weatherLocation'
 
 interface AddItemDialogProps {
     open: boolean
@@ -13,6 +16,7 @@ interface AddItemDialogProps {
     groupId: string | null
     groupKind: 'system' | 'app' | 'bookmark'
     onSubmit: (data: AddItemData) => Promise<void>
+    defaultWeather?: WeatherSettings
 }
 
 interface AddItemData {
@@ -34,11 +38,10 @@ const WIDGET_TYPES: { kind: WidgetKind; labelKey: string }[] = [
     { kind: 'notes', labelKey: 'widgets:notes' },
     { kind: 'rss', labelKey: 'widgets:rss' },
     { kind: 'currency', labelKey: 'widgets:currency' },
-    { kind: 'deals', labelKey: 'widgets:deals' },
 ]
 
 const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
-    weather: { city: 'Shanghai, Shanghai, China' },
+    weather: { city: 'Shanghai, Shanghai, China', lat: 31.23234, lon: 121.4691 },
     metrics: { showCpu: true, showMem: true, showDisk: true, showNet: true, refreshSec: 1 },
     markets: { symbols: ['BTC', 'ETH', 'AAPL', 'MSFT'] },
     holidays: { countries: ['CN', 'US'] },
@@ -47,7 +50,6 @@ const DEFAULT_WIDGET_CONFIG: Record<WidgetKind, object | null> = {
     notes: null,
     rss: { feeds: ['https://hnrss.org/frontpage', 'https://github.blog/feed/'] },
     currency: { pairs: ['USD-CNY', 'EUR-JPY', 'GBP-USD', 'EUR-USD'] },
-    deals: { region: 'us' },
 }
 
 function isValidUrl(str: string): boolean {
@@ -67,14 +69,22 @@ export function AddItemDialog({
     groupId,
     groupKind,
     onSubmit,
+    defaultWeather,
 }: AddItemDialogProps) {
-    const { t } = useTranslation(['home', 'common', 'widgets'])
+    const { t, i18n } = useTranslation(['home', 'common', 'widgets'])
 
     const [name, setName] = useState('')
     const [desc, setDesc] = useState('')
     const [url, setUrl] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
+    const [weatherPicking, setWeatherPicking] = useState(false)
+    const [weather, setWeather] = useState<WeatherSettings>({ city: '' })
+    const citySearch = useCitySearch({
+        enabled: open && weatherPicking,
+        query: weather.city,
+        lang: i18n.language === 'en' ? 'en' : 'zh',
+    })
 
     // Icon mode: 'none' = default (use fetched icon or nothing), 'url' = custom URL, 'lucide' = icon library
     const [iconMode, setIconMode] = useState<IconMode>('none')
@@ -102,6 +112,7 @@ export function AddItemDialog({
             setDesc('')
             setUrl('')
             setError(null)
+            setWeatherPicking(false)
             setFetchingMeta(false)
             setPreviewIcon(null)
             setResolvedIcon({ iconPath: null, iconSource: null })
@@ -161,7 +172,7 @@ export function AddItemDialog({
             setLoading(true)
             try {
                 const widgetName = WIDGET_LABEL_KEYS[kind] ? t(WIDGET_LABEL_KEYS[kind] as never) : kind
-                const config = DEFAULT_WIDGET_CONFIG[kind]
+                const config = kind === 'weather' ? { ...weather, city: weather.city.trim() } : DEFAULT_WIDGET_CONFIG[kind]
                 await onSubmit({
                     groupId,
                     name: String(widgetName),
@@ -177,7 +188,7 @@ export function AddItemDialog({
                 setLoading(false)
             }
         },
-        [groupId, onSubmit, onClose, t]
+        [groupId, onSubmit, onClose, t, weather]
     )
 
     const handleAddAppLink = useCallback(
@@ -272,11 +283,37 @@ export function AddItemDialog({
                 </div>
             )}
             {groupKind === 'system' ? (
+                weatherPicking ? (
+                    <div className="space-y-3">
+                        <label className="block text-sm">
+                            <div className="mb-1 text-white/70">{t('widgets:weatherCity')}</div>
+                            <CityPicker
+                                value={weather.city}
+                                onChange={(city) => setWeather(weatherLocation(city))}
+                                onPick={(city, option) => setWeather(weatherLocation(city, option))}
+                                options={citySearch.options}
+                                placeholder={t('widgets:weatherCityPlaceholder')}
+                            />
+                        </label>
+                        <button type="button" disabled={loading || !weather.city.trim()}
+                            onClick={() => handleAddWidget('weather')}
+                            className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20 disabled:opacity-50">
+                            {t('widgets:add')}
+                        </button>
+                    </div>
+                ) : (
                 <div className="grid grid-cols-3 gap-2">
                     {WIDGET_TYPES.map((widget) => (
                         <button
                             key={widget.kind}
-                            onClick={() => handleAddWidget(widget.kind)}
+                            onClick={() => {
+                                if (widget.kind === 'weather') {
+                                    setWeather(defaultWeather?.city ? { ...defaultWeather } : DEFAULT_WIDGET_CONFIG.weather as WeatherSettings)
+                                    setWeatherPicking(true)
+                                } else {
+                                    void handleAddWidget(widget.kind)
+                                }
+                            }}
                             disabled={loading}
                             className="h-10 rounded-lg border border-white/10 bg-black/40 px-2 text-xs hover:bg-black/30 disabled:opacity-50"
                         >
@@ -286,6 +323,7 @@ export function AddItemDialog({
                         </button>
                     ))}
                 </div>
+                )
             ) : (
                 <form onSubmit={handleAddAppLink} className="space-y-3">
                     <label className="block text-sm">

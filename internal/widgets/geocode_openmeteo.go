@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -22,14 +23,15 @@ type GeoPoint struct {
 }
 
 type geoResult struct {
-	ID         int     `json:"id"`
-	Name       string  `json:"name"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-	Timezone   string  `json:"timezone"`
-	Country    string  `json:"country"`
-	Admin1     string  `json:"admin1"`
-	Population int     `json:"population"`
+	ID          int      `json:"id"`
+	Name        string   `json:"name"`
+	Latitude    *float64 `json:"latitude"`
+	Longitude   *float64 `json:"longitude"`
+	Timezone    string   `json:"timezone"`
+	Country     string   `json:"country"`
+	CountryCode string   `json:"country_code"`
+	Admin1      string   `json:"admin1"`
+	Population  int      `json:"population"`
 }
 
 type geoPayload struct {
@@ -136,36 +138,34 @@ func fetchGeo(ctx context.Context, q string, count int, language string) (geoPay
 	}
 
 	var payload geoPayload
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return geoPayload{}, err
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return geoPayload{}, fmt.Errorf("open-meteo geocoding: %w", err)
 	}
+	valid := make([]geoResult, 0, len(payload.Results))
+	for _, result := range payload.Results {
+		if result.Latitude != nil && result.Longitude != nil &&
+			ValidCoordinates(*result.Latitude, *result.Longitude) && strings.TrimSpace(result.Name) != "" {
+			valid = append(valid, result)
+		}
+	}
+	if len(payload.Results) > 0 && len(valid) == 0 {
+		return geoPayload{}, errors.New("open-meteo geocoding: invalid location data")
+	}
+	payload.Results = valid
 	return payload, nil
 }
 
-// SearchCities searches for cities using Nominatim (OpenStreetMap) API as the primary backend.
-// Falls back to Open-Meteo if Nominatim fails, since Open-Meteo includes timezone info.
+// SearchCities preserves localized search without a forecast request for every suggestion.
 func SearchCities(ctx context.Context, query string, count int, language string) ([]GeoPoint, error) {
-	// Try Nominatim first - much better for Chinese/international city names
-	results, err := SearchCitiesNominatim(ctx, query, count, language)
-	if err == nil && len(results) > 0 {
-		// Nominatim doesn't return timezone, so resolve it from Open-Meteo's timezone API
-		for i := range results {
-			if results[i].Timezone == "" {
-				if tz, err := ResolveTimezone(ctx, fmt.Sprintf("%f", results[i].Lat), fmt.Sprintf("%f", results[i].Lon)); err == nil {
-					results[i].Timezone = tz
-				}
-			}
-		}
-		return results, nil
-	}
-
-	// Fallback to Open-Meteo if Nominatim fails
-	return SearchCitiesOpenMeteo(ctx, query, count, language)
+	results, _, err := SearchCitiesCached(ctx, query, count, language)
+	return results, err
 }
 
 // SearchCitiesOpenMeteo is the legacy implementation using Open-Meteo's geocoding API.
 // Kept as fallback since it includes timezone info directly.
 func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, language string) ([]GeoPoint, error) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return nil, errors.New("city required")
@@ -248,26 +248,60 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 		pinyinQuery = getPinyinVariant(q)
 	}
 
-	// Always search in English first (better coverage for major cities)
-	if payloadEn, err := fetchGeo(ctx, q, count*2, "en"); err == nil {
+	// Fetch language variants concurrently under a single deadline. A failed
+	// variant must not turn an upstream outage into a successful empty result.
+	type searchVariant struct{ query, language string }
+	variants := []searchVariant{{q, "en"}, {q, "zh"}}
+	if pinyinQuery != "" {
+		variants = append(variants, searchVariant{pinyinQuery, "en"})
+	}
+	if langNorm == "zh" {
+		variants = append(variants, searchVariant{q, "zh-CN"})
+		if pinyinQuery != "" {
+			variants = append(variants, searchVariant{pinyinQuery, "zh-CN"}, searchVariant{pinyinQuery, "zh"})
+		}
+	}
+	type variantResult struct {
+		variant searchVariant
+		payload geoPayload
+		err     error
+	}
+	completed := make(chan variantResult, len(variants))
+	for _, variant := range variants {
+		go func() {
+			payload, err := fetchGeo(ctx, variant.query, count*2, variant.language)
+			completed <- variantResult{variant, payload, err}
+		}()
+	}
+	payloads := make(map[searchVariant]geoPayload, len(variants))
+	var upstreamErrors []error
+	for range variants {
+		result := <-completed
+		if result.err != nil {
+			upstreamErrors = append(upstreamErrors, result.err)
+		} else {
+			payloads[result.variant] = result.payload
+		}
+	}
+	if payloadEn, ok := payloads[searchVariant{q, "en"}]; ok {
 		mergeResults(payloadEn, false)
 	}
 
 	// If we have a pinyin variant, search with that too (much better results for major cities)
 	if pinyinQuery != "" {
-		if payloadPinyin, err := fetchGeo(ctx, pinyinQuery, count*2, "en"); err == nil {
+		if payloadPinyin, ok := payloads[searchVariant{pinyinQuery, "en"}]; ok {
 			mergeResults(payloadPinyin, false)
 		}
 	}
 
 	// Also search in Chinese (for local names)
-	if payloadZh, err := fetchGeo(ctx, q, count*2, "zh"); err == nil {
+	if payloadZh, ok := payloads[searchVariant{q, "zh"}]; ok {
 		mergeResults(payloadZh, true)
 	}
 
 	// For Chinese display, also fetch zh-CN for simplified names
 	if langNorm == "zh" {
-		if payloadCN, err := fetchGeo(ctx, q, count*2, "zh-CN"); err == nil {
+		if payloadCN, ok := payloads[searchVariant{q, "zh-CN"}]; ok {
 			for _, r := range payloadCN.Results {
 				if r.ID == 0 {
 					continue
@@ -283,7 +317,7 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 		// Also get Chinese names for pinyin search results
 		if pinyinQuery != "" {
 			// First get zh-CN for simplified city names
-			if payloadCN, err := fetchGeo(ctx, pinyinQuery, count*2, "zh-CN"); err == nil {
+			if payloadCN, ok := payloads[searchVariant{pinyinQuery, "zh-CN"}]; ok {
 				for _, r := range payloadCN.Results {
 					if r.ID == 0 {
 						continue
@@ -297,7 +331,7 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 				}
 			}
 			// Then get zh for proper admin1/country Chinese names
-			if payloadZhPinyin, err := fetchGeo(ctx, pinyinQuery, count*2, "zh"); err == nil {
+			if payloadZhPinyin, ok := payloads[searchVariant{pinyinQuery, "zh"}]; ok {
 				for _, r := range payloadZhPinyin.Results {
 					if r.ID == 0 {
 						continue
@@ -321,7 +355,10 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 	// If query is CJK but we got no results, the English search might have worked
 	// with pinyin, so we're good. If nothing found, return error.
 	if len(resultByID) == 0 {
-		return nil, errors.New("city not found")
+		if len(upstreamErrors) > 0 {
+			return nil, fmt.Errorf("city lookup unavailable: %w", errors.Join(upstreamErrors...))
+		}
+		return nil, ErrCityNotFound
 	}
 
 	// Convert to slice and sort by population (descending)
@@ -330,8 +367,15 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 		results = append(results, r)
 	}
 	sort.Slice(results, func(i, j int) bool {
+		left, right := matchesCityQualifier(query, results[i].geoResult), matchesCityQualifier(query, results[j].geoResult)
+		if left != right {
+			return left
+		}
 		// Higher population first
-		return results[i].Population > results[j].Population
+		if results[i].Population != results[j].Population {
+			return results[i].Population > results[j].Population
+		}
+		return results[i].ID < results[j].ID
 	})
 
 	// Deduplicate by approximate location (to 0.01 degree ≈ 1km)
@@ -346,8 +390,8 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 
 		// Round to 2 decimal places for dedup
 		key := locKey{
-			lat: int(math.Round(r.Latitude * 100)),
-			lon: int(math.Round(r.Longitude * 100)),
+			lat: int(math.Round(*r.Latitude * 100)),
+			lon: int(math.Round(*r.Longitude * 100)),
 		}
 		if seen[key] {
 			continue
@@ -367,7 +411,7 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 			}
 			// Country in Chinese
 			country = strings.TrimSpace(r.Country)
-			if country == "China" || country == "" {
+			if country == "China" {
 				country = "中国"
 			}
 		} else {
@@ -394,15 +438,15 @@ func SearchCitiesOpenMeteo(ctx context.Context, query string, count int, languag
 		}
 
 		out = append(out, GeoPoint{
-			Lat:         r.Latitude,
-			Lon:         r.Longitude,
+			Lat:         *r.Latitude,
+			Lon:         *r.Longitude,
 			DisplayName: dn,
 			Timezone:    strings.TrimSpace(r.Timezone),
 		})
 	}
 
 	if len(out) == 0 {
-		return nil, errors.New("city not found")
+		return nil, ErrCityNotFound
 	}
 
 	return out, nil
@@ -416,7 +460,7 @@ func GeocodeCity(ctx context.Context, city string) (GeoPoint, error) {
 		return GeoPoint{}, err
 	}
 	if len(list) == 0 {
-		return GeoPoint{}, errors.New("city not found")
+		return GeoPoint{}, ErrCityNotFound
 	}
 	return list[0], nil
 }
@@ -429,7 +473,7 @@ func GeocodeCityLocalized(ctx context.Context, city string, language string) (Ge
 		return GeoPoint{}, err
 	}
 	if len(list) == 0 {
-		return GeoPoint{}, errors.New("city not found")
+		return GeoPoint{}, ErrCityNotFound
 	}
 	return list[0], nil
 }

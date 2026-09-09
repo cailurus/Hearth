@@ -40,7 +40,6 @@
 - 📈 **行情** - 美股、港股和加密货币价格，当日走势图（Yahoo Finance）
 - 💱 **汇率** - 最多 4 个货币对，30 天历史走势图 + 国旗标识（Frankfurter API）
 - 📰 **RSS 订阅** - 聚合最多 10 个 RSS/Atom 源，支持手动刷新和高度调节
-- 🎮 **游戏优惠** - PC（CheapShark/Steam）和 iOS（App Store）折扣，含价格、评分和商店直链
 - 🕐 **世界时钟** - 最多 4 个可配置的时区时钟
 - 📊 **系统状态** - CPU、内存、磁盘和网络监控，含 7 天历史趋势图
 - 🐳 **Docker 监控** - 容器状态、资源占用、启动/停止/重启操作
@@ -48,7 +47,7 @@
 - 📝 **便签** - 快速笔记和备忘
 
 ### 个性化
-- 👋 **问候语 & 每日一言** - 基于时间段的问候语，附带每日名人名言（ZenQuotes）
+- 👋 **问候语 & 每日一言** - 基于时间段的问候语，中文一言使用 Hitokoto，英文使用 ZenQuotes
 - 🗓️ **二十四节气** - 可选在日期旁显示中国节气（可在设置中开关）
 - 🎨 **动态背景** - Bing 每日、随机、Unsplash、Picsum 或视频背景
 - 🌓 **中英双语** - 完整的国际化支持
@@ -69,7 +68,7 @@ docker run -d \
   cailurus/hearth:latest
 ```
 
-打开 `http://localhost:8787`，使用 `admin` / `admin` 登录。
+打开 `http://localhost:8787`，用户名为 `admin`。若配置了 `HEARTH_INITIAL_PASSWORD`，使用该密码；否则从 `docker logs hearth` 查看首次启动时生成的密码。
 
 > Docker socket 挂载（`-v /var/run/docker.sock:...`）是**可选的** —— 它用于启用 Docker 监控组件。不挂载时，其他所有功能正常使用。
 
@@ -115,11 +114,22 @@ docker logs hearth | head -20
 | `HEARTH_COOKIE_SECURE` | `auto` | Secure Cookie 标志（`auto` / `true` / `false`） |
 | `HEARTH_DOCKER_SOCKET` | 自动检测 | Docker socket 路径（自动检测常见路径） |
 | `HEARTH_INITIAL_PASSWORD` | _(空)_ | 初始管理员密码。未设置时自动生成 16 位随机密码并打印到标准输出（通过 `docker logs` 查看）。 |
+| `HEARTH_COINGECKO_API_KEY` | _(空)_ | 可选的 CoinGecko Demo Key，用于加密货币备用源和搜索。仅在服务端使用，不返回浏览器；不配置时保留原有匿名备用访问方式，但不保证可用性。请遵守账户配额，遇到 429 时退避，不密集重试。 |
 | `HEARTH_CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域允许列表（逗号分隔）。默认仅允许内置的 Vite 开发服务器；生产部署因前后端同源无需调整，除非将前端部署到独立域名。 |
 | `HEARTH_DOCKER_ALLOW_PATTERNS` | _(空)_ | 容器 `start`/`stop`/`restart` 操作的容器名正则白名单（逗号分隔）。留空则允许操作任何 Docker 守护进程暴露的容器。示例：`^(jellyfin\|sonarr\|radarr)$`。不匹配则返回 403 并记入审计日志。 |
 | `HEARTH_DOCKER_LABEL_INTERVAL` | `30s` | 容器 `hearth.*`/`homepage.*` 标签发现的轮询间隔。`0s`（或 `0`）彻底关闭轮询。 |
 | `HEARTH_TRUSTED_PROXY_HEADER` | _(空)_ | 当 Hearth 部署在 forward-auth 反代后（Authelia / Authentik / oauth2-proxy / Caddy `forward_auth` / Traefik `forwardAuth`），用于携带认证用户名的 HTTP 头部名称。常用值：`X-Remote-User`、`Remote-User`。必须同时设置 `HEARTH_TRUSTED_PROXY_NETWORKS`，否则 Hearth 拒绝启动。 |
 | `HEARTH_TRUSTED_PROXY_NETWORKS` | _(空)_ | 反代源 IP 的 CIDR 白名单（逗号分隔）。只有从这些网段进来的请求才会信任上面的头部 — 绕过反代直连 Hearth 无法伪造头部。示例：`10.0.0.0/8,172.20.0.0/16`。 |
+
+### 组件数据与离线行为
+
+- 各组件独立加载。刷新失败时保留仍可使用的旧数据，并明确显示警告，不再把上游失败包装成零价格或无尽加载占位。
+- 天气、已解析坐标、参考汇率、RSS 元数据、年度假日和一言使用 `$HEARTH_DATA_DIR/widget-cache` 下的有界快照，现有 Docker 数据卷即可跨重启保留。缓存过期但仍在可用期限内时先显示旧数据，后台合并刷新；超过保留期限的数据不当作当前数据展示。
+- 首次没有任何有效快照时，仍需要数据源成功返回。超时、部分结果、后台刷新及数据时间会明确显示；RSS 手动刷新会绕过新鲜缓存。
+- 选择天气城市时同时保存坐标。已有仅城市名的配置继续兼容，但解析过程有缓存和超时限制，不再先查询时区才读取天气。
+- Frankfurter v1 提供工作日**参考汇率**，不是银行买入/卖出价。行情保留实际币种及供应商数据时间，不保证是实时交易数据。Yahoo/CoinGecko 行情仅保留内存缓存，部署者仍需遵守供应商数据使用条款。
+- 随应用附带经过核实的 2026 年中国假日数据、许可证及来源信息，支持离线首启；年度数据后台更新，不虚构尚未公布的未来假期。
+- 中文每日一言使用 Hitokoto，英文使用 ZenQuotes，页面保留来源署名。不自动启用付费数据源，也不内置共用 API 凭据。
 
 <details>
 <summary><b>NAS Docker 监控配置</b>（飞牛 fnOS、群晖 Synology 等）</summary>

@@ -358,7 +358,6 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/api/widgets/rss", s.handleGetRSS)
 		r.Get("/api/widgets/quote", s.handleGetQuote)
 		r.Get("/api/widgets/currency", s.handleGetCurrency)
-		r.Get("/api/widgets/deals", s.handleGetDeals)
 	})
 
 	// Serve built frontend (if present).

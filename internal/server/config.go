@@ -6,16 +6,17 @@ import (
 )
 
 type Config struct {
-	Addr        string
-	DataDir     string
-	DatabaseDSN string
-	SessionTTL  string
-	CORSOrigins       string // comma-separated allowed origins; empty = dev defaults
-	CookieSecure      string // "auto" | "true" | "false"; default "auto"
-	DockerSocket      string // Docker socket path; default "/var/run/docker.sock"
+	Addr                string
+	DataDir             string
+	DatabaseDSN         string
+	SessionTTL          string
+	CORSOrigins         string // comma-separated allowed origins; empty = dev defaults
+	CookieSecure        string // "auto" | "true" | "false"; default "auto"
+	DockerSocket        string // Docker socket path; default "/var/run/docker.sock"
 	DockerAllowPatterns string // comma-separated container-name regex allowlist for start/stop/restart; empty = allow all
 	DockerLabelInterval string // poll interval for hearth.*/homepage.* label discovery; "0s" or "0" disables; default "30s"
-	InitialPassword   string // first-run admin password; if empty, a random password is generated and printed to PasswordOutput
+	InitialPassword     string // first-run admin password; if empty, a random password is generated and printed to PasswordOutput
+	CoinGeckoAPIKey     string // optional Demo key; never returned to the browser
 
 	// Forward-auth (Authelia / Authentik / oauth2-proxy / Caddy forward_auth /
 	// Traefik forwardAuth). Both must be set to enable; either empty disables.
@@ -44,6 +45,7 @@ func LoadConfigFromEnv() Config {
 	dockerAllowPatterns := getEnv("HEARTH_DOCKER_ALLOW_PATTERNS", "")
 	dockerLabelInterval := getEnv("HEARTH_DOCKER_LABEL_INTERVAL", "30s")
 	initialPassword := getEnv("HEARTH_INITIAL_PASSWORD", "")
+	coinGeckoAPIKey := getEnv("HEARTH_COINGECKO_API_KEY", "")
 	trustedProxyHeader := getEnv("HEARTH_TRUSTED_PROXY_HEADER", "")
 	trustedProxyNetworks := getEnv("HEARTH_TRUSTED_PROXY_NETWORKS", "")
 
@@ -58,6 +60,7 @@ func LoadConfigFromEnv() Config {
 		DockerAllowPatterns:  dockerAllowPatterns,
 		DockerLabelInterval:  dockerLabelInterval,
 		InitialPassword:      initialPassword,
+		CoinGeckoAPIKey:      coinGeckoAPIKey,
 		TrustedProxyHeader:   trustedProxyHeader,
 		TrustedProxyNetworks: trustedProxyNetworks,
 	}

@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/morezhou/hearth/internal/widgets"
@@ -14,38 +17,45 @@ func (s *Server) handleGetWeather(w http.ResponseWriter, r *http.Request) {
 	lon := strings.TrimSpace(r.URL.Query().Get("lon"))
 	city := strings.TrimSpace(r.URL.Query().Get("city"))
 	lang := validLang(strings.TrimSpace(r.URL.Query().Get("lang")), "")
+	settings := s.weatherSettings()
 	if city == "" {
-		city = s.getStringSetting(kvWeatherCity, "")
+		city = settings.City
 	}
-
-	cityLabel := city
-	if lat == "" || lon == "" {
-		pt, err := widgets.GeocodeCityLocalized(r.Context(), city, lang)
-		if err != nil && strings.HasPrefix(strings.ToLower(lang), "zh") {
-			pt, err = widgets.GeocodeCityLocalized(r.Context(), city, "en")
-		}
-		if err != nil {
+	if r.URL.Query().Has("lat") || r.URL.Query().Has("lon") {
+		if _, _, err := widgets.ParseWeatherCoordinates(lat, lon); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		lat = fmt.Sprintf("%f", pt.Lat)
-		lon = fmt.Sprintf("%f", pt.Lon)
-		if strings.TrimSpace(pt.DisplayName) != "" {
-			cityLabel = pt.DisplayName
-		}
+	} else if city == settings.City && settings.Lat != nil && settings.Lon != nil {
+		lat = strconv.FormatFloat(*settings.Lat, 'f', -1, 64)
+		lon = strconv.FormatFloat(*settings.Lon, 'f', -1, 64)
 	}
-
-	wx, err := widgets.FetchOpenMeteo(r.Context(), lat, lon, cityLabel)
+	force := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("nocache") == "1"
+	var wx widgets.Weather
+	var err error
+	if lat != "" && lon != "" {
+		wx, err = widgets.FetchOpenMeteo(r.Context(), lat, lon, city, force)
+	} else {
+		wx, err = widgets.FetchWeatherForCity(r.Context(), city, lang, force)
+	}
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "status=429") {
-			writeError(w, http.StatusTooManyRequests, msg)
-			return
-		}
-		writeError(w, http.StatusBadRequest, msg)
+		writeWeatherError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, wx)
+}
+
+func writeWeatherError(w http.ResponseWriter, err error) {
+	status := http.StatusBadGateway
+	switch {
+	case errors.Is(err, widgets.ErrCityNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, context.DeadlineExceeded):
+		status = http.StatusGatewayTimeout
+	case strings.Contains(err.Error(), "status=429"):
+		status = http.StatusTooManyRequests
+	}
+	writeError(w, status, err.Error())
 }
 
 func (s *Server) handleSearchCity(w http.ResponseWriter, r *http.Request) {
@@ -58,15 +68,9 @@ func (s *Server) handleSearchCity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "query required")
 		return
 	}
-	list, err := widgets.SearchCities(r.Context(), q, 8, lang)
-	if err != nil && strings.HasPrefix(strings.ToLower(lang), "zh") {
-		if list2, err2 := widgets.SearchCities(r.Context(), q, 8, "en"); err2 == nil {
-			list = list2
-			err = nil
-		}
-	}
+	list, status, err := widgets.SearchCitiesCached(r.Context(), q, 8, lang)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeWeatherError(w, err)
 		return
 	}
 	type cityResult struct {
@@ -78,7 +82,10 @@ func (s *Server) handleSearchCity(w http.ResponseWriter, r *http.Request) {
 	for _, pt := range list {
 		res = append(res, cityResult{DisplayName: pt.DisplayName, Lat: pt.Lat, Lon: pt.Lon})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": res})
+	writeJSON(w, http.StatusOK, struct {
+		widgets.DataStatus
+		Results []cityResult `json:"results"`
+	}{DataStatus: status, Results: res})
 }
 
 func (s *Server) handleGetCityTimezone(w http.ResponseWriter, r *http.Request) {
@@ -91,10 +98,7 @@ func (s *Server) handleGetCityTimezone(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "city required")
 		return
 	}
-	pt, err := widgets.GeocodeCityLocalized(r.Context(), city, lang)
-	if err != nil && strings.HasPrefix(strings.ToLower(lang), "zh") {
-		pt, err = widgets.GeocodeCityLocalized(r.Context(), city, "en")
-	}
+	pt, _, err := widgets.ResolveWeatherLocation(r.Context(), city, lang)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

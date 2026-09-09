@@ -4,13 +4,14 @@
 
 import { memo, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Cog, Cpu, Download, HardDrive, MemoryStick, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Cog, Cpu, Download, HardDrive, MemoryStick, Trash2, Upload } from 'lucide-react'
 import type { AppItem } from '../../types'
 import { AppIcon } from '../cards/AppIcon'
 import { DockerBadge } from '../cards/DockerBadge'
 import { StatusDot } from '../ui/StatusDot'
 import { Spinner } from '../ui/Spinner'
 import { WidgetBoundary } from '../ui'
+import { WidgetStatusFooter } from '../ui/WidgetStatusFooter'
 import { useWidgetData } from '../../contexts/WidgetDataContext'
 import { WIDGET_LABEL_KEYS } from '../../utils/constants'
 
@@ -49,12 +50,11 @@ function GroupBlockImpl({
     onRenameGroup,
     onReorder,
     statusMap,
-    lang = 'en',
 }: GroupBlockProps) {
     // Widget fetch state used to be 21 props drilled from HomePage. They're
     // now read from a Context backed by useWidgets — 4 fields instead of
     // 21, with all per-instance state consolidated under byId.
-    const { byId, metrics, netRate } = useWidgetData()
+    const { byId, metrics, metricsErr, netRate } = useWidgetData()
     const { t } = useTranslation(['widgets', 'common'])
     const [draggingId, setDraggingId] = useState<string | null>(null)
     const [dropTargetId, setDropTargetId] = useState<string | null>(null)
@@ -251,22 +251,6 @@ function GroupBlockImpl({
                                 >
                                     {isAdmin ? (
                                         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover/card:opacity-100">
-                                            {widget === 'rss' ? (() => {
-                                                const refresh = byId.get(a.id)?.refresh
-                                                return refresh ? (
-                                                    <button
-                                                        className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
-                                                        aria-label="refresh"
-                                                        title={lang === 'zh' ? '刷新' : 'Refresh'}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation()
-                                                            refresh()
-                                                        }}
-                                                    >
-                                                        <RefreshCw className="h-4 w-4" />
-                                                    </button>
-                                                ) : null
-                                            })() : null}
                                             <button
                                                 className="rounded-lg bg-black/50 p-1 text-white/80 backdrop-blur-sm hover:bg-black/70 hover:text-white"
                                                 aria-label="edit"
@@ -294,7 +278,7 @@ function GroupBlockImpl({
                                     <div className="mb-3 truncate whitespace-nowrap text-sm font-semibold leading-tight text-white/90">
                                         {WIDGET_LABEL_KEYS[widget] ? t(WIDGET_LABEL_KEYS[widget] as never) : widget}
                                     </div>
-                                    <div className="min-h-0 flex-1">
+                                    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto scrollbar-thin">
                                         <WidgetBoundary
                                             fallbackLabel={t('common:widgetError')}
                                             retryLabel={t('common:retry')}
@@ -343,6 +327,8 @@ function GroupBlockImpl({
                                                         </>
                                                     ) : null}
                                                 </div>
+                                            ) : metricsErr ? (
+                                                <div className="flex h-full items-center justify-center text-xs text-white/60">{t('widgets:unavailable')}</div>
                                             ) : (
                                                 <div className="flex h-full items-center justify-center"><Spinner size="sm" className="border-white/40" /></div>
                                             )
@@ -354,7 +340,7 @@ function GroupBlockImpl({
                                                 <spec.Component
                                                     data={slice?.data ?? null}
                                                     error={slice?.error ?? null}
-                                                    cfg={cfg}
+                                                    cfg={{ ...spec.defaultConfig as object, ...cfg }}
                                                     refresh={slice?.refresh ?? noop}
                                                     isAdmin={isAdmin}
                                                 />
@@ -362,6 +348,17 @@ function GroupBlockImpl({
                                         })()}
                                         </WidgetBoundary>
                                     </div>
+                                    {widget === 'metrics' && metricsErr ? (
+                                        <WidgetStatusFooter                                         data={metrics ? { fetchedAt: Math.floor(metrics.collectedAt / 1000) } : null} error={metricsErr} />
+                                    ) : getWidget(widget)?.fetchData ? (
+                                        <WidgetStatusFooter
+                                            data={byId.get(a.id)?.data}
+                                            error={byId.get(a.id)?.error}
+                                            loading={byId.get(a.id)?.loading}
+                                            refreshing={byId.get(a.id)?.refreshing}
+                                            refresh={byId.get(a.id)?.refresh}
+                                        />
+                                    ) : null}
                                 </div>
                             )
                         }
