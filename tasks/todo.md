@@ -1,14 +1,16 @@
 # Hearth Code Fix - Progress Tracker
 
-## 2026-09-09 v0.8 系列发布
+## 2026-09-09 会话恢复指引：v0.8.1 已发布
+
+正式版本为 `v0.8.1`，标签对应 `66ca84b`。GitHub Release 与 Docker Hub 镜像均已发布并核实；内网容器没有更新。`v0.8.0` 保留为失败构建的原始标签，不存在该版本的 Release 或镜像。
 
 - [x] 确认 `gh` 已登录 `cailurus`，`main` 与远端一致，最新发布为 `v0.7.0`。
 - [x] 选择 `v0.8.0` 次版本，发布已通过验收的 `b651888`；版本由标签注入，无需修改前端包版本。
 - [x] 创建并推送带说明的 `v0.8.0` 标签；工作流 `34304683581` 在 `npm ci` 阶段失败，未发布镜像或 Release。
 - [x] 修复 `@eslint/js` 10 与 ESLint 9 的 peer dependency 冲突，使用 Node 20 / npm 10 验证干净安装和构建。
-- [ ] 推送修复提交和新的 `v0.8.1` 标签，不覆盖 `v0.8.0`。
-- [ ] 核实工作流成功、GitHub Release 以及 Docker Hub `0.8.1` / `0.8` / `latest` 镜像。
-- [ ] 记录发布结果并同步恢复记录；不操作内网容器。
+- [x] 推送修复提交和新的 `v0.8.1` 标签，不覆盖 `v0.8.0`。
+- [x] 核实工作流成功、GitHub Release 以及 Docker Hub `0.8.1` / `0.8` / `latest` 镜像。
+- [x] 记录发布结果并同步恢复记录；不操作内网容器。
 
 ### 发布验收标准
 
@@ -20,7 +22,15 @@
 - 使用 npm 10 生成锁文件，将 `@eslint/js` 对齐到现有 ESLint 的 `9.39.2`，复用原锁文件已有的公共 registry URL 和 SHA-512，避免提交本地镜像源地址。
 - 本机 Docker daemon 未运行；完整 Linux 多架构构建及镜像发布必须以 GitHub Actions 的结果为准。
 
-## 2026-09-09 会话恢复指引
+### 发布验收记录
+
+- [Docker 发布工作流 34305045691](https://github.com/cailurus/Hearth/actions/runs/34305045691) 成功，包含前后端构建、双架构推送和 Release 创建。
+- [GitHub Release v0.8.1](https://github.com/cailurus/Hearth/releases/tag/v0.8.1) 为正式发布，完整说明覆盖 `v0.7.0...v0.8.1`，不是只列出失败标签之后的构建修复。
+- Docker Hub 公共 API 确认 `cailurus/hearth:0.8.1`、`:0.8`、`:latest` 均为 active，清单摘要一致：`sha256:47d6c110ed3e8ccd74c9f1342c5f337f5a7843b3a24d8baa81f319f253f61273`。
+- 三个标签都包含 active 的 `linux/amd64` 和 `linux/arm64` 镜像。
+- 升级前应备份现有数据卷；拉取镜像后仍需重建容器。本会话没有操作内网部署。
+
+## 2026-09-09 实现验收记录（发布前）
 
 本轮数据加载可靠性改造已完成并推送 `origin/main`：实现提交 `c7fb3f2`，旧二进制清理提交 `4ebed88`。
 
