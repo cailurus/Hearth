@@ -1,5 +1,25 @@
 # Hearth Code Fix - Progress Tracker
 
+## 2026-09-09 v0.8 系列发布
+
+- [x] 确认 `gh` 已登录 `cailurus`，`main` 与远端一致，最新发布为 `v0.7.0`。
+- [x] 选择 `v0.8.0` 次版本，发布已通过验收的 `b651888`；版本由标签注入，无需修改前端包版本。
+- [x] 创建并推送带说明的 `v0.8.0` 标签；工作流 `34304683581` 在 `npm ci` 阶段失败，未发布镜像或 Release。
+- [x] 修复 `@eslint/js` 10 与 ESLint 9 的 peer dependency 冲突，使用 Node 20 / npm 10 验证干净安装和构建。
+- [ ] 推送修复提交和新的 `v0.8.1` 标签，不覆盖 `v0.8.0`。
+- [ ] 核实工作流成功、GitHub Release 以及 Docker Hub `0.8.1` / `0.8` / `latest` 镜像。
+- [ ] 记录发布结果并同步恢复记录；不操作内网容器。
+
+### 发布验收标准
+
+标签必须指向已验证的提交，发布工作流必须成功，三个镜像标签必须指向同一清单且包含 `linux/amd64` 和 `linux/arm64`。源码推送或 README 同步成功不能代替镜像发布验收。
+
+### 发布前检查
+
+- Node `20.20.2` / npm `10.9.9`：`npm ci`、前端 build、i18n parity、widget registry、widget display/weather-coordinate tests、28 项网络 smoke tests 和定向 ESLint 全部通过。
+- 使用 npm 10 生成锁文件，将 `@eslint/js` 对齐到现有 ESLint 的 `9.39.2`，复用原锁文件已有的公共 registry URL 和 SHA-512，避免提交本地镜像源地址。
+- 本机 Docker daemon 未运行；完整 Linux 多架构构建及镜像发布必须以 GitHub Actions 的结果为准。
+
 ## 2026-09-09 会话恢复指引
 
 本轮数据加载可靠性改造已完成并推送 `origin/main`：实现提交 `c7fb3f2`，旧二进制清理提交 `4ebed88`。
